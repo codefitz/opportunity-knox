@@ -2476,3 +2476,255 @@ textarea {
 .ai-stages > span {
   color: #8c9e78;
 }
+
+/* A job link is the starting point; fetched content remains reviewable and editable. */
+.form-grid > .wide {
+  grid-column: 1/-1;
+}
+.job-lookup {
+  background: #f5f8f0;
+  border: 1px solid #dce7d2;
+  border-radius: 9px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.job-lookup-existing {
+  margin-bottom: 0;
+  background: #fafcf7;
+}
+.job-lookup .field > label {
+  color: #718563;
+  font-size: 11px;
+  font-weight: 600;
+}
+.lookup-input-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.lookup-input-row > input {
+  min-width: 0;
+  flex: 1;
+  padding-left: 34px;
+  background: #fff;
+}
+.lookup-link-icon {
+  position: absolute;
+  left: 11px;
+  top: 11px;
+  display: flex;
+  color: #97aa85;
+  pointer-events: none;
+}
+.lookup-input-row > .button {
+  font-size: 10px;
+  min-height: 39px;
+  flex-shrink: 0;
+  padding-left: 11px;
+  padding-right: 11px;
+}
+.lookup-message {
+  display: flex;
+  gap: 10px;
+  padding: 13px;
+  border-radius: 7px;
+  margin-top: 13px;
+  line-height: 1.75;
+}
+.lookup-message > svg {
+  margin-top: 3px;
+}
+.lookup-error {
+  background: #fcf5e9;
+  border: 1px solid #eddfbf;
+  color: #9e8551;
+  font-size: 10px;
+}
+.lookup-message strong {
+  font-size: 11px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
+}
+.lookup-message p + p {
+  margin-top: 5px;
+}
+.lookup-result {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #dfe9d5;
+}
+.lookup-result-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.lookup-success-icon {
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  background: #e4efda;
+  color: #75965c;
+  border-radius: 50%;
+}
+.lookup-result-heading > strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b8655;
+}
+.lookup-result-heading > span:last-child {
+  font-size: 8px;
+  padding: 4px 6px;
+  background: #eaf1e1;
+  border-radius: 4px;
+  color: #8da176;
+  margin-left: auto;
+}
+.lookup-review-note {
+  font-size: 10px;
+  color: #8a9b79;
+  line-height: 1.8;
+  margin-top: 8px;
+}
+.lookup-warnings {
+  font-size: 10px;
+  color: #9f926e;
+  line-height: 1.8;
+  margin: 10px 0 0;
+  padding-left: 17px;
+}
+.lookup-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 13px;
+  margin-top: 11px;
+  font-size: 8px;
+  color: #98aa85;
+}
+.lookup-provenance > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #8aa073;
+  text-decoration: none;
+}
+.lookup-provenance > a:hover {
+  text-decoration: underline;
+}
+.lookup-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 17px;
+  margin: 13px 0;
+  padding: 13px;
+  background: #fff;
+  border: 1px solid #e3ebd9;
+  border-radius: 7px;
+}
+.lookup-preview > div {
+  min-width: 0;
+}
+.lookup-preview dt {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #a0b18c;
+  margin-bottom: 4px;
+}
+.lookup-preview dd {
+  font-size: 10px;
+  color: #809769;
+  line-height: 1.7;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.lookup-preview .lookup-description {
+  grid-column: 1/-1;
+}
+.lookup-preview .lookup-description dd {
+  max-height: 150px;
+  overflow: auto;
+}
+.lookup-result > .button {
+  margin-top: 14px;
+}
+.lookup-applied {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  color: #7e9a64;
+  margin-top: 9px;
+}
+.new-job-details {
+  margin-top: 20px;
+  border: 1px solid #e3ebd9;
+  border-radius: 8px;
+  background: #fcfdf9;
+}
+.new-job-details > summary {
+  cursor: pointer;
+  padding: 13px 14px;
+  font-size: 11px;
+  color: #7c9466;
+  font-weight: 500;
+}
+.new-job-details > summary > span {
+  display: block;
+  font-size: 9px;
+  color: #9eae8c;
+  font-weight: 400;
+  margin-left: 15px;
+  margin-top: 4px;
+}
+.new-job-details > .form-grid {
+  padding: 5px 14px 16px;
+}
+.new-job-details[open] > summary {
+  margin-bottom: 7px;
+}
+@media (max-width: 700px) {
+  .job-lookup {
+    padding: 13px;
+  }
+  .lookup-input-row {
+    flex-wrap: wrap;
+  }
+  .lookup-input-row > input {
+    flex-basis: 100%;
+    font-size: 11px;
+  }
+  .lookup-input-row > .button {
+    font-size: 10px;
+    margin-left: auto;
+    min-height: 33px;
+  }
+  .lookup-link-icon {
+    top: 10px;
+  }
+  .lookup-provenance {
+    font-size: 8px;
+    line-height: 1.6;
+  }
+  .lookup-result-heading > span:last-child {
+    margin-left: 28px;
+  }
+  .lookup-preview {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .lookup-preview .lookup-description {
+    grid-column: auto;
+  }
+  .new-job-details > summary {
+    font-size: 10px;
+  }
+  .new-job-details > summary > span {
+    font-size: 8px;
+  }
+}

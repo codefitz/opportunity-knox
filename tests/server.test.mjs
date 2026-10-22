@@ -563,3 +563,119 @@ test("failed backup cleans incomplete work and never publishes a finished snapsh
   assert.match(result.data.error, /Backup incomplete/);
   assert.deepEqual(readdirSync(join(f.options.filesDir, "backups")), []);
 });
+
+test("job lookup requires login and previews extracted details without creating a card", async (t) => {
+  let calls = 0;
+  const extracted = {
+    fields: {
+      company: "Fictional Research",
+      role: "AI Architect",
+      location: "London",
+      salary: "GBP 90,000–110,000 / year",
+      employmentType: "Full time",
+      deadline: "2026-12-01",
+      description:
+        "Design reliable systems.\n\nRequirements\n- Architecture experience",
+    },
+    method: "structured-data",
+    sourceUrl: "https://example.com/jobs/architect",
+    resolvedUrl: "https://example.com/careers/architect",
+    retrievedAt: "2026-10-22T12:00:00.000Z",
+    warnings: [],
+  };
+  const f = await fixture(t, {
+    jobLookup: async (url) => {
+      calls++;
+      assert.equal(url, extracted.sourceUrl);
+      return extracted;
+    },
+  });
+  const query = { method: "POST", body: { url: extracted.sourceUrl } };
+  assert.equal((await f.request("/api/job-lookup", query)).status, 401);
+  assert.equal(calls, 0);
+  await f.setup();
+  assert.equal(
+    (await f.request("/api/job-lookup", { method: "POST", body: {} })).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.request("/api/job-lookup", {
+        method: "POST",
+        body: { url: "file:///etc/passwd" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(calls, 0);
+  const result = await f.request("/api/job-lookup", query);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data, extracted);
+  assert.equal((await f.request("/api/board")).data.opportunities.length, 0);
+  const created = await f.request("/api/opportunities", {
+    method: "POST",
+    body: {
+      ...extracted.fields,
+      url: extracted.sourceUrl,
+      note: `Retrieved ${extracted.retrievedAt}`,
+    },
+  });
+  assert.equal(created.status, 201);
+  await f.restart();
+  await f.login();
+  const saved = (await f.request(`/api/opportunities/${created.data.id}`)).data;
+  assert.equal(saved.description, extracted.fields.description);
+  assert.equal(saved.location, "London");
+  assert.equal(saved.deadline, "2026-12-01");
+  assert.match(saved.events[0].note, /Retrieved/);
+});
+
+test("job lookup failures remain actionable and concurrent lookups are bounded", async (t) => {
+  let pending = 0;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const f = await fixture(t, {
+    jobLookup: async (url) => {
+      if (url.endsWith("blocked"))
+        throw Object.assign(
+          new Error(
+            "This site requires a login. Paste the job description or upload its PDF.",
+          ),
+          { status: 422 },
+        );
+      pending++;
+      await gate;
+      return {
+        fields: { role: "Test role" },
+        warnings: [],
+        method: "page-content",
+      };
+    },
+  });
+  await f.setup();
+  const failed = await f.request("/api/job-lookup", {
+    method: "POST",
+    body: { url: "https://example.com/blocked" },
+  });
+  assert.equal(failed.status, 422);
+  assert.match(failed.data.error, /Paste the job description/);
+  const requests = Array.from({ length: 4 }, () =>
+    f.request("/api/job-lookup", {
+      method: "POST",
+      body: { url: "https://example.com/job" },
+    }),
+  );
+  for (let i = 0; i < 100 && pending < 4; i++) await new Promise(setImmediate);
+  assert.equal(pending, 4);
+  const busy = await f.request("/api/job-lookup", {
+    method: "POST",
+    body: { url: "https://example.com/job" },
+  });
+  assert.equal(busy.status, 429);
+  release();
+  for (const response of await Promise.all(requests))
+    assert.equal(response.status, 200);
+});

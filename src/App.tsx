@@ -59,6 +59,12 @@ import {
   type StageEvent,
 } from "./types";
 
+import JobLookup, {
+  JOB_FIELDS,
+  lookupNote,
+  type JobLookupResult,
+} from "./components/JobLookup";
+
 type Page = "board" | "library" | "settings";
 const initials = (name: string) =>
   name
@@ -817,6 +823,7 @@ export default function App() {
           initialUrl={newUrl}
           initialFile={newFile}
           initialText={newText}
+          onAuthError={report}
           onClose={() => setNewOpen(false)}
           onCreated={(op, warning) => {
             updated(op);
@@ -1101,20 +1108,64 @@ function NewOpportunity({
   initialText,
   onClose,
   onCreated,
+  onAuthError,
 }: {
   initialUrl: string;
   initialFile: File | null;
   initialText: string;
   onClose: () => void;
   onCreated: (o: Opportunity, warning?: string) => void;
+  onAuthError: (error: unknown) => void;
 }) {
-  const [company, setCompany] = useState(""),
-    [role, setRole] = useState(""),
-    [url, setUrl] = useState(initialUrl),
-    [description, setDescription] = useState(initialText),
-    [file, setFile] = useState<File | null>(initialFile),
+  const [form, setForm] = useState<Record<string, string>>({
+    company: "",
+    role: "",
+    url: initialUrl,
+    description: initialText,
+    jobReference: "",
+    location: "",
+    workMode: "",
+    salary: "",
+    employmentType: "",
+    contact: "",
+    deadline: "",
+  });
+  const [file, setFile] = useState<File | null>(initialFile),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [detailsOpen, setDetailsOpen] = useState(false),
+    [retrieved, setRetrieved] = useState<JobLookupResult | null>(null);
+  const dirty = useRef(new Set<string>(initialText ? ["description"] : []));
+  const change =
+    (key: string) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      dirty.current.add(key);
+      setForm((current) => ({ ...current, [key]: e.target.value }));
+    };
+  function applyLookup(result: JobLookupResult) {
+    setForm((current) => {
+      const next = { ...current };
+      for (const key of JOB_FIELDS) {
+        const value = result.fields[key];
+        if (typeof value === "string" && value && !dirty.current.has(key))
+          next[key] = value;
+      }
+      return next;
+    });
+    setRetrieved(result);
+    setDetailsOpen(true);
+  }
+  function changeUrl(url: string) {
+    setForm((current) => {
+      const next: Record<string, string> = { ...current, url };
+      if (retrieved) {
+        for (const key of JOB_FIELDS)
+          if (!dirty.current.has(key)) next[key] = "";
+      }
+      return next;
+    });
+    setRetrieved(null);
+  }
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -1122,7 +1173,10 @@ function NewOpportunity({
     try {
       const o = await api<Opportunity>(
         "/opportunities",
-        json({ company, role, url, description }),
+        json({
+          ...form,
+          ...(retrieved ? { note: lookupNote(retrieved) } : {}),
+        }),
       );
       if (file) {
         try {
@@ -1146,6 +1200,7 @@ function NewOpportunity({
       } else onCreated(o);
     } catch (e) {
       setError(displayError(e));
+      if (e instanceof ApiError && e.status === 401) onAuthError(e);
     } finally {
       setBusy(false);
     }
@@ -1153,52 +1208,106 @@ function NewOpportunity({
   return (
     <Modal
       title="A new possibility."
-      subtitle="Start with the essentials. You can fill in the rest as you go."
+      subtitle="Start with a job link. Fetch its details, review them, and make it yours."
       onClose={onClose}
     >
       <form onSubmit={submit}>
+        <JobLookup
+          url={form.url}
+          onUrlChange={changeUrl}
+          onResult={applyLookup}
+          onAuthError={onAuthError}
+          autoLookup={!!initialUrl}
+        />
         <div className="form-grid">
           <Field label="Company">
             <input
               required
-              autoFocus
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
+              value={form.company}
+              onChange={change("company")}
               placeholder="Company name"
             />
           </Field>
           <Field label="Role">
             <input
               required
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
+              value={form.role}
+              onChange={change("role")}
               placeholder="Job title"
-            />
-          </Field>
-          <Field label="Job link" wide>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://…"
             />
           </Field>
           <Field
             label="Job description"
             wide
-            hint="Paste the description or attach a document. Automatic extraction will be available with an AI connection."
+            hint="Keep the source description here, or attach a document below. Review extracted text against the listing."
           >
             <textarea
               rows={5}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What caught your eye?"
+              value={form.description}
+              onChange={change("description")}
+              placeholder="Paste the job description, or fetch it from a link above."
             />
           </Field>
         </div>
+        <details
+          className="new-job-details"
+          open={detailsOpen}
+          onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
+        >
+          <summary>
+            More job details{" "}
+            <span>Location, salary, closing date, and contacts</span>
+          </summary>
+          <div className="form-grid">
+            <Field label="Location">
+              <input
+                value={form.location}
+                onChange={change("location")}
+                placeholder="City or region"
+              />
+            </Field>
+            <Field label="Working arrangement">
+              <input
+                value={form.workMode}
+                onChange={change("workMode")}
+                placeholder="Remote, hybrid, on-site…"
+              />
+            </Field>
+            <Field label="Salary / rate">
+              <input
+                value={form.salary}
+                onChange={change("salary")}
+                placeholder="Amount, currency, and period"
+              />
+            </Field>
+            <Field label="Employment type">
+              <input
+                value={form.employmentType}
+                onChange={change("employmentType")}
+                placeholder="Permanent, contract…"
+              />
+            </Field>
+            <Field label="Job reference">
+              <input
+                value={form.jobReference}
+                onChange={change("jobReference")}
+              />
+            </Field>
+            <Field label="Closing date">
+              <input
+                type="date"
+                value={form.deadline}
+                onChange={change("deadline")}
+              />
+            </Field>
+            <Field label="Contact" wide>
+              <input value={form.contact} onChange={change("contact")} />
+            </Field>
+          </div>
+        </details>
         <label className="upload-drop">
           <Upload size={21} />
-          <strong>{file ? file.name : "Attach a job description"}</strong>
+          <strong>{file ? file.name : "Or attach a job description"}</strong>
           <span>PDF, Word, or text · up to 15 MB</span>
           <input
             type="file"
@@ -1327,6 +1436,7 @@ function OpportunityDetail({
             key={`${o.id}-${o.revision}`}
             o={o}
             busy={busy}
+            onAuthError={onError}
             save={(body) =>
               mutate(
                 `/opportunities/${o.id}`,
@@ -1375,9 +1485,11 @@ function Overview({
   o,
   busy,
   save,
+  onAuthError,
 }: {
   o: Opportunity;
   busy: boolean;
+  onAuthError: (error: unknown) => void;
   save: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [form, setForm] = useState<Record<string, string>>({
@@ -1568,9 +1680,30 @@ function Overview({
         <Field label="Job reference">
           <input value={form.jobReference} onChange={set("jobReference")} />
         </Field>
-        <Field label="Job link" wide>
-          <input type="url" value={form.url} onChange={set("url")} />
-        </Field>
+        <div className="wide">
+          <JobLookup
+            url={form.url}
+            onUrlChange={(url) => setForm((current) => ({ ...current, url }))}
+            onAuthError={onAuthError}
+            preview
+            onResult={(result) => {
+              setForm((current) => {
+                const next = { ...current };
+                for (const key of JOB_FIELDS) {
+                  const value = result.fields[key];
+                  if (
+                    typeof value === "string" &&
+                    value &&
+                    !current[key]?.trim()
+                  )
+                    next[key] = value;
+                }
+                return next;
+              });
+              setSaved(false);
+            }}
+          />
+        </div>
         <Field label="Tags" wide hint="Separate tags with commas.">
           <input
             value={form.tags}

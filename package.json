@@ -1,6 +1,6 @@
 {
   "name": "opportunity-board",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A privately hosted application board with a one-command Docker launcher.",
   "type": "module",
@@ -18,6 +18,8 @@
     "format": "prettier --write src server tests/*.mjs vite.config.ts tsconfig.json package.json index.html"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
+    "ipaddr.js": "^2.5.0",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

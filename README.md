@@ -67,9 +67,17 @@ You can also choose a different port, remembered for future starts:
 
 The initial manual workflow covers opportunity capture, dated stage history and corrections, notes, repeatable interviews and communications, document uploads/downloads, reference material, and configurable storage. The app tracks the documents used for an application; recording submission does not send anything to an employer.
 
-AI providers have not been connected. Job-page extraction, evidence-based fit reviews, and CV/cover-letter generation remain subsequent work. The manual workflow remains usable without an AI service. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
+AI providers have not been connected. Evidence-based fit reviews and CV/cover-letter generation remain subsequent work. Job-link lookup works without an AI provider. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
 
 Record export is JSON with a document manifest; it is not a full portable document archive. The backup action creates a private database snapshot and copies managed document files into a snapshot directory under the backup subfolder selected in Settings, within the current document root. A guided restore/import and cloud-document connectors are subsequent work. Check a backup's contents before relying on it as your only recovery copy.
+
+## Look up a job link
+
+Add an opportunity, paste its listing URL, and choose **Fetch job details**. Dropping a job link onto the board opens a draft and starts lookup. Review the extracted company, role, location, salary, employment type, closing date, reference, contact and description before saving. Missing information stays blank. Existing opportunities can look up their saved link and preview details to fill empty fields while preserving your edits.
+
+Lookup first reads published `JobPosting` structured data and otherwise extracts the visible job content, including public LinkedIn listings. It does not require an AI key, send reference CVs, or submit an application. The draft shows its source and retrieval time. A listing which requires sign-in, blocks requests, needs JavaScript to reveal its content, or links directly to a PDF may need pasted JD text or an uploaded file instead.
+
+The host retrieves public HTTP(S) pages only. Private-network targets and unsafe redirects are rejected; downloads have time and size limits. These restrictions also apply when the browser itself could access a local/private site.
 
 ## Development
 

@@ -18,11 +18,13 @@ Verification details and limits are recorded in `VERIFICATION.md`. The automatic
 
 ## Subsequent increments
 
+Version 0.2 adds public job-link retrieval, structured/visible job details, preview before saving, and manual fallback for inaccessible listings. This includes a Docker/browser check against the supplied LinkedIn listing. See `VERIFICATION.md` for details.
+
 - Previewed import of chosen existing career/application folders, duplicate detection, and existing-file linking.
 - Native Google Drive/Docs connectors and cloud-document editing/export.
 - Server-side folder browsing, multiple independent reference roots, communications direction/channel refinements, and explicit review decisions beyond stage/outcome/notes.
 - AI adapter/task protocol and provider selection, then JD extraction, fit review, CV/cover generation and rendered document checks.
-- OCR for scanned JDs and retrieval/snapshot of job pages. URLs and uploaded files can be recorded before extraction exists.
+- OCR/PDF text extraction, JavaScript-rendered job pages, and complete original-page snapshots. The extracted job description and source provenance can be saved by link lookup; storing the full original HTML/PDF snapshot remains future work.
 - Submission-pack approval and enforced snapshot workflow across all selected document versions.
 - Portable backup/restore and export/import with document reconciliation across hosts.
 - Authenticated remote hosting, chosen hostname/VPN, HTTPS, and deployment-specific verification.

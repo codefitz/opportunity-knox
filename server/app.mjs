@@ -30,6 +30,8 @@ import {
   sep,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fetchJobPage } from "./job-fetch.mjs";
+import { parseJobPage } from "./job-parser.mjs";
 
 export const stages = [
   ["identification", "Identification"],
@@ -174,6 +176,17 @@ function writeAtomic(path, data) {
 
 /** Creates an unbound HTTP server. Call server.listen(), and await close() to release server and SQLite. */
 export function createApp(options = {}) {
+  const lookupJob =
+    options.jobLookup ||
+    (async (url) => {
+      const page = await fetchJobPage(url);
+      return {
+        ...parseJobPage(page.html, { url: page.url }),
+        sourceUrl: url,
+        resolvedUrl: page.url,
+      };
+    });
+  let activeJobLookups = 0;
   const dataDir = resolve(
     options.dataDir || process.env.BOARD_DATA_DIR || ".local/state",
   );
@@ -537,6 +550,23 @@ export function createApp(options = {}) {
       }
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
+        if (path === "/api/job-lookup" && method === "POST") {
+          const body = await readBody(req);
+          const url = safeURL(body.url ?? "");
+          if (!url) fail(400, "Add a job listing URL first.");
+          if (activeJobLookups >= 4)
+            fail(429, "Job lookups are busy. Try again shortly.");
+          activeJobLookups++;
+          try {
+            return json(res, await lookupJob(url));
+          } catch (error) {
+            if ([400, 413, 415, 422, 429, 502, 504].includes(error.status))
+              fail(error.status, error.message);
+            throw error;
+          } finally {
+            activeJobLookups--;
+          }
+        }
         if (path === "/api/board" && method === "GET")
           return json(res, {
             opportunities: listRecords().map(fullRecord),

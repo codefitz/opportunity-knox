@@ -4,12 +4,13 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html vite.config.ts tsconfig*.json ./
 COPY src ./src
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4318 BOARD_DATA_DIR=/data BOARD_FILES_DIR=/files/default
 WORKDIR /app
 COPY package.json ./
+COPY --from=build /app/node_modules ./node_modules
 COPY server ./server
 COPY --from=build /app/dist ./dist
 EXPOSE 4318
