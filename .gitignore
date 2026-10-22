@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.board/
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+.local/
+.npm-cache/

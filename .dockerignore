@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.DS_Store
+*.log
+__pycache__
+tests
+docs
+README.md
+.local/
+.npm-cache/
