@@ -25,11 +25,13 @@ Version 0.3 implements: Opportunity Knox branding; Forest/Cappuccino/Ocean/Midni
 - Previewed import of chosen existing career/application folders, duplicate detection, and existing-file linking.
 - Native Google Drive/Docs connectors and cloud-document editing/export.
 - Server-side folder browsing, multiple independent reference roots, communications direction/channel refinements, and explicit review decisions beyond stage/outcome/notes.
-- AI adapter/task protocol and provider selection, then JD extraction, fit review, CV/cover generation and rendered document checks.
-- OCR/PDF text extraction, JavaScript-rendered job pages, and complete original-page snapshots. The extracted job description and source provenance can be saved by link lookup; storing the full original HTML/PDF snapshot remains future work.
+- Further AI tools for JD extraction, approved CV templates, PDF export, and richer retrieval beyond the current local text chunks.
+- OCR for scanned documents, JavaScript-rendered job pages, and complete original-page snapshots. The extracted job description and source provenance can be saved by link lookup; storing the full original HTML/PDF snapshot remains future work.
 - Submission-pack approval and enforced snapshot workflow across all selected document versions.
 - Portable backup/restore and export/import with document reconciliation across hosts.
 - Authenticated remote hosting, chosen hostname/VPN, HTTPS, and deployment-specific verification.
 - Calendar/email integration and reminders.
 
-No AI provider is connected in this increment. External application submission and email sending are not implemented.
+Version 0.4 implements Career Buddy provider/model settings and connection testing; local PDF/DOCX/text extraction and chunk retrieval; persistent opportunity chats; reviewed dated interview/communication/note/field updates; fit, salary and skills prompts; editable CV/cover drafts saved as versioned Word documents. API keys remain server-side and are excluded from record exports. See `CAREER_BUDDY.md` for setup and `VERIFICATION.md` for validation limits.
+
+A provider must be configured by the user. Real paid-provider credentials and live model output quality have not been tested in this run. External application submission and email sending are not implemented.

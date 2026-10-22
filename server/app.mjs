@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { fetchJobPage } from "./job-fetch.mjs";
 import { parseJobPage } from "./job-parser.mjs";
 import { validateAvatar } from "./profile.mjs";
+import { createCareerBuddy } from "./career-buddy.mjs";
 
 export const stages = [
   ["identification", "Identification"],
@@ -352,7 +353,7 @@ export function createApp(options = {}) {
     return {
       ...settingDefaults,
       ...(getConfig("settings") || {}),
-      aiEnabled: false,
+      aiEnabled: Boolean(getConfig("careerBuddy")?.enabled),
       pendingHostPath,
       hostDocumentsPath: hostFilesDir,
       storagePath: filesDir,
@@ -460,6 +461,70 @@ export function createApp(options = {}) {
     putRecord(record);
     return fullRecord(record);
   }
+  const saveDocument = ({
+    name,
+    kind,
+    status,
+    opportunityId,
+    content,
+    notes = "",
+    generation,
+  }) => {
+    const version =
+      1 +
+      getDocuments()
+        .filter(
+          (d) =>
+            d.opportunityId === opportunityId &&
+            d.kind === kind &&
+            d.name === name,
+        )
+        .reduce((n, d) => Math.max(n, d.version), 0);
+    const id = randomUUID();
+    const baseSubdir = opportunityId
+      ? `${settings().documentsSubdir}/${opportunityId}`
+      : settings().referenceSubdir;
+    folder(filesDir, baseSubdir);
+    const relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
+    const target = safePath(filesDir, relativePath);
+    writeFileSync(target, content, { flag: "wx", mode: 0o600 });
+    const document = {
+      id,
+      name,
+      kind,
+      status,
+      opportunityId,
+      createdAt: now(),
+      size: content.length,
+      version,
+      notes: notes,
+      storageRoot: filesDir,
+      relativePath,
+      sha256: createHash("sha256").update(content).digest("hex"),
+      revision: 1,
+      ...(generation ? { generation } : {}),
+    };
+    try {
+      putDocument(document);
+    } catch (e) {
+      unlinkSync(target);
+      throw e;
+    }
+    return publicDocument(document);
+  };
+  const buddy = createCareerBuddy({
+    db,
+    getConfig,
+    putConfig,
+    getRecord,
+    putRecord,
+    fullRecord,
+    getDocuments,
+    documentPath,
+    settings,
+    saveDocument,
+    buddyFetch: options.buddyFetch,
+  });
   async function readBody(req) {
     if (!(req.headers["content-type"] || "").startsWith("application/json"))
       fail(415, "Send JSON content.");
@@ -604,6 +669,23 @@ export function createApp(options = {}) {
       }
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
+        if (
+          path.startsWith("/api/buddy/") ||
+          /^\/api\/opportunities\/[^/]+\/buddy(?:\/|$)/.test(path)
+        ) {
+          try {
+            if (await buddy.handle(path, method, req, res, { json, readBody }))
+              return;
+          } catch (error) {
+            if (
+              Number.isInteger(error.status) &&
+              error.status >= 400 &&
+              error.status < 600
+            )
+              fail(error.status, error.message);
+            throw error;
+          }
+        }
         if (path === "/api/job-lookup" && method === "POST") {
           const body = await readBody(req);
           const url = safeURL(body.url ?? "");
@@ -834,10 +916,9 @@ export function createApp(options = {}) {
                 correctedAt: now(),
               });
               if (body.effectiveAt !== undefined)
-                event.effectiveAt = timestamp(
-                  body.effectiveAt,
-                  "Effective date",
-                );
+                event.effectiveAt = /^\d{4}-\d{2}-\d{2}$/.test(body.effectiveAt)
+                  ? dateOnly(body.effectiveAt, "Effective date")
+                  : timestamp(body.effectiveAt, "Effective date");
               if (body.note !== undefined)
                 event.note = cleanText(body.note, "Note", 50000);
               // Date correction of the most recent transition updates current stage date.
@@ -906,7 +987,9 @@ export function createApp(options = {}) {
               );
             if (body.scheduledAt !== undefined)
               activity.scheduledAt = body.scheduledAt
-                ? timestamp(body.scheduledAt, "Scheduled date")
+                ? /^\d{4}-\d{2}-\d{2}$/.test(body.scheduledAt)
+                  ? dateOnly(body.scheduledAt, "Scheduled date")
+                  : timestamp(body.scheduledAt, "Scheduled date")
                 : "";
             if (body.isFinal !== undefined) {
               if (typeof body.isFinal !== "boolean")
@@ -948,46 +1031,15 @@ export function createApp(options = {}) {
           const content = Buffer.from(body.contentBase64, "base64");
           if (content.length > 20 * 1024 * 1024)
             fail(413, "Maximum file size is 20 MB.");
-          const version =
-            1 +
-            getDocuments()
-              .filter(
-                (d) =>
-                  d.opportunityId === opportunityId &&
-                  d.kind === kind &&
-                  d.name === name,
-              )
-              .reduce((n, d) => Math.max(n, d.version), 0);
-          const id = randomUUID();
-          const baseSubdir = opportunityId
-            ? `${settings().documentsSubdir}/${opportunityId}`
-            : settings().referenceSubdir;
-          folder(filesDir, baseSubdir);
-          const relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
-          const target = safePath(filesDir, relativePath);
-          writeFileSync(target, content, { flag: "wx", mode: 0o600 });
-          const document = {
-            id,
+          const document = saveDocument({
             name,
             kind,
             status,
             opportunityId,
-            createdAt: now(),
-            size: content.length,
-            version,
+            content,
             notes: cleanText(body.notes ?? "", "Notes", 50000),
-            storageRoot: filesDir,
-            relativePath,
-            sha256: createHash("sha256").update(content).digest("hex"),
-            revision: 1,
-          };
-          try {
-            putDocument(document);
-          } catch (e) {
-            unlinkSync(target);
-            throw e;
-          }
-          return json(res, publicDocument(document), 201);
+          });
+          return json(res, document, 201);
         }
         const docMatch = path.match(/^\/api\/documents\/([^/]+)(\/content)?$/);
         if (docMatch) {
@@ -1077,7 +1129,7 @@ export function createApp(options = {}) {
               updated[key] = sub.replace(/\/+$/, "");
             }
           if (body.aiEnabled)
-            fail(400, "AI providers are not connected in this version.");
+            fail(400, "Use the Career Buddy settings to configure AI.");
           let pending;
           if (body.pendingHostPath !== undefined) {
             pending = cleanText(body.pendingHostPath, "Host folder", 2000);
@@ -1116,10 +1168,12 @@ export function createApp(options = {}) {
             version: 1,
             exportedAt: now(),
             limitations:
-              "Records and document manifest only. File bytes, profile photo bytes, and authentication secrets are excluded. Use a full backup for managed files and the profile photo.",
+              "Records and document manifest only. File bytes, profile photo bytes, API keys, and authentication secrets are excluded. Use a full backup for managed files and the profile photo.",
             settings: settings(),
             profile: publicProfile(),
             tasks: listTasks(),
+            careerBuddy: buddy.publicSettings(),
+            conversations: buddy.exportMessages(),
             opportunities: listRecords(),
             documents: getDocuments().map(publicDocument),
           });
@@ -1165,9 +1219,16 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
-              for (const table of ["records", "documents", "config", "tasks"]) {
+              for (const table of [
+                "records",
+                "documents",
+                "config",
+                "tasks",
+                "buddy_messages",
+                "document_text",
+              ]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";
                 const insert = snapshot.prepare(
@@ -1189,7 +1250,7 @@ export function createApp(options = {}) {
                   createdAt,
                   documents: manifest,
                   restore:
-                    "Restore board.sqlite into a stopped installation and copy documents to their recorded storageRoot/relativePath, or remap roots before use. Backup contains the private password hash.",
+                    "Restore board.sqlite into a stopped installation and copy documents to their recorded storageRoot/relativePath, or remap roots before use. Backup contains the private password hash, Career Buddy API key and conversations. Keep it private.",
                 },
                 null,
                 2,

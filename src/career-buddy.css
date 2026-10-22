@@ -1,0 +1,432 @@
+.buddy-chat {
+  color: var(--ink);
+  min-width: 0;
+}
+.buddy-chat-heading,
+.buddy-identity,
+.buddy-buttons,
+.buddy-composer-bottom,
+.buddy-message-byline,
+.buddy-working,
+.buddy-success {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.buddy-chat-heading {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.buddy-identity h3 {
+  font-size: 19px;
+  margin: 0 0 5px;
+}
+.buddy-identity p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.buddy-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--green);
+  border-radius: 15px;
+}
+.buddy-toggle {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  margin: 15px 0;
+  cursor: pointer;
+}
+.buddy-toggle input,
+.buddy-source-picker input {
+  accent-color: var(--green);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.buddy-settings .form-grid {
+  margin-top: 19px;
+}
+.buddy-settings input[readonly] {
+  color: var(--muted);
+  background: var(--panel-soft);
+}
+.buddy-advanced {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 13px 15px;
+  margin: 18px 0;
+}
+.buddy-advanced .field {
+  margin-top: 14px;
+  max-width: 450px;
+}
+.buddy-privacy,
+.buddy-muted,
+.buddy-context > p,
+.buddy-callout {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.buddy-privacy {
+  padding: 15px;
+  background: var(--panel-soft);
+  border-radius: 9px;
+  margin: 18px 0;
+}
+.buddy-buttons {
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.buddy-buttons > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.buddy-success {
+  font-size: 12px;
+  color: var(--green);
+  line-height: 1.6;
+  margin-top: 14px;
+}
+.buddy-context,
+.buddy-sources,
+.buddy-proposal,
+.buddy-draft {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 15px 0;
+  background: var(--surface);
+  overflow: hidden;
+}
+.buddy-context summary,
+.buddy-sources summary,
+.buddy-proposal summary,
+.buddy-draft summary,
+.buddy-advanced summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.buddy-context summary {
+  padding: 14px 16px;
+  background: var(--panel-soft);
+}
+.buddy-context summary span {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 10px;
+}
+.buddy-context > p,
+.buddy-context > .buddy-toggle,
+.buddy-context > small {
+  margin: 13px 16px;
+}
+.buddy-context > small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.buddy-source-picker {
+  max-height: 235px;
+  overflow: auto;
+  margin: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.buddy-source-picker label {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  align-items: flex-start;
+}
+.buddy-source-picker label:last-child {
+  border-bottom: 0;
+}
+.buddy-source-picker strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.buddy-source-picker small {
+  display: block;
+  margin-top: 5px;
+  line-height: 1.6;
+  color: var(--muted);
+  font-size: 10px;
+}
+.buddy-callout {
+  background: var(--accent-soft);
+  color: var(--ink-secondary);
+  padding: 16px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+.buddy-callout .text-button {
+  display: block;
+  margin-top: 8px;
+}
+.buddy-conversation {
+  padding: 5px 4px 10px 0;
+  max-height: 48vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.buddy-welcome {
+  text-align: center;
+  max-width: 540px;
+  margin: 35px auto;
+  padding: 10px 24px;
+  color: var(--muted);
+}
+.buddy-welcome > svg {
+  color: var(--green);
+}
+.buddy-welcome h3 {
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.5;
+}
+.buddy-welcome p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.buddy-message {
+  margin: 14px 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.buddy-message.is-user {
+  margin-left: 46px;
+  background: var(--panel-soft);
+  border-color: transparent;
+}
+.buddy-message-byline {
+  color: var(--muted);
+  font-size: 10px;
+  margin-bottom: 11px;
+  gap: 6px;
+}
+.buddy-prose {
+  font-size: 13px;
+  line-height: 1.75;
+}
+.buddy-prose p {
+  margin: 0 0 7px;
+  white-space: pre-wrap;
+  min-height: 4px;
+}
+.buddy-working {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 18px 12px;
+}
+.buddy-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.buddy-presets button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  color: var(--green);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 8px 11px;
+  font-size: 10px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.buddy-presets button:hover {
+  background: var(--accent-soft);
+}
+.buddy-presets button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.buddy-composer {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+.buddy-composer textarea {
+  background: var(--surface);
+}
+.buddy-composer-bottom {
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+.buddy-composer-bottom small {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 390px;
+}
+.buddy-proposal summary,
+.buddy-draft summary {
+  padding: 13px 15px;
+  background: var(--accent-soft);
+  color: var(--green);
+}
+.buddy-proposal summary svg,
+.buddy-draft summary svg {
+  vertical-align: middle;
+  margin-right: 5px;
+}
+.buddy-proposal-body {
+  padding: 16px;
+}
+.buddy-proposal-body fieldset {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0 0 15px;
+  min-width: 0;
+}
+.buddy-proposal-body legend {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+.buddy-proposal-body .field {
+  margin-bottom: 13px;
+}
+.buddy-proposal-body .form-grid {
+  gap: 13px;
+}
+.buddy-proposal-body fieldset[disabled] input,
+.buddy-proposal-body fieldset[disabled] textarea,
+.buddy-proposal-body fieldset[disabled] select {
+  opacity: 0.8;
+}
+.buddy-draft-editor {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.8;
+  resize: vertical;
+  min-height: 320px;
+}
+.buddy-draft-link {
+  display: block;
+  font-size: 11px;
+  margin-top: 12px;
+  color: var(--green);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.buddy-sources {
+  padding: 12px 14px;
+  border-style: dashed;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+.buddy-sources summary {
+  font-size: 10px;
+  font-weight: 500;
+}
+.buddy-sources ul {
+  padding-left: 18px;
+  margin: 10px 0;
+}
+.buddy-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+}
+.buddy-library-tools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.buddy-library-tools p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 0;
+}
+.buddy-library-tools button {
+  flex-shrink: 0;
+}
+.buddy-chat button:focus-visible,
+.buddy-settings button:focus-visible,
+.buddy-context summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+@media (max-width: 760px) {
+  .buddy-chat-heading {
+    align-items: flex-start;
+  }
+  .buddy-identity h3 {
+    font-size: 17px;
+  }
+  .buddy-chat-heading .button {
+    padding: 8px;
+    font-size: 10px;
+  }
+  .buddy-message {
+    padding: 15px;
+  }
+  .buddy-message.is-user {
+    margin-left: 16px;
+  }
+  .buddy-context summary span {
+    display: block;
+    margin-left: 14px;
+  }
+  .buddy-composer {
+    padding: 13px;
+  }
+  .buddy-composer-bottom {
+    gap: 13px;
+  }
+  .buddy-composer-bottom small {
+    max-width: 200px;
+  }
+  .buddy-proposal-body {
+    padding: 12px;
+  }
+  .buddy-proposal-body fieldset {
+    padding: 11px;
+  }
+  .buddy-buttons {
+    align-items: stretch;
+  }
+  .buddy-buttons .button {
+    font-size: 11px;
+  }
+  .buddy-library-tools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

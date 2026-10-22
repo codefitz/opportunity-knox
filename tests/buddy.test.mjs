@@ -1,0 +1,417 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  defaultBuddy,
+  publicBuddy,
+  updateBuddy,
+  validateBaseUrl,
+  providerRequest,
+  providerText,
+  callProvider,
+} from "../server/buddy-provider.mjs";
+import {
+  parseBuddyOutput,
+  validateChanges,
+  applyChanges,
+} from "../server/career-buddy.mjs";
+import {
+  chunkText,
+  retrieveChunks,
+  extractDocument,
+  wordDraft,
+} from "../server/buddy-documents.mjs";
+const empty = () => ({
+  reply: "Ready",
+  changes: [],
+  draft: { kind: "none", title: "", content: "" },
+  sourceIds: [],
+});
+const change = (patch = {}) => ({
+  kind: "interview",
+  title: "Second interview",
+  date: "2026-10-22",
+  type: "other",
+  status: "completed",
+  notes: "They mentioned lack of Databricks experience.",
+  field: "",
+  value: "",
+  isFinal: false,
+  ...patch,
+});
+const config = (provider = "openai") =>
+  updateBuddy(defaultBuddy(), {
+    revision: 1,
+    provider,
+    enabled: true,
+    model: "fixture-model",
+    apiKey: "private-fixture-key",
+    ...(provider === "custom" ? { baseUrl: "https://api.example.com/v1" } : {}),
+  });
+test("provider settings validate activation, preserve blank keys, clear provider keys and enforce revisions", () => {
+  assert.throws(
+    () => updateBuddy(defaultBuddy(), { revision: 1, enabled: true }),
+    /model/,
+  );
+  const initial = config();
+  assert.equal(publicBuddy(initial).hasKey, true);
+  assert.equal(publicBuddy(initial).apiKey, undefined);
+  assert.equal(
+    updateBuddy(initial, { revision: 2, apiKey: "", enabled: false }).apiKey,
+    "private-fixture-key",
+  );
+  assert.equal(
+    updateBuddy(initial, {
+      revision: 2,
+      provider: "ollama",
+      model: "local-fixture",
+    }).apiKey,
+    "",
+  );
+  assert.throws(
+    () => updateBuddy(initial, { revision: 1, enabled: false }),
+    /changed/,
+  );
+  assert.throws(
+    () => updateBuddy(initial, { revision: 2, provider: "fake" }),
+    /provider/,
+  );
+  assert.throws(
+    () => updateBuddy(initial, { revision: 2, outputMode: "unsafe" }),
+    /output/,
+  );
+});
+test("API endpoint validation allows deliberate local providers but rejects credential URLs, metadata and remote cleartext", () => {
+  for (const value of [
+    "http://host.docker.internal:11434",
+    "http://127.0.0.1:11434",
+    "http://192.168.1.3:11434",
+    "https://api.example.com/v1",
+  ])
+    assert.equal(validateBaseUrl(value), value);
+  for (const value of [
+    "ftp://example.com",
+    "https://user:secret@example.com",
+    "https://example.com?key=secret",
+    "https://example.com/#x",
+    "http://example.com",
+    "http://169.254.169.254",
+    "http://metadata.google.internal",
+    "http://0.0.0.0",
+    "http://[::ffff:169.254.169.254]",
+  ])
+    assert.throws(() => validateBaseUrl(value));
+});
+for (const provider of ["openai", "anthropic", "gemini", "ollama", "custom"]) {
+  test(
+    provider +
+      " adapter uses its native API, header auth and JSON schema without credentials in the body",
+    () => {
+      const c = config(provider),
+        r = providerRequest(c, "system", [
+          { role: "user", content: "question" },
+          { role: "assistant", content: "answer" },
+        ]);
+      assert.ok(!r.url.includes(c.apiKey));
+      assert.ok(!JSON.stringify(r.body).includes(c.apiKey));
+      assert.equal(r.body.model || c.model, "fixture-model");
+      if (provider === "openai") {
+        assert.match(r.url, /\/v1\/responses$/);
+        assert.equal(r.body.store, false);
+        assert.equal(r.body.text.format.strict, true);
+      }
+      if (provider === "anthropic") {
+        assert.match(r.url, /\/v1\/messages$/);
+        assert.equal(r.headers["x-api-key"], c.apiKey);
+        assert.equal(r.body.output_config.format.type, "json_schema");
+      }
+      if (provider === "gemini") {
+        assert.match(r.url, /fixture-model:generateContent$/);
+        assert.equal(r.headers["x-goog-api-key"], c.apiKey);
+        assert.equal(r.body.contents[1].role, "model");
+        assert.equal(
+          r.body.generationConfig.responseMimeType,
+          "application/json",
+        );
+      }
+      if (provider === "ollama") {
+        assert.match(r.url, /\/api\/chat$/);
+        assert.equal(r.body.stream, false);
+        assert.equal(r.body.format.type, "object");
+      }
+      if (provider === "custom") {
+        assert.match(r.url, /\/v1\/chat\/completions$/);
+        assert.equal(r.body.response_format.type, "json_schema");
+      }
+    },
+  );
+}
+test("compatibility output modes omit unsupported schema parameters", () => {
+  for (const provider of [
+    "openai",
+    "anthropic",
+    "gemini",
+    "ollama",
+    "custom",
+  ]) {
+    const r = providerRequest(
+      { ...config(provider), outputMode: "prompt" },
+      "Return JSON",
+      [],
+    );
+    assert.ok(!JSON.stringify(r.body).includes("json_schema"));
+  }
+  assert.equal(
+    providerRequest({ ...config("custom"), outputMode: "json" }, "JSON", [])
+      .body.response_format.type,
+    "json_object",
+  );
+});
+test("provider responses extract only final text and reject truncated, blocked or refused answers", () => {
+  assert.equal(
+    providerText("openai", {
+      status: "completed",
+      output: [
+        {
+          content: [
+            { type: "output_text", text: "Ready" },
+            { type: "refusal", refusal: "no" },
+          ],
+        },
+      ],
+    }),
+    "Ready",
+  );
+  assert.equal(
+    providerText("anthropic", {
+      stop_reason: "end_turn",
+      content: [
+        { type: "thinking", thinking: "private" },
+        { type: "text", text: "Ready" },
+      ],
+    }),
+    "Ready",
+  );
+  assert.equal(
+    providerText("gemini", {
+      candidates: [
+        {
+          finishReason: "STOP",
+          content: {
+            parts: [{ thought: true, text: "hidden" }, { text: "Ready" }],
+          },
+        },
+      ],
+    }),
+    "Ready",
+  );
+  assert.equal(
+    providerText("ollama", { done: true, message: { content: "Ready" } }),
+    "Ready",
+  );
+  for (const [p, r] of [
+    ["openai", { status: "incomplete" }],
+    ["anthropic", { stop_reason: "max_tokens" }],
+    ["gemini", { candidates: [{ finishReason: "SAFETY" }] }],
+    ["ollama", { done: false }],
+    ["custom", { choices: [{ finish_reason: "length" }] }],
+  ])
+    assert.throws(() => providerText(p, r));
+});
+test("provider transport does not follow redirects and suppresses raw provider errors or secrets", async () => {
+  let options;
+  const text = await callProvider(
+    config("custom"),
+    "system",
+    [],
+    async (_, opts) => {
+      options = opts;
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: "Ready" } }],
+        }),
+      );
+    },
+  );
+  assert.equal(text, "Ready");
+  assert.equal(options.redirect, "error");
+  assert.ok(options.signal);
+  await assert.rejects(
+    callProvider(
+      config(),
+      "system",
+      [],
+      async () => new Response("private-fixture-key", { status: 401 }),
+    ),
+    (error) =>
+      error.status === 502 && !error.message.includes("private-fixture-key"),
+  );
+  await assert.rejects(
+    callProvider(config(), "system", [], async () => {
+      throw Error("private-fixture-key");
+    }),
+    (error) => !error.message.includes("private-fixture-key"),
+  );
+});
+test("structured answers filter invented source IDs and fail closed on invalid records and dates", () => {
+  const output = {
+    ...empty(),
+    changes: [change()],
+    sourceIds: ["known", "invented", "known"],
+  };
+  const parsed = parseBuddyOutput(JSON.stringify(output), ["known"]);
+  assert.deepEqual(parsed.sourceIds, ["known"]);
+  assert.throws(() => parseBuddyOutput("not json"), /structured/);
+  assert.throws(
+    () => validateChanges([change({ date: "2026-02-30" })]),
+    /date/,
+  );
+  assert.throws(
+    () =>
+      validateChanges([
+        change({ kind: "update", field: "__proto__", value: "bad" }),
+      ]),
+    /field/,
+  );
+  assert.throws(
+    () => validateChanges([change({ kind: "delete" })]),
+    /unsupported/,
+  );
+});
+test("reviewed changes append dated feedback and preserve all prior history without mutating the source", () => {
+  const record = {
+    id: "o",
+    revision: 3,
+    stage: "review",
+    outcome: "",
+    events: [{ id: "old", stage: "review", effectiveAt: "2026-10-01" }],
+    activities: [],
+    currentStageEventId: "old",
+  };
+  const next = applyChanges(
+    record,
+    [change()],
+    "message",
+    "2026-10-22T18:00:00Z",
+  );
+  assert.equal(next.revision, 4);
+  assert.equal(record.activities.length, 0);
+  assert.deepEqual(next.events, record.events);
+  assert.equal(next.activities[0].scheduledAt, "2026-10-22");
+  assert.match(next.activities[0].notes, /Databricks/);
+  assert.equal(next.activities[0].messageId, "message");
+  assert.equal(next.stage, "review");
+  const moved = applyChanges(
+    record,
+    [change({ kind: "update", field: "stage", value: "interviews" })],
+    "message",
+    "2026-10-22T18:00:00Z",
+  );
+  assert.equal(moved.events.length, 2);
+  assert.equal(moved.stage, "interviews");
+  assert.equal(moved.currentStageEventId, moved.events[1].id);
+});
+test("local text preparation chunks UTF-8 evidence, reports unsupported and scanned/unreadable inputs honestly", async () => {
+  const source = "Architecture and Databricks governance evidence.\n".repeat(
+    100,
+  );
+  const result = await extractDocument("evidence.txt", Buffer.from(source));
+  assert.equal(result.status, "ready");
+  assert.ok(result.chunks.length > 1);
+  assert.match(result.chunks[0].text, /Architecture/);
+  assert.equal(
+    (await extractDocument("legacy.doc", Buffer.from("data"))).status,
+    "unsupported",
+  );
+  assert.equal(
+    (await extractDocument("empty.txt", Buffer.from(" "))).status,
+    "unavailable",
+  );
+  assert.equal(
+    (await extractDocument("invalid.txt", Buffer.from([255, 0]))).status,
+    "unavailable",
+  );
+  assert.equal(
+    (await extractDocument("broken.pdf", Buffer.from("not a PDF"))).status,
+    "unavailable",
+  );
+});
+test("retrieval balances selected sources and ranks relevant text within the context budget", () => {
+  const documents = [
+    {
+      id: "a",
+      name: "CV.txt",
+      kind: "cv",
+      chunks: chunkText(
+        "General evidence.\n".repeat(150) +
+          "Specialist Databricks engineering.\n".repeat(60),
+      ),
+    },
+    {
+      id: "b",
+      name: "Notes.txt",
+      kind: "reference",
+      chunks: chunkText("Governance notes."),
+    },
+  ];
+  const snapshot = JSON.stringify(documents),
+    r = retrieveChunks(documents, "Databricks engineering", 4500);
+  assert.ok(r.chunks.some((c) => c.sourceId === "b"));
+  assert.ok(r.chunks.some((c) => c.text.includes("Databricks")));
+  assert.ok(r.characters <= 4500);
+  assert.ok(r.omittedChunks > 0);
+  assert.equal(JSON.stringify(documents), snapshot);
+});
+test("Word drafts are editable DOCX files whose paragraphs, tables and Unicode can be read back locally", async () => {
+  const bytes = await wordDraft(
+    "Fictional CV",
+    "# Alex Example\n\n## Experience\n- Led architecture reviews for a fictional team.\n- Worked in Montréal.",
+  );
+  assert.equal(bytes.subarray(0, 2).toString(), "PK");
+  const result = await extractDocument("CV.docx", bytes);
+  assert.equal(result.status, "ready");
+  assert.match(result.text, /Alex Example/);
+  assert.match(result.text, /Montréal/);
+  assert.match(result.text, /architecture reviews/);
+});
+
+function textPDF(text) {
+  const stream =
+    "BT /F1 12 Tf 50 780 Td (" + text.replace(/[()\\]/g, "\\$&") + ") Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length " +
+      Buffer.byteLength(stream) +
+      " >>\nstream\n" +
+      stream +
+      "\nendstream",
+  ];
+  let content = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(content));
+    content += index + 1 + " 0 obj\n" + object + "\nendobj\n";
+  }
+  const xref = Buffer.byteLength(content);
+  content +=
+    "xref\n0 6\n0000000000 65535 f \n" +
+    offsets
+      .slice(1)
+      .map((n) => String(n).padStart(10, "0") + " 00000 n \n")
+      .join("") +
+    "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" +
+    xref +
+    "\n%%EOF";
+  return Buffer.from(content);
+}
+test("real PDF text can be extracted locally without a provider or OCR", async () => {
+  const result = await extractDocument(
+    "Career evidence.pdf",
+    textPDF("Fictional experience leading governance workshops."),
+  );
+  assert.equal(result.status, "ready");
+  assert.match(result.text, /governance workshops/);
+  assert.ok(result.chunks.length);
+});

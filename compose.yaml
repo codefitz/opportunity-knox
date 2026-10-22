@@ -3,6 +3,8 @@ services:
   board:
     build:
       context: .
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     init: true
     restart: unless-stopped
     stop_grace_period: 15s

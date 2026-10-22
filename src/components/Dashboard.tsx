@@ -766,7 +766,7 @@ export default function Dashboard(props: Props) {
           <span className="knox-reference-link">
             Open career library <ArrowRight size={15} />
           </span>
-          <small>Stored originals · AI indexing not connected</small>
+          <small>Stored originals · Source material for Career Buddy</small>
         </button>
       </div>
     </section>

@@ -73,14 +73,14 @@ Version 0.3 introduces the Opportunity Knox name and separate sidebar pages:
 - **Opportunities:** searchable list for detailed application tracking.
 - **Kanban board:** the eight-stage drag-and-drop board on its own page.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link a task to an opportunity when useful.
-- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; AI extraction, chunking, indexing and retrieval await a provider connection.
-- **Settings:** profile name/photo, themes, file locations, backups, and future AI connections.
+- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; PDF, DOCX and text files can be prepared locally for Career Buddy retrieval.
+- **Settings:** profile name/photo, themes, file locations, backups, and Career Buddy connections.
 
 Choose Forest, Cappuccino, Ocean, or Midnight in Settings. The profile supports PNG, JPEG and WebP photos up to 2 MB. Preferences, profile and tasks persist in the database and private backups. Browser routes use `#/dashboard`, `#/opportunities`, `#/board`, `#/todos`, `#/library` and `#/settings`.
 
 Existing installation directories, Docker project names and the `./board` command stay compatible. The default document directory remains `~/OpportunityBoard` and the Mac state directory remains `~/Library/Application Support/OpportunityBoard`.
 
-AI providers have not been connected. Evidence-based fit reviews and CV/cover-letter generation remain subsequent work. Job-link lookup works without an AI provider. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
+Version 0.4 adds **Career Buddy**, an optional assistant configured in Settings. Choose OpenAI, Claude, Gemini, Ollama, or a custom OpenAI-compatible API, enter a model ID and key where required, then test the connection. In an opportunity, open the Career Buddy tab to chat, review proposed updates, ask about fit/salary/skills, and draft a CV or cover letter. Reviewable Word drafts can be saved as new versions in Documents. See [docs/CAREER_BUDDY.md](docs/CAREER_BUDDY.md) for setup, source coverage, privacy and current limits. Job-link lookup and manual tracking still work without an AI provider. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
 
 Record export is JSON with a document manifest; it is not a full portable document archive. The backup action creates a private database snapshot and copies managed document files into a snapshot directory under the backup subfolder selected in Settings, within the current document root. A guided restore/import and cloud-document connectors are subsequent work. Check a backup's contents before relying on it as your only recovery copy.
 

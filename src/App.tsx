@@ -71,6 +71,8 @@ import JobLookup, {
 } from "./components/JobLookup";
 
 import Dashboard from "./components/Dashboard";
+import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
+import CareerBuddySettings from "./components/CareerBuddySettings";
 import Todos from "./components/Todos";
 import ProfileSettings, {
   ThemeSettings,
@@ -1015,6 +1017,15 @@ export default function App() {
           onUpdate={updated}
           onError={report}
           onReload={() => void openOpportunity(selected.id)}
+          onConfigureBuddy={() => {
+            setSelected(null);
+            navigate("settings");
+            requestAnimationFrame(() =>
+              document
+                .getElementById("career-buddy-settings")
+                ?.scrollIntoView({ block: "start" }),
+            );
+          }}
         />
       )}
     </div>
@@ -1519,6 +1530,7 @@ function OpportunityDetail({
   onUpdate,
   onError,
   onReload,
+  onConfigureBuddy,
 }: {
   opportunity: Opportunity;
   timezone: string;
@@ -1526,6 +1538,7 @@ function OpportunityDetail({
   onUpdate: (o: Opportunity) => void;
   onError: (e: unknown) => void;
   onReload: () => void;
+  onConfigureBuddy: () => void;
 }) {
   const [tab, setTab] = useState("overview"),
     [busy, setBusy] = useState(false),
@@ -1579,6 +1592,7 @@ function OpportunityDetail({
           ["activities", "Interviews & comms"],
           ["documents", "Documents"],
           ["summary", "Summary"],
+          ["buddy", "Career Buddy"],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -1649,6 +1663,15 @@ function OpportunityDetail({
           />
         )}{" "}
         {tab === "summary" && <Summary o={o} timezone={timezone} />}
+        {tab === "buddy" && (
+          <CareerBuddy
+            opportunity={o}
+            timezone={timezone}
+            onUpdate={onUpdate}
+            onError={onError}
+            onConfigure={onConfigureBuddy}
+          />
+        )}
       </div>
     </Modal>
   );
@@ -2320,12 +2343,14 @@ function Documents({
   timezone,
   onChanged,
   onError,
+  extraction,
 }: {
   documents: BoardDocument[];
   opportunityId?: string;
   timezone: string;
   onChanged: () => void;
   onError: (e: unknown) => void;
+  extraction?: Record<string, BuddySource["extraction"]>;
 }) {
   const [file, setFile] = useState<File | null>(null),
     [kind, setKind] = useState(opportunityId ? "jd" : "reference"),
@@ -2368,7 +2393,7 @@ function Documents({
         <p>
           {opportunityId
             ? "Each upload creates a separate version. Submitted files stay preserved."
-            : "Add any career-related files. Stored originals are ready for later selection and future AI extraction, chunking, and retrieval."}
+            : "Add any career-related files. Career Buddy can prepare PDF, DOCX and text sources locally for selected use in chat."}
         </p>
       </div>
       <form className="document-upload" onSubmit={upload}>
@@ -2457,7 +2482,11 @@ function Documents({
               </small>
               {!opportunityId && (
                 <span className="library-file-status">
-                  Stored · AI indexing not connected
+                  Stored ·{" "}
+                  {extraction?.[doc.id]?.status === "ready"
+                    ? `${extraction[doc.id].chunkCount} text chunk${extraction[doc.id].chunkCount === 1 ? "" : "s"} ready`
+                    : extraction?.[doc.id]?.warnings.join(" ") ||
+                      "Text prepared when selected for Career Buddy"}
                 </span>
               )}
               {doc.notes && <p>{doc.notes}</p>}
@@ -2581,17 +2610,42 @@ function Library({
   onError: (e: unknown) => void;
   timezone: string;
 }) {
+  const [extraction, setExtraction] = useState<
+      Record<string, BuddySource["extraction"]>
+    >({}),
+    [preparing, setPreparing] = useState(false);
   const [docs, setDocs] = useState<BoardDocument[]>([]),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState("");
   async function load() {
     try {
-      const r = await api<{ documents: BoardDocument[] }>("/documents");
+      const [r, prepared] = await Promise.all([
+        api<{ documents: BoardDocument[] }>("/documents"),
+        api<{ documents: BuddySource[] }>("/buddy/documents"),
+      ]);
+      setExtraction(
+        Object.fromEntries(prepared.documents.map((d) => [d.id, d.extraction])),
+      );
       setDocs(r.documents.filter((d) => !d.opportunityId));
     } catch (e) {
       onError(e);
     } finally {
       setLoading(false);
+    }
+  }
+  async function prepare() {
+    setPreparing(true);
+    try {
+      for (let i = 0; i < docs.length; i += 50)
+        await api(
+          "/buddy/index",
+          json({ documentIds: docs.slice(i, i + 50).map((doc) => doc.id) }),
+        );
+      await load();
+    } catch (error) {
+      onError(error);
+    } finally {
+      setPreparing(false);
     }
   }
   useEffect(() => {
@@ -2606,8 +2660,8 @@ function Library({
             Your career library<span className="heading-dot">.</span>
           </h1>
           <p>
-            Bring your career material together. Keep originals ready for future
-            AI-assisted applications.
+            Bring your career material together. Give Career Buddy the evidence
+            for your next application.
           </p>
         </div>
         <Badge kind="green">
@@ -2621,8 +2675,8 @@ function Library({
           <p>
             Drop in CVs, old job descriptions, project notes, achievements,
             certificates, interview notes, articles, and any other
-            career-related evidence. This is your source library; you can
-            organise and select material later.
+            career-related evidence. This is your source library; you can select
+            what Career Buddy reads for each conversation.
           </p>
         </div>
         <div className="library-index-state">
@@ -2630,13 +2684,33 @@ function Library({
             <Check size={12} />
             Stored originals
           </span>
-          <span className="badge muted">AI indexing not connected</span>
+          <span className="badge muted">Local text preparation</span>
           <p>
-            Extraction, chunking, and retrieval are planned for a future AI
-            connection. Files are stored as uploaded; nothing has been indexed
-            or sent to a model.
+            PDF, DOCX and text files can be extracted into searchable chunks on
+            your host. Selected excerpts are sent only when you message Career
+            Buddy. Scanned PDFs need OCR first; originals stay unchanged.
           </p>
         </div>
+      </div>
+      <div className="buddy-library-tools">
+        <p>
+          {docs.filter((doc) => extraction[doc.id]?.status === "ready").length}{" "}
+          of {docs.length} documents have readable text ready. Preparation is
+          local and needs no API key.
+        </p>
+        <button
+          type="button"
+          className="button secondary small"
+          disabled={preparing || !docs.length}
+          onClick={() => void prepare()}
+        >
+          {preparing ? (
+            <LoaderCircle size={15} className="spin" />
+          ) : (
+            <Sparkles size={15} />
+          )}{" "}
+          {preparing ? "Preparing text…" : "Prepare library text"}
+        </button>
       </div>
       <div className="content-panel">
         <div className="search-input library-search">
@@ -2658,6 +2732,7 @@ function Library({
                 .includes(search.toLowerCase()),
             )}
             timezone={timezone}
+            extraction={extraction}
             onChanged={() => void load()}
             onError={onError}
           />
@@ -2725,7 +2800,6 @@ function SettingsPage({
             referenceSubdir: form.referenceSubdir,
             backupSubdir: form.backupSubdir,
             pendingHostPath: form.pendingHostPath,
-            aiEnabled: false,
           },
           "PATCH",
         ),
@@ -2878,8 +2952,8 @@ function SettingsPage({
             <strong>Create a private backup</strong>
             <p>
               Save a consistent database snapshot and managed documents in your
-              configured backup subfolder. This includes account data; keep it
-              private. Portable restore is planned.
+              configured backup subfolder. This includes account data and Career
+              Buddy API keys; keep it private. Portable restore is planned.
             </p>
           </div>
           <button
@@ -2916,8 +2990,9 @@ function SettingsPage({
           <div>
             <strong>Export board records</strong>
             <p>
-              Download your opportunity history and document manifest as JSON.
-              Document files and login credentials are excluded.
+              Download opportunity history, tasks, chats and the document
+              manifest as JSON. File bytes, API keys and login credentials are
+              excluded.
             </p>
           </div>
           <button
@@ -2940,34 +3015,7 @@ function SettingsPage({
           </button>
         </div>
       </section>
-      <section className="settings-section ai-settings">
-        <div className="settings-section-heading">
-          <Sparkles size={21} />
-          <div>
-            <h2>AI connections</h2>
-            <p>
-              Optional help for identification, fit review, and document
-              generation.
-            </p>
-          </div>
-          <Badge>Coming next</Badge>
-        </div>
-        <p className="ai-explanation">
-          The connection layer will let you choose your provider later. This
-          first version lets you track applications manually; no documents are
-          sent to an AI service.
-        </p>
-        <div className="ai-stages">
-          {["Extract job details", "Review fit", "Draft CV & cover letter"].map(
-            (t, i) => (
-              <span key={t}>
-                <span>{i + 1}</span>
-                {t}
-              </span>
-            ),
-          )}
-        </div>
-      </section>
+      <CareerBuddySettings onError={onError} />
     </main>
   );
 }

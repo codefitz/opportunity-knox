@@ -1094,3 +1094,502 @@ test("opening a pre-task database adds the new table without resetting legacy re
     legacy.id,
   );
 });
+
+const buddyReply = (patch = {}) => ({
+  reply: "I have proposed the interview for your review.",
+  changes: [],
+  draft: { kind: "none", title: "", content: "" },
+  sourceIds: [],
+  ...patch,
+});
+const buddyChange = (patch = {}) => ({
+  kind: "interview",
+  title: "Second interview",
+  date: "2026-10-22",
+  type: "other",
+  status: "completed",
+  notes: "Feedback: lack of Databricks experience.",
+  field: "",
+  value: "",
+  isFinal: false,
+  ...patch,
+});
+const buddyResponse = (output) =>
+  new Response(
+    JSON.stringify({
+      choices: [
+        { finish_reason: "stop", message: { content: JSON.stringify(output) } },
+      ],
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  );
+async function enableBuddy(f) {
+  const current = (await f.request("/api/buddy/settings")).data;
+  const result = await f.request("/api/buddy/settings", {
+    method: "PATCH",
+    body: {
+      revision: current.revision,
+      enabled: true,
+      provider: "custom",
+      model: "fixture-model",
+      baseUrl: "https://mock-api.example/v1",
+      apiKey: "private-buddy-test-key",
+    },
+  });
+  assert.equal(result.status, 200);
+  return result.data;
+}
+async function buddyChat(f, id, body = {}) {
+  return f.request("/api/opportunities/" + id + "/buddy/chat", {
+    method: "POST",
+    body: {
+      message:
+        "Had the second interview today - they mentioned lack of Databricks experience.",
+      action: "chat",
+      requestId: "request-" + Math.random(),
+      documentIds: [],
+      includeOtherOpportunities: false,
+      ...body,
+    },
+  });
+}
+test("Career Buddy settings and connection test protect secrets, revision conflicts and off mode", async (t) => {
+  let calls = 0;
+  const f = await fixture(t, {
+    buddyFetch: async () => {
+      calls++;
+      return buddyResponse(buddyReply());
+    },
+  });
+  assert.equal(
+    (await f.request("/api/buddy/settings", { auth: false })).status,
+    401,
+  );
+  await f.setup();
+  const enabled = await enableBuddy(f);
+  assert.equal(enabled.apiKey, undefined);
+  assert.equal(enabled.hasKey, true);
+  assert.equal(
+    (
+      await f.request("/api/buddy/settings", {
+        method: "PATCH",
+        body: { revision: 1, enabled: false },
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (await f.request("/api/buddy/test", { method: "POST", body: {} })).status,
+    200,
+  );
+  assert.equal(calls, 1);
+  const exported = JSON.stringify((await f.request("/api/export")).data);
+  assert.ok(!exported.includes("private-buddy-test-key"));
+  await f.restart();
+  await f.login();
+  assert.equal((await f.request("/api/buddy/settings")).data.hasKey, true);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  assert.equal(
+    (
+      await f.request("/api/buddy/settings", {
+        method: "PATCH",
+        body: { revision: enabled.revision, enabled: false },
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await buddyChat(f, op.id)).status, 400);
+  assert.equal(calls, 1);
+});
+test("opportunity chat persists reviewable proposals and applies date and feedback once without duplicate interviews", async (t) => {
+  let calls = 0;
+  const f = await fixture(t, {
+    buddyFetch: async () => {
+      calls++;
+      return buddyResponse(buddyReply({ changes: [buddyChange()] }));
+    },
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  const response = await buddyChat(f, op.id, { requestId: "same-request" });
+  assert.equal(response.status, 200);
+  const assistant = response.data.messages.at(-1);
+  assert.equal(assistant.changes[0].date, "2026-10-22");
+  assert.equal(
+    (await f.request("/api/opportunities/" + op.id)).data.activities.length,
+    0,
+  );
+  assert.equal(
+    (await buddyChat(f, op.id, { requestId: "same-request" })).data.messages
+      .length,
+    2,
+  );
+  assert.equal(calls, 1);
+  const url = "/api/opportunities/" + op.id + "/buddy/apply/" + assistant.id;
+  const applied = await f.request(url, {
+    method: "POST",
+    body: { revision: op.revision, changes: assistant.changes },
+  });
+  assert.equal(applied.status, 200);
+  assert.equal(applied.data.opportunity.activities.length, 1);
+  assert.equal(
+    applied.data.opportunity.activities[0].scheduledAt,
+    "2026-10-22",
+  );
+  assert.match(applied.data.opportunity.activities[0].notes, /Databricks/);
+  const again = await f.request(url, {
+    method: "POST",
+    body: { revision: op.revision },
+  });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.opportunity.activities.length, 1);
+  await f.restart();
+  await f.login();
+  const saved = (await f.request("/api/opportunities/" + op.id + "/buddy"))
+    .data;
+  assert.equal(saved.messages.length, 2);
+  assert.ok(saved.messages[1].appliedAt);
+});
+test("stale or out-of-scope Career Buddy proposals cannot overwrite newer opportunity edits", async (t) => {
+  const f = await fixture(t, {
+    buddyFetch: async () =>
+      buddyResponse(buddyReply({ changes: [buddyChange()] })),
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  const reply = (await buddyChat(f, op.id)).data.messages.at(-1);
+  const unrelated = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { ...opportunity, company: "Other fictional employer" },
+    })
+  ).data;
+  assert.equal(
+    (
+      await f.request(
+        "/api/opportunities/" + unrelated.id + "/buddy/apply/" + reply.id,
+        { method: "POST", body: { revision: unrelated.revision } },
+      )
+    ).status,
+    404,
+  );
+  await f.request("/api/opportunities/" + op.id, {
+    method: "PATCH",
+    body: { revision: op.revision, nextAction: "User update" },
+  });
+  const result = await f.request(
+    "/api/opportunities/" + op.id + "/buddy/apply/" + reply.id,
+    { method: "POST", body: { revision: op.revision + 1 } },
+  );
+  assert.equal(result.status, 409);
+  const current = (await f.request("/api/opportunities/" + op.id)).data;
+  assert.equal(current.activities.length, 0);
+  assert.equal(current.nextAction, "User update");
+});
+test("selected career text is prepared locally, scoped to this opportunity and sent with honest source coverage", async (t) => {
+  let context;
+  const f = await fixture(t, {
+    buddyFetch: async (_, opts) => {
+      context = JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+      return buddyResponse(
+        buddyReply({ reply: "Relevant governance experience is supported." }),
+      );
+    },
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { ...opportunity, description: "Governance requirements" },
+    })
+  ).data;
+  const other = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { ...opportunity, company: "Private other application" },
+    })
+  ).data;
+  const source = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Fictional CV.txt",
+        kind: "cv",
+        contentBase64: Buffer.from(
+          "Candidate-authored evidence: led governance workshops.",
+        ).toString("base64"),
+      },
+    })
+  ).data;
+  const unrelated = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Other private.txt",
+        kind: "reference",
+        opportunityId: other.id,
+        contentBase64: Buffer.from(
+          "Do not send this without selection.",
+        ).toString("base64"),
+      },
+    })
+  ).data;
+  assert.equal(
+    (await buddyChat(f, op.id, { documentIds: [unrelated.id] })).status,
+    400,
+  );
+  const result = await buddyChat(f, op.id, {
+    action: "fit",
+    message: "Am I a good fit?",
+    documentIds: [source.id],
+  });
+  assert.equal(result.status, 200);
+  assert.equal(context.context.excerpts[0].sourceId, source.id);
+  assert.match(context.context.excerpts[0].text, /governance/);
+  assert.equal(context.context.otherOpportunities.length, 0);
+  assert.ok(!JSON.stringify(context).includes("Do not send this"));
+  const sources = (await f.request("/api/buddy/documents")).data.documents;
+  assert.equal(
+    sources.find((d) => d.id === source.id).extraction.status,
+    "ready",
+  );
+  assert.equal(result.data.messages.at(-1).sources[0].included, true);
+});
+test("drafting requires actual career evidence and advice actions reject unrelated record mutations", async (t) => {
+  let output = buddyReply({ changes: [buddyChange()] });
+  const f = await fixture(t, { buddyFetch: async () => buddyResponse(output) });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  assert.equal((await buddyChat(f, op.id, { action: "cv" })).status, 422);
+  assert.equal((await buddyChat(f, op.id, { action: "fit" })).status, 502);
+  assert.equal(
+    (await f.request("/api/opportunities/" + op.id)).data.activities.length,
+    0,
+  );
+  output = buddyReply({
+    draft: {
+      kind: "cv",
+      title: "Unsupported draft",
+      content: "Invented experience.",
+    },
+  });
+  assert.equal((await buddyChat(f, op.id)).status, 422);
+  output = buddyReply({
+    changes: [
+      buddyChange({
+        kind: "update",
+        field: "url",
+        value: "file:///etc/passwd",
+      }),
+    ],
+  });
+  assert.equal((await buddyChat(f, op.id)).status, 422);
+});
+test("CV drafts save a new editable Word document, keep submitted originals and include chats/text/key in private backups", async (t) => {
+  const f = await fixture(t, {
+    buddyFetch: async () =>
+      buddyResponse(
+        buddyReply({
+          reply: "A draft is ready. Please review it.",
+          draft: {
+            kind: "cv",
+            title: "Fictional CV",
+            content:
+              "# Alex Example\n\n## Experience\n- Led governance workshops.",
+          },
+        }),
+      ),
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  const source = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Source CV.txt",
+        kind: "cv",
+        status: "submitted",
+        contentBase64: Buffer.from(
+          "Alex Example led governance workshops.",
+        ).toString("base64"),
+      },
+    })
+  ).data;
+  const result = await buddyChat(f, op.id, {
+    action: "cv",
+    documentIds: [source.id],
+  });
+  assert.equal(result.status, 200);
+  const reply = result.data.messages.at(-1);
+  const url = "/api/opportunities/" + op.id + "/buddy/draft/" + reply.id,
+    body = { title: "Fictional CV", content: reply.draft.content };
+  const saved = await f.request(url, { method: "POST", body });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.opportunity.documents.length, 1);
+  const word = saved.data.opportunity.documents[0];
+  assert.equal(word.status, "draft");
+  assert.equal(word.kind, "cv");
+  assert.match(word.name, /\.docx$/);
+  const bytes = await f.request(word.url, { binary: true });
+  assert.equal(bytes.data.subarray(0, 2).toString(), "PK");
+  assert.equal(
+    (await f.request(url, { method: "POST", body })).data.opportunity.documents
+      .length,
+    1,
+  );
+  const updated = await f.request(url, {
+    method: "POST",
+    body: { ...body, content: body.content + "\n- Revised wording." },
+  });
+  assert.equal(updated.data.opportunity.documents.length, 2);
+  assert.equal(updated.data.opportunity.documents.at(-1).version, 2);
+  assert.equal(
+    (await f.request(source.url, { binary: true })).data.toString(),
+    "Alex Example led governance workshops.",
+  );
+  const backup = await f.request("/api/backup", { method: "POST", body: {} });
+  assert.equal(backup.status, 200);
+  const snapshot = new DatabaseSync(
+    join(backup.data.location, "board.sqlite"),
+    { readOnly: true },
+  );
+  try {
+    assert.equal(
+      snapshot.prepare("SELECT count(*) AS n FROM buddy_messages").get().n,
+      2,
+    );
+    assert.equal(
+      snapshot.prepare("SELECT count(*) AS n FROM document_text").get().n,
+      1,
+    );
+    assert.match(
+      snapshot.prepare("SELECT data FROM config WHERE key='careerBuddy'").get()
+        .data,
+      /private-buddy-test-key/,
+    );
+  } finally {
+    snapshot.close();
+  }
+  const exported = JSON.stringify((await f.request("/api/export")).data);
+  assert.ok(!exported.includes("private-buddy-test-key"));
+  assert.match(exported, /A draft is ready/);
+});
+
+test("concurrent Career Buddy setting edits accept one revision and reject the stale writer", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const c = (await f.request("/api/buddy/settings")).data;
+  const results = await Promise.all(
+    ["model-one", "model-two"].map((model) =>
+      f.request("/api/buddy/settings", {
+        method: "PATCH",
+        body: { revision: c.revision, model },
+      }),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+});
+test("a pending Career Buddy call is bounded and cannot silently apply over an intervening manual edit", async (t) => {
+  let release, entered;
+  const started = new Promise((resolve) => (entered = resolve)),
+    gate = new Promise((resolve) => (release = resolve));
+  const f = await fixture(t, {
+    buddyFetch: async () => {
+      entered();
+      await gate;
+      return buddyResponse(buddyReply({ changes: [buddyChange()] }));
+    },
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  const running = buddyChat(f, op.id);
+  await started;
+  assert.equal((await buddyChat(f, op.id)).status, 429);
+  await f.request("/api/opportunities/" + op.id, {
+    method: "PATCH",
+    body: { revision: op.revision, nextAction: "Manual edit while thinking" },
+  });
+  release();
+  const result = await running;
+  assert.equal(result.status, 200);
+  const reply = result.data.messages.at(-1);
+  assert.equal(
+    (
+      await f.request(
+        "/api/opportunities/" + op.id + "/buddy/apply/" + reply.id,
+        { method: "POST", body: { revision: op.revision + 1 } },
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (await f.request("/api/opportunities/" + op.id)).data.nextAction,
+    "Manual edit while thinking",
+  );
+});
+
+test("concurrent saves of the same generated draft cannot create duplicate document versions", async (t) => {
+  const f = await fixture(t, {
+    buddyFetch: async () =>
+      buddyResponse(
+        buddyReply({
+          draft: {
+            kind: "cover",
+            title: "Fictional cover",
+            content:
+              "# Alex Example\n\nDear Hiring Team,\nI led governance workshops.\n\nYours sincerely,\nAlex Example",
+          },
+        }),
+      ),
+  });
+  await f.setup();
+  await enableBuddy(f);
+  const op = (
+    await f.request("/api/opportunities", { method: "POST", body: opportunity })
+  ).data;
+  const evidence = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Career.txt",
+        kind: "reference",
+        contentBase64: Buffer.from(
+          "Alex Example led governance workshops.",
+        ).toString("base64"),
+      },
+    })
+  ).data;
+  const reply = (
+    await buddyChat(f, op.id, { action: "cover", documentIds: [evidence.id] })
+  ).data.messages.at(-1);
+  const path = "/api/opportunities/" + op.id + "/buddy/draft/" + reply.id,
+    body = { title: reply.draft.title, content: reply.draft.content };
+  const responses = await Promise.all([
+    f.request(path, { method: "POST", body }),
+    f.request(path, { method: "POST", body }),
+  ]);
+  assert.ok(responses.some((result) => result.status === 200));
+  assert.ok(responses.every((result) => [200, 429].includes(result.status)));
+  assert.equal(
+    (await f.request("/api/opportunities/" + op.id)).data.documents.length,
+    1,
+  );
+});
