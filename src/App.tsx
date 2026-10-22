@@ -22,6 +22,8 @@ import {
   Folder,
   FolderOpen,
   LayoutGrid,
+  ChartNoAxesCombined,
+  ListTodo,
   List,
   LoaderCircle,
   LogOut,
@@ -57,6 +59,9 @@ import {
   type Activity,
   type BoardDocument,
   type StageEvent,
+  type Profile,
+  type Task,
+  type Theme,
 } from "./types";
 
 import JobLookup, {
@@ -65,7 +70,28 @@ import JobLookup, {
   type JobLookupResult,
 } from "./components/JobLookup";
 
-type Page = "board" | "library" | "settings";
+import Dashboard from "./components/Dashboard";
+import Todos from "./components/Todos";
+import ProfileSettings, {
+  ThemeSettings,
+  applyTheme,
+} from "./components/ProfileSettings";
+import "./themes.css";
+
+type Page =
+  "dashboard" | "opportunities" | "board" | "todos" | "library" | "settings";
+const PAGE_LABELS: Record<Page, string> = {
+  dashboard: "Dashboard",
+  opportunities: "Opportunities",
+  board: "Kanban board",
+  todos: "To-do list",
+  library: "Career library",
+  settings: "Settings",
+};
+function routePage(): Page {
+  const route = window.location.hash.replace(/^#\//, "").split("?")[0];
+  return Object.hasOwn(PAGE_LABELS, route) ? (route as Page) : "dashboard";
+}
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -205,8 +231,7 @@ export default function App() {
     [bootError, setBootError] = useState("");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]),
     [settings, setSettings] = useState<Settings | null>(null);
-  const [page, setPage] = useState<Page>("board"),
-    [view, setView] = useState<"board" | "list">("board"),
+  const [page, setPage] = useState<Page>(routePage),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("active");
   const [error, setError] = useState(""),
@@ -216,6 +241,15 @@ export default function App() {
     [newUrl, setNewUrl] = useState(""),
     [newFile, setNewFile] = useState<File | null>(null),
     [newText, setNewText] = useState("");
+  const [profile, setProfile] = useState<Profile>({
+    name: "Your workspace",
+    avatarUrl: "",
+    revision: 0,
+  });
+  const [tasks, setTasks] = useState<Task[]>([]),
+    [referenceCount, setReferenceCount] = useState(0),
+    [refreshing, setRefreshing] = useState(false);
+  const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
     [dragging, setDragging] = useState(""),
     [dropStage, setDropStage] = useState("");
@@ -227,30 +261,85 @@ export default function App() {
       window.history.replaceState(
         null,
         "",
-        window.location.pathname + window.location.search,
+        window.location.pathname + window.location.search + "#/dashboard",
       );
     api<Session>("/session")
       .then(setSession)
       .catch((e) => setBootError(displayError(e)));
   }, []);
-  async function load() {
-    setLoading(true);
+  function navigate(next: Page) {
+    if (window.location.hash !== `#/${next}`) window.location.hash = `/${next}`;
+    setPage(next);
+  }
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [page]);
+  useEffect(() => {
+    const changed = () => setPage(routePage());
+    window.addEventListener("hashchange", changed);
+    if (!window.location.hash)
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}#/dashboard`,
+      );
+    return () => window.removeEventListener("hashchange", changed);
+  }, []);
+  async function load(background = false) {
+    if (!background) setLoading(true);
+    setRefreshing(true);
     try {
       const data = await api<{
         opportunities: Opportunity[];
         settings: Settings;
+        profile: Profile;
+        tasks: Task[];
+        referenceCount: number;
       }>("/board");
       setOpportunities(data.opportunities);
       setSettings(data.settings);
+      setProfile(
+        data.profile || { name: "Your workspace", avatarUrl: "", revision: 0 },
+      );
+      setTasks(data.tasks || []);
+      setReferenceCount(data.referenceCount || 0);
+      applyTheme(data.settings.theme || "forest");
     } catch (e) {
       report(e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
   useEffect(() => {
     if (session?.authenticated) void load();
   }, [session?.authenticated]);
+  useEffect(() => {
+    if (session?.authenticated && (page === "dashboard" || page === "todos"))
+      void load(true);
+  }, [page]);
+  useEffect(() => {
+    if (!session?.authenticated) return;
+    const refresh = () => {
+      const element = document.activeElement as HTMLElement | null;
+      if (
+        page === "settings" ||
+        newOpen ||
+        selected ||
+        document.querySelector('[data-editing="true"]') ||
+        element?.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(element?.tagName || "")
+      )
+        return;
+      void load(true);
+    };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [session?.authenticated, page, newOpen, selected]);
   function report(e: unknown) {
     setError(displayError(e));
     if (e instanceof ApiError && e.status === 401)
@@ -370,42 +459,57 @@ export default function App() {
       <aside className="sidebar">
         <a
           className="brand"
-          href="#"
+          href="#/dashboard"
           onClick={(e) => {
             e.preventDefault();
-            setPage("board");
+            navigate("dashboard");
           }}
         >
           <span className="brand-mark">
             <LayoutGrid size={20} />
           </span>
           <span>
-            Opportunity<span className="brand-sub">YOUR NEXT CHAPTER</span>
+            Opportunity Knox<span className="brand-sub">YOUR NEXT CHAPTER</span>
           </span>
         </a>
         <div className="workspace-label">PERSONAL WORKSPACE</div>
         <nav aria-label="Main navigation">
-          <button
-            className={page === "board" ? "nav-item active" : "nav-item"}
-            onClick={() => setPage("board")}
-          >
-            <LayoutGrid size={18} />
-            Opportunities<span className="nav-count">{active.length}</span>
-          </button>
-          <button
-            className={page === "library" ? "nav-item active" : "nav-item"}
-            onClick={() => setPage("library")}
-          >
-            <FolderOpen size={18} />
-            Reference library
-          </button>
-          <button
-            className={page === "settings" ? "nav-item active" : "nav-item"}
-            onClick={() => setPage("settings")}
-          >
-            <Settings2 size={18} />
-            Settings
-          </button>
+          {(
+            [
+              {
+                id: "dashboard",
+                label: "Dashboard",
+                icon: ChartNoAxesCombined,
+              },
+              {
+                id: "opportunities",
+                label: "Opportunities",
+                icon: BriefcaseBusiness,
+              },
+              { id: "board", label: "Kanban board", icon: LayoutGrid },
+              { id: "todos", label: "To-do list", icon: ListTodo },
+              { id: "library", label: "Career library", icon: FolderOpen },
+              { id: "settings", label: "Settings", icon: Settings2 },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              className={page === item.id ? "nav-item active" : "nav-item"}
+              aria-current={page === item.id ? "page" : undefined}
+              onClick={() => navigate(item.id)}
+            >
+              <item.icon size={18} />
+              {item.label}
+              {item.id === "opportunities" && (
+                <span className="nav-count">{active.length}</span>
+              )}
+              {item.id === "todos" && tasks.some((t) => !t.completed) && (
+                <span className="nav-count">
+                  {tasks.filter((t) => !t.completed).length}
+                </span>
+              )}
+            </button>
+          ))}
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note">
@@ -419,45 +523,86 @@ export default function App() {
             Ready whenever you are.
           </p>
         </div>
-        <button
-          className="profile"
-          onClick={async () => {
-            try {
-              await api("/logout", json({}));
-              setSession({
-                authenticated: false,
-                setupRequired: false,
-                setupTokenRequired: false,
-              });
-            } catch (e) {
-              report(e);
-            }
-          }}
-        >
-          <span className="avatar">YO</span>
-          <span>
-            <strong>Your workspace</strong>
-            <small>Sign out</small>
-          </span>
-          <LogOut size={16} />
-        </button>
+        <div className="sidebar-profile">
+          <button
+            className="profile"
+            aria-label={`Edit profile for ${profile.name}`}
+            onClick={() => navigate("settings")}
+          >
+            <span className="avatar">
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" />
+              ) : (
+                initials(profile.name)
+              )}
+            </span>
+            <span>
+              <strong>{profile.name}</strong>
+              <small>Edit your profile</small>
+            </span>
+            <Settings2 size={15} />
+          </button>
+          <button
+            className="signout-button"
+            onClick={async () => {
+              try {
+                await api("/logout", json({}));
+                setSession({
+                  authenticated: false,
+                  setupRequired: false,
+                  setupTokenRequired: false,
+                });
+              } catch (e) {
+                report(e);
+              }
+            }}
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
+        </div>
       </aside>
       <div className="main-shell">
         <header className="topbar">
           <span className="breadcrumb">
             Workspace <ChevronRight size={14} />
-            <strong>
-              {page === "board"
-                ? "Opportunities"
-                : page === "library"
-                  ? "Reference library"
-                  : "Settings"}
-            </strong>
+            <strong>{PAGE_LABELS[page]}</strong>
           </span>
           <span className="private-label">
             <span />
             Private workspace
           </span>
+          <div className="topbar-mobile-profile">
+            <button
+              className="avatar"
+              aria-label={`Edit profile for ${profile.name}`}
+              onClick={() => navigate("settings")}
+            >
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" />
+              ) : (
+                initials(profile.name)
+              )}
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Sign out"
+              onClick={async () => {
+                try {
+                  await api("/logout", json({}));
+                  setSession({
+                    authenticated: false,
+                    setupRequired: false,
+                    setupTokenRequired: false,
+                  });
+                } catch (e) {
+                  report(e);
+                }
+              }}
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
         </header>
         {error && (
           <div className="alert error" role="alert">
@@ -492,7 +637,41 @@ export default function App() {
             </button>
           </div>
         )}
-        {page === "board" && (
+        {page === "dashboard" &&
+          (loading ? (
+            <div className="loading-board">
+              <Busy text="Opening your dashboard…" />
+            </div>
+          ) : (
+            <Dashboard
+              opportunities={opportunities}
+              tasks={tasks}
+              profile={profile}
+              timezone={settings?.timezone || "Europe/London"}
+              referenceCount={referenceCount}
+              onOpenOpportunity={(id) => void openOpportunity(id)}
+              onNavigate={navigate}
+              onAddOpportunity={add}
+              onRefresh={() => void load(true)}
+              refreshing={refreshing}
+            />
+          ))}
+        {page === "todos" &&
+          (loading ? (
+            <div className="loading-board">
+              <Busy text="Opening your to-do list…" />
+            </div>
+          ) : (
+            <Todos
+              tasks={tasks}
+              opportunities={opportunities}
+              timezone={settings?.timezone || "Europe/London"}
+              onChanged={() => void load(true)}
+              onError={report}
+              onOpenOpportunity={(id) => void openOpportunity(id)}
+            />
+          ))}
+        {(page === "board" || page === "opportunities") && (
           <main
             className="board-page"
             onDragOver={(e) => {
@@ -506,11 +685,15 @@ export default function App() {
                   A LITTLE STRUCTURE. A CLEARER PATH.
                 </div>
                 <h1>
-                  Your next opportunity<span className="heading-dot">.</span>
+                  {page === "board"
+                    ? "Your opportunity board"
+                    : "Your opportunities"}
+                  <span className="heading-dot">.</span>
                 </h1>
                 <p>
-                  From the first possibility to your next chapter. Keep it all
-                  moving.
+                  {page === "board"
+                    ? "See the whole journey. Move each possibility forward at your own pace."
+                    : "Every possibility, application, and next action in one place."}
                 </p>
               </div>
               <button className="button primary" onClick={add}>
@@ -551,22 +734,9 @@ export default function App() {
               />
             </div>
             <div className="board-toolbar">
-              <div className="view-toggle" aria-label="Display mode">
-                <button
-                  className={view === "board" ? "selected" : ""}
-                  onClick={() => setView("board")}
-                >
-                  <LayoutGrid size={15} />
-                  Board
-                </button>
-                <button
-                  className={view === "list" ? "selected" : ""}
-                  onClick={() => setView("list")}
-                >
-                  <List size={16} />
-                  List
-                </button>
-              </div>
+              <span className="view-caption">
+                {page === "board" ? "PIPELINE VIEW" : "OPPORTUNITY REGISTER"}
+              </span>
               <div className="toolbar-right">
                 <div className="search-input">
                   <Search size={16} />
@@ -812,6 +982,8 @@ export default function App() {
         {page === "settings" && settings && (
           <SettingsPage
             settings={settings}
+            profile={profile}
+            onProfileSaved={setProfile}
             onSaved={setSettings}
             onError={report}
             onNotice={setNotice}
@@ -1006,7 +1178,7 @@ function Auth({
         <span className="brand-mark">
           <LayoutGrid size={24} />
         </span>
-        <div className="eyebrow">YOUR NEXT CHAPTER</div>
+        <div className="eyebrow">OPPORTUNITY KNOX · YOUR NEXT CHAPTER</div>
         <h1>
           A clearer path
           <br />
@@ -2196,7 +2368,7 @@ function Documents({
         <p>
           {opportunityId
             ? "Each upload creates a separate version. Submitted files stay preserved."
-            : "Add master CVs, previous JDs, templates, and career evidence. Choose what to reuse later."}
+            : "Add any career-related files. Stored originals are ready for later selection and future AI extraction, chunking, and retrieval."}
         </p>
       </div>
       <form className="document-upload" onSubmit={upload}>
@@ -2283,6 +2455,11 @@ function Documents({
                 {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
                 {formatDate(doc.createdAt, timezone)}
               </small>
+              {!opportunityId && (
+                <span className="library-file-status">
+                  Stored · AI indexing not connected
+                </span>
+              )}
               {doc.notes && <p>{doc.notes}</p>}
             </div>
             {doc.status === "submitted" ? (
@@ -2426,16 +2603,40 @@ function Library({
         <div>
           <div className="eyebrow">BUILT ON YOUR EXPERIENCE</div>
           <h1>
-            Your reference library<span className="heading-dot">.</span>
+            Your career library<span className="heading-dot">.</span>
           </h1>
           <p>
-            A reusable home for career evidence, templates, and previous
-            documents.
+            Bring your career material together. Keep originals ready for future
+            AI-assisted applications.
           </p>
         </div>
         <Badge kind="green">
           {docs.length} document{docs.length === 1 ? "" : "s"}
         </Badge>
+      </div>
+      <div className="library-intro-panel">
+        <div>
+          <FolderOpen size={24} />
+          <h2>Your career, in its own words.</h2>
+          <p>
+            Drop in CVs, old job descriptions, project notes, achievements,
+            certificates, interview notes, articles, and any other
+            career-related evidence. This is your source library; you can
+            organise and select material later.
+          </p>
+        </div>
+        <div className="library-index-state">
+          <span className="badge green">
+            <Check size={12} />
+            Stored originals
+          </span>
+          <span className="badge muted">AI indexing not connected</span>
+          <p>
+            Extraction, chunking, and retrieval are planned for a future AI
+            connection. Files are stored as uploaded; nothing has been indexed
+            or sent to a model.
+          </p>
+        </div>
       </div>
       <div className="content-panel">
         <div className="search-input library-search">
@@ -2474,19 +2675,43 @@ function Library({
 }
 function SettingsPage({
   settings,
+  profile,
+  onProfileSaved,
   onSaved,
   onError,
   onNotice,
 }: {
   settings: Settings;
+  profile: Profile;
+  onProfileSaved: (profile: Profile) => void;
   onSaved: (s: Settings) => void;
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
 }) {
   const [form, setForm] = useState(settings),
     [busy, setBusy] = useState(false),
-    [backingUp, setBackingUp] = useState(false);
-  useEffect(() => setForm(settings), [settings]);
+    [backingUp, setBackingUp] = useState(false),
+    [themeSaving, setThemeSaving] = useState(false);
+  useEffect(
+    () => setForm((current) => ({ ...current, theme: settings.theme })),
+    [settings.theme],
+  );
+  async function chooseTheme(theme: Theme) {
+    const previous = form.theme;
+    applyTheme(theme);
+    setForm((current) => ({ ...current, theme }));
+    setThemeSaving(true);
+    try {
+      const next = await api<Settings>("/settings", json({ theme }, "PATCH"));
+      onSaved(next);
+    } catch (e) {
+      applyTheme(previous);
+      setForm((current) => ({ ...current, theme: previous }));
+      onError(e);
+    } finally {
+      setThemeSaving(false);
+    }
+  }
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -2506,6 +2731,7 @@ function SettingsPage({
         ),
       );
       onSaved(s);
+      setForm(s);
       onNotice(
         s.pendingHostPath
           ? "Settings saved. Apply the new host folder with ./board restart on the hosting machine."
@@ -2528,6 +2754,17 @@ function SettingsPage({
           <p>Your files, preferences, and future connections.</p>
         </div>
       </div>
+      <ProfileSettings
+        profile={profile}
+        onSaved={onProfileSaved}
+        onError={onError}
+        onNotice={onNotice}
+      />
+      <ThemeSettings
+        theme={form.theme || "forest"}
+        onChange={(theme) => void chooseTheme(theme)}
+        saving={themeSaving}
+      />
       <form onSubmit={save}>
         <section className="settings-section">
           <div className="settings-section-heading">

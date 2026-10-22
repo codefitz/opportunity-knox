@@ -69,7 +69,22 @@ export type Opportunity = {
   activities?: Activity[];
   documents?: BoardDocument[];
 };
+export type Theme = "forest" | "cappuccino" | "ocean" | "midnight";
+export type Profile = { name: string; avatarUrl: string; revision: number };
+export type Task = {
+  id: string;
+  title: string;
+  notes: string;
+  dueDate: string;
+  completed: boolean;
+  opportunityId: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string;
+};
 export type Settings = {
+  theme: Theme;
   timezone: string;
   documentsSubdir: string;
   referenceSubdir: string;

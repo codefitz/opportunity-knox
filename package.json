@@ -1,8 +1,8 @@
 {
   "name": "opportunity-board",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "A privately hosted application board with a one-command Docker launcher.",
+  "description": "Opportunity Knox: a private career workspace with a Docker launcher",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"

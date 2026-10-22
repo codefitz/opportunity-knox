@@ -20,6 +20,8 @@ Verification details and limits are recorded in `VERIFICATION.md`. The automatic
 
 Version 0.2 adds public job-link retrieval, structured/visible job details, preview before saving, and manual fallback for inaccessible listings. This includes a Docker/browser check against the supplied LinkedIn listing. See `VERIFICATION.md` for details.
 
+Version 0.3 implements: Opportunity Knox branding; Forest/Cappuccino/Ocean/Midnight themes; distinct dashboard, opportunities, Kanban and to-do pages; profile name/photo; clearer career-material library and pending AI-indexing status; persisted tasks and statistics based on saved records. Integration requirements are recorded in `KNOX_CONTRACT.md`.
+
 - Previewed import of chosen existing career/application folders, duplicate detection, and existing-file linking.
 - Native Google Drive/Docs connectors and cloud-document editing/export.
 - Server-side folder browsing, multiple independent reference roots, communications direction/channel refinements, and explicit review decisions beyond stage/outcome/notes.

@@ -1,4 +1,4 @@
-# Opportunity Board
+# Opportunity Knox
 
 - Read `docs/PLAN.md` for product intent and `docs/ROADMAP.md` for implementation status.
 - Keep routine start/stop and storage configuration behind the launcher and app. Do not require users to edit Docker configuration.

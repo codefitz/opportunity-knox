@@ -1,8 +1,8 @@
-# Opportunity Board
+# Opportunity Knox
 
-A private browser-based application tracker, from a saved job description to the final hiring decision. One service keeps the same board available across your devices. Docker runs behind a small launcher.
+A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
-![Board preview with fictional test opportunities](docs/preview.png)
+![Cappuccino dashboard preview with fictional test opportunities](docs/preview.png)
 
 ## Start the board
 
@@ -63,9 +63,22 @@ You can also choose a different port, remembered for future starts:
 ./board start --port 4319
 ```
 
-## First release
+## Workspace features
 
 The initial manual workflow covers opportunity capture, dated stage history and corrections, notes, repeatable interviews and communications, document uploads/downloads, reference material, and configurable storage. The app tracks the documents used for an application; recording submission does not send anything to an employer.
+
+Version 0.3 introduces the Opportunity Knox name and separate sidebar pages:
+
+- **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes, tasks, and interview/action queues. Charts and records update after changes and periodic refreshes.
+- **Opportunities:** searchable list for detailed application tracking.
+- **Kanban board:** the eight-stage drag-and-drop board on its own page.
+- **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link a task to an opportunity when useful.
+- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; AI extraction, chunking, indexing and retrieval await a provider connection.
+- **Settings:** profile name/photo, themes, file locations, backups, and future AI connections.
+
+Choose Forest, Cappuccino, Ocean, or Midnight in Settings. The profile supports PNG, JPEG and WebP photos up to 2 MB. Preferences, profile and tasks persist in the database and private backups. Browser routes use `#/dashboard`, `#/opportunities`, `#/board`, `#/todos`, `#/library` and `#/settings`.
+
+Existing installation directories, Docker project names and the `./board` command stay compatible. The default document directory remains `~/OpportunityBoard` and the Mac state directory remains `~/Library/Application Support/OpportunityBoard`.
 
 AI providers have not been connected. Evidence-based fit reviews and CV/cover-letter generation remain subsequent work. Job-link lookup works without an AI provider. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
 

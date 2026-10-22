@@ -93,7 +93,7 @@ def validate_bind(value: str) -> str:
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Start or stop your Opportunity Board without managing Docker.")
+    parser = argparse.ArgumentParser(description="Start or stop your Opportunity Knox without managing Docker.")
     parser.add_argument("command", nargs="?", default="start", choices=["start", "stop", "restart", "status", "logs"])
     parser.add_argument("--files", help="Existing document folder on the hosting machine; remembered for future starts")
     parser.add_argument("--port", type=int, help="Browser port (default: 4318)")
@@ -244,7 +244,7 @@ def main(argv=None) -> int:
     config_path = state_dir / "launcher.json"
     if args.command in ("stop", "status", "logs"):
         if not config_path.exists():
-            print("Opportunity Board has not been started on this host yet.")
+            print("Opportunity Knox has not been started on this host yet.")
             return 0
         config = read_json(config_path)
         ensure_docker(auto_start=False)
@@ -272,7 +272,7 @@ def main(argv=None) -> int:
     try:
         # Validate generated Compose before changing a running service.
         run(command + ["config", "--quiet"], capture=True)
-        print("Preparing Opportunity Board…", flush=True)
+        print("Preparing Opportunity Knox…", flush=True)
         up_args = ["up", "--detach", "--build", "--wait", "--wait-timeout", "60"]
         if args.command == "restart":
             up_args.append("--force-recreate")
@@ -311,7 +311,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (LauncherError, OSError) as exc:
-        print("Opportunity Board: " + str(exc), file=sys.stderr)
+        print("Opportunity Knox: " + str(exc), file=sys.stderr)
         raise SystemExit(1)
     except KeyboardInterrupt:
         print("\nCancelled. Existing board data is unchanged.", file=sys.stderr)

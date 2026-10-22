@@ -32,6 +32,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { fetchJobPage } from "./job-fetch.mjs";
 import { parseJobPage } from "./job-parser.mjs";
+import { validateAvatar } from "./profile.mjs";
 
 export const stages = [
   ["identification", "Identification"],
@@ -228,7 +229,7 @@ export function createApp(options = {}) {
   );
   const db = new DatabaseSync(join(dataDir, "board.sqlite"));
   db.exec(
-    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data TEXT NOT NULL);",
+    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);",
   );
   const getConfig = (key) => {
     const row = db.prepare("SELECT data FROM config WHERE key=?").get(key);
@@ -251,6 +252,58 @@ export function createApp(options = {}) {
         "INSERT INTO records(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
       )
       .run(record.id, JSON.stringify(record));
+  const getProfile = () =>
+    getConfig("profile") || {
+      name: "Your workspace",
+      revision: 1,
+      image: null,
+    };
+  const publicProfile = () => {
+    const profile = getProfile();
+    return {
+      name: profile.name,
+      revision: profile.revision,
+      avatarUrl: profile.image
+        ? `/api/profile/avatar?v=${profile.revision}`
+        : "",
+    };
+  };
+  const getTask = (id) => {
+    const row = db.prepare("SELECT data FROM tasks WHERE id=?").get(id);
+    if (!row) fail(404, "Task not found.");
+    return JSON.parse(row.data);
+  };
+  const putTask = (task) =>
+    db
+      .prepare(
+        "INSERT INTO tasks(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+      )
+      .run(task.id, JSON.stringify(task));
+  const listTasks = () =>
+    db
+      .prepare("SELECT data FROM tasks")
+      .all()
+      .map((row) => JSON.parse(row.data))
+      .sort((a, b) => {
+        if (a.completed !== b.completed) return a.completed ? 1 : -1;
+        const due = (a.dueDate || "9999-99-99").localeCompare(
+          b.dueDate || "9999-99-99",
+        );
+        return (
+          due ||
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.id.localeCompare(b.id)
+        );
+      });
+  const linkedOpportunity = (value) => {
+    const id = cleanText(value, "Linked opportunity", 100);
+    if (id && !db.prepare("SELECT id FROM records WHERE id=?").get(id))
+      fail(
+        400,
+        "The linked opportunity was not found. Reload and choose an existing opportunity.",
+      );
+    return id;
+  };
   const getDocuments = () =>
     db
       .prepare("SELECT data FROM documents")
@@ -280,6 +333,7 @@ export function createApp(options = {}) {
       .map((row) => JSON.parse(row.data));
   const settingDefaults = {
     timezone: "Europe/London",
+    theme: "forest",
     documentsSubdir: "opportunities",
     referenceSubdir: "references",
     backupSubdir: "backups",
@@ -567,12 +621,145 @@ export function createApp(options = {}) {
             activeJobLookups--;
           }
         }
-        if (path === "/api/board" && method === "GET")
+        if (path === "/api/profile" && method === "GET")
+          return json(res, publicProfile());
+        if (path === "/api/profile/avatar" && method === "GET") {
+          const image = getProfile().image;
+          if (!image) fail(404, "No profile photo has been set.");
+          const bytes = Buffer.from(image.base64, "base64");
+          res.writeHead(200, {
+            "Content-Type": image.contentType,
+            "Content-Length": bytes.length,
+            "Content-Disposition": "inline",
+          });
+          return res.end(bytes);
+        }
+        if (path === "/api/profile" && method === "PATCH") {
+          const body = await readBody(req);
+          const profile = getProfile();
+          if (
+            !Number.isInteger(body.revision) ||
+            body.revision !== profile.revision
+          )
+            fail(
+              409,
+              "Your profile changed on another device. Reload before saving.",
+            );
+          if (
+            Object.keys(body).some(
+              (key) =>
+                !["revision", "name", "imageBase64", "removeAvatar"].includes(
+                  key,
+                ),
+            )
+          )
+            fail(400, "Unsupported profile setting.");
+          if (body.name !== undefined) {
+            profile.name = cleanText(body.name, "Name", 80);
+            if (!profile.name)
+              fail(400, "Enter a name between 1 and 80 characters.");
+          }
+          if (
+            body.removeAvatar !== undefined &&
+            typeof body.removeAvatar !== "boolean"
+          )
+            fail(400, "Remove photo must be true or false.");
+          if (body.imageBase64 !== undefined && body.removeAvatar)
+            fail(
+              400,
+              "Upload a photo or remove the current photo, not both at once.",
+            );
+          if (body.imageBase64 !== undefined) {
+            try {
+              profile.image = validateAvatar(body.imageBase64);
+            } catch (error) {
+              fail(error.status || 400, error.message);
+            }
+          }
+          if (body.removeAvatar) profile.image = null;
+          profile.revision++;
+          putConfig("profile", profile);
+          return json(res, publicProfile());
+        }
+        if (path === "/api/tasks" && method === "GET")
+          return json(res, { tasks: listTasks() });
+        if (path === "/api/tasks" && method === "POST") {
+          const body = await readBody(req);
+          const title = cleanText(body.title, "Task title", 300);
+          if (!title) fail(400, "Enter a task title.");
+          const createdAt = now();
+          const task = {
+            id: randomUUID(),
+            title,
+            notes: cleanText(
+              body.notes === undefined ? "" : body.notes,
+              "Task notes",
+              10000,
+            ),
+            dueDate: dateOnly(
+              body.dueDate === undefined ? "" : body.dueDate,
+              "Due date",
+            ),
+            opportunityId: linkedOpportunity(
+              body.opportunityId === undefined ? "" : body.opportunityId,
+            ),
+            completed: false,
+            completedAt: "",
+            revision: 1,
+            createdAt,
+            updatedAt: createdAt,
+          };
+          putTask(task);
+          return json(res, task, 201);
+        }
+        const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
+        if (taskMatch && method === "PATCH") {
+          const body = await readBody(req);
+          const task = getTask(taskMatch[1]);
+          if (
+            !Number.isInteger(body.revision) ||
+            body.revision !== task.revision
+          )
+            fail(
+              409,
+              "This task changed on another device. Reload before saving.",
+            );
+          if (body.title !== undefined) {
+            task.title = cleanText(body.title, "Task title", 300);
+            if (!task.title) fail(400, "Enter a task title.");
+          }
+          if (body.notes !== undefined)
+            task.notes = cleanText(body.notes, "Task notes", 10000);
+          if (body.dueDate !== undefined)
+            task.dueDate = dateOnly(body.dueDate, "Due date");
+          if (body.opportunityId !== undefined)
+            task.opportunityId = linkedOpportunity(body.opportunityId);
+          if (body.completed !== undefined) {
+            if (typeof body.completed !== "boolean")
+              fail(400, "Task completion must be true or false.");
+            if (body.completed && !task.completed) task.completedAt = now();
+            if (!body.completed) task.completedAt = "";
+            task.completed = body.completed;
+          }
+          task.revision++;
+          task.updatedAt = now();
+          putTask(task);
+          return json(res, task);
+        }
+        if (path === "/api/board" && method === "GET") {
+          const documents = getDocuments();
           return json(res, {
             opportunities: listRecords().map(fullRecord),
             settings: settings(),
             stages,
+            profile: publicProfile(),
+            tasks: listTasks(),
+            documentCount: documents.length,
+            referenceCount: documents.filter(
+              (document) => !document.opportunityId,
+            ).length,
           });
+        }
         if (path === "/api/opportunities" && method === "POST")
           return json(res, createOpportunity(await readBody(req)), 201);
         const match = path.match(
@@ -863,6 +1050,12 @@ export function createApp(options = {}) {
         if (path === "/api/settings" && method === "PATCH") {
           const body = await readBody(req);
           const updated = settings();
+          if (body.theme !== undefined)
+            updated.theme = choice(
+              body.theme,
+              ["forest", "cappuccino", "ocean", "midnight"],
+              "theme",
+            );
           if (body.timezone !== undefined) {
             const zone = cleanText(body.timezone, "Timezone", 100);
             try {
@@ -923,8 +1116,10 @@ export function createApp(options = {}) {
             version: 1,
             exportedAt: now(),
             limitations:
-              "Records and document manifest only. File bytes and authentication secrets are excluded. Use a full backup for managed files.",
+              "Records and document manifest only. File bytes, profile photo bytes, and authentication secrets are excluded. Use a full backup for managed files and the profile photo.",
             settings: settings(),
+            profile: publicProfile(),
+            tasks: listTasks(),
             opportunities: listRecords(),
             documents: getDocuments().map(publicDocument),
           });
@@ -970,9 +1165,9 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
-              for (const table of ["records", "documents", "config"]) {
+              for (const table of ["records", "documents", "config", "tasks"]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";
                 const insert = snapshot.prepare(

@@ -31,6 +31,7 @@ async function fixture(t, extras = {}) {
     await new Promise((done) => app.server.listen(0, "127.0.0.1", done));
     base = `http://127.0.0.1:${app.server.address().port}`;
   }
+  if (extras.beforeOpen) extras.beforeOpen(options);
   await open();
   t.after(async () => {
     await app.close();
@@ -38,7 +39,7 @@ async function fixture(t, extras = {}) {
   });
   async function request(
     path,
-    { method = "GET", body, auth = true, headers = {} } = {},
+    { method = "GET", body, auth = true, headers = {}, binary = false } = {},
   ) {
     const response = await fetch(base + path, {
       method,
@@ -50,9 +51,11 @@ async function fixture(t, extras = {}) {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const type = response.headers.get("content-type") || "";
-    const data = type.includes("application/json")
-      ? await response.json()
-      : await response.text();
+    const data = binary
+      ? Buffer.from(await response.arrayBuffer())
+      : type.includes("application/json")
+        ? await response.json()
+        : await response.text();
     return { response, status: response.status, data };
   }
   async function setup() {
@@ -678,4 +681,416 @@ test("job lookup failures remain actionable and concurrent lookups are bounded",
   release();
   for (const response of await Promise.all(requests))
     assert.equal(response.status, 200);
+});
+
+// Fictional solid-colour 2×2 images, generated for format-validation fixtures.
+const avatarFixtures = {
+  png: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGOU9NZlYGBgYgADAAbiAJW0YxQdAAAAAElFTkSuQmCC",
+  jpeg: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDziiiisTyz/9k=",
+  webp: "UklGRjAAAABXRUJQVlA4ICQAAABwAQCdASoCAAIAAUAmJYgCdAF1AAD++AQ0Hxcv+N/q18mQ4AA=",
+};
+
+test("theme selection persists without resetting other settings or opportunity data", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const created = await f.request("/api/opportunities", {
+    method: "POST",
+    body: opportunity,
+  });
+  assert.equal((await f.request("/api/settings")).data.theme, "forest");
+  const changed = await f.request("/api/settings", {
+    method: "PATCH",
+    body: {
+      theme: "cappuccino",
+      timezone: "America/New_York",
+      documentsSubdir: "my-applications",
+    },
+  });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.data.theme, "cappuccino");
+  const next = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { theme: "midnight" },
+  });
+  assert.equal(next.data.timezone, "America/New_York");
+  assert.equal(next.data.documentsSubdir, "my-applications");
+  assert.equal(
+    (
+      await f.request("/api/settings", {
+        method: "PATCH",
+        body: { theme: "invented" },
+      })
+    ).status,
+    400,
+  );
+  await f.restart();
+  await f.login();
+  const board = await f.request("/api/board");
+  assert.equal(board.data.settings.theme, "midnight");
+  assert.equal(board.data.opportunities[0].id, created.data.id);
+  assert.equal(board.data.profile.name, "Your workspace");
+  assert.deepEqual(board.data.tasks, []);
+});
+
+test("profile name and photo validate, preserve revision conflicts, survive restart and allow removal", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  assert.equal((await f.request("/api/profile", { auth: false })).status, 401);
+  assert.equal(
+    (await f.request("/api/profile/avatar", { auth: false })).status,
+    401,
+  );
+  assert.equal((await f.request("/api/profile/avatar")).status, 404);
+  let profile = (await f.request("/api/profile")).data;
+  assert.deepEqual(profile, {
+    name: "Your workspace",
+    avatarUrl: "",
+    revision: 1,
+  });
+  for (const name of ["", "   ", "n".repeat(81)])
+    assert.equal(
+      (
+        await f.request("/api/profile", {
+          method: "PATCH",
+          body: { revision: profile.revision, name },
+        })
+      ).status,
+      400,
+    );
+  for (const imageBase64 of [
+    Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64"),
+    Buffer.from("not an image").toString("base64"),
+    "data:image/png;base64," + avatarFixtures.png,
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64"),
+  ])
+    assert.equal(
+      (
+        await f.request("/api/profile", {
+          method: "PATCH",
+          body: { revision: profile.revision, imageBase64 },
+        })
+      ).status,
+      400,
+    );
+  assert.equal(
+    (
+      await f.request("/api/profile", {
+        method: "PATCH",
+        body: {
+          revision: profile.revision,
+          imageBase64: Buffer.alloc(2 * 1024 * 1024 + 1).toString("base64"),
+        },
+      })
+    ).status,
+    413,
+  );
+  const saved = await f.request("/api/profile", {
+    method: "PATCH",
+    body: {
+      revision: profile.revision,
+      name: " Fictional Candidate ",
+      imageBase64: avatarFixtures.png,
+    },
+  });
+  assert.equal(saved.status, 200);
+  profile = saved.data;
+  assert.equal(profile.name, "Fictional Candidate");
+  assert.match(profile.avatarUrl, /\/api\/profile\/avatar\?v=2/);
+  assert.equal(profile.imageBase64, undefined);
+  assert.equal(profile.image, undefined);
+  assert.equal(
+    (
+      await f.request("/api/profile", {
+        method: "PATCH",
+        body: { revision: 1, name: "Stale name" },
+      })
+    ).status,
+    409,
+  );
+  const image = await f.request(profile.avatarUrl, { binary: true });
+  assert.equal(image.status, 200);
+  assert.equal(image.response.headers.get("content-type"), "image/png");
+  assert.deepEqual(image.data, Buffer.from(avatarFixtures.png, "base64"));
+  await f.restart();
+  await f.login();
+  assert.equal(
+    (await f.request("/api/profile")).data.name,
+    "Fictional Candidate",
+  );
+  for (const [format, contentType] of [
+    ["jpeg", "image/jpeg"],
+    ["webp", "image/webp"],
+  ]) {
+    const result = await f.request("/api/profile", {
+      method: "PATCH",
+      body: { revision: profile.revision, imageBase64: avatarFixtures[format] },
+    });
+    assert.equal(result.status, 200);
+    profile = result.data;
+    const content = await f.request(profile.avatarUrl, { binary: true });
+    assert.equal(content.response.headers.get("content-type"), contentType);
+    assert.deepEqual(
+      content.data,
+      Buffer.from(avatarFixtures[format], "base64"),
+    );
+  }
+  const removed = await f.request("/api/profile", {
+    method: "PATCH",
+    body: { revision: profile.revision, removeAvatar: true },
+  });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.data.avatarUrl, "");
+  assert.equal((await f.request("/api/profile/avatar")).status, 404);
+});
+
+test("tasks are independent, validate dates and links, sort due dates and preserve completion and reopen history", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  assert.equal((await f.request("/api/tasks", { auth: false })).status, 401);
+  for (const body of [
+    { title: "" },
+    { title: "x".repeat(301) },
+    { title: "Bad date", dueDate: "2026-02-30" },
+    { title: "Missing opportunity", opportunityId: "missing-id" },
+    { title: "Wrong notes", notes: null },
+  ])
+    assert.equal(
+      (await f.request("/api/tasks", { method: "POST", body })).status,
+      400,
+    );
+  const create = (body) => f.request("/api/tasks", { method: "POST", body });
+  const undated = await create({ title: "Independent admin task" });
+  assert.equal(undated.status, 201);
+  assert.equal(undated.data.opportunityId, "");
+  assert.equal(undated.data.completedAt, "");
+  const late = await create({
+    title: "Prepare interview",
+    dueDate: "2026-12-03",
+  });
+  const early = await create({
+    title: "Check requirements",
+    dueDate: "2026-11-01",
+  });
+  assert.deepEqual(
+    (await f.request("/api/tasks")).data.tasks.map((task) => task.id),
+    [early.data.id, late.data.id, undated.data.id],
+  );
+  const op = await f.request("/api/opportunities", {
+    method: "POST",
+    body: opportunity,
+  });
+  const linked = await f.request(`/api/tasks/${early.data.id}`, {
+    method: "PATCH",
+    body: {
+      revision: early.data.revision,
+      opportunityId: op.data.id,
+      notes: "Read the JD first",
+    },
+  });
+  assert.equal(linked.status, 200);
+  const completed = await f.request(`/api/tasks/${early.data.id}`, {
+    method: "PATCH",
+    body: { revision: linked.data.revision, completed: true },
+  });
+  assert.equal(completed.data.completed, true);
+  assert.ok(Number.isFinite(Date.parse(completed.data.completedAt)));
+  assert.equal(
+    (
+      await f.request(`/api/tasks/${early.data.id}`, {
+        method: "PATCH",
+        body: { revision: linked.data.revision, title: "Stale overwrite" },
+      })
+    ).status,
+    409,
+  );
+  const editedComplete = await f.request(`/api/tasks/${early.data.id}`, {
+    method: "PATCH",
+    body: {
+      revision: completed.data.revision,
+      title: "Completed requirements review",
+    },
+  });
+  assert.equal(editedComplete.data.completedAt, completed.data.completedAt);
+  const reopened = await f.request(`/api/tasks/${early.data.id}`, {
+    method: "PATCH",
+    body: { revision: editedComplete.data.revision, completed: false },
+  });
+  assert.equal(reopened.data.completed, false);
+  assert.equal(reopened.data.completedAt, "");
+  assert.equal(reopened.data.notes, "Read the JD first");
+  assert.equal(
+    (
+      await f.request(`/api/tasks/${early.data.id}`, {
+        method: "PATCH",
+        body: { revision: reopened.data.revision, completed: "yes" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.request(`/api/tasks/${early.data.id}`, {
+        method: "PATCH",
+        body: { revision: reopened.data.revision, dueDate: "yesterday" },
+      })
+    ).status,
+    400,
+  );
+  const concurrency = await Promise.all(
+    ["A", "B"].map((title) =>
+      f.request(`/api/tasks/${late.data.id}`, {
+        method: "PATCH",
+        body: { revision: late.data.revision, title },
+      }),
+    ),
+  );
+  assert.deepEqual(
+    concurrency.map((result) => result.status).sort(),
+    [200, 409],
+  );
+  await f.restart();
+  await f.login();
+  const board = await f.request("/api/board");
+  assert.equal(board.data.tasks.length, 3);
+  assert.equal(
+    board.data.tasks.find((task) => task.id === early.data.id).opportunityId,
+    op.data.id,
+  );
+  assert.equal(board.data.tasks[0].dueDate, "2026-11-01");
+});
+
+test("board document counts, tasks, and private profile photo are backed up while photo bytes stay out of export", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const profile = await f.request("/api/profile", {
+    method: "PATCH",
+    body: {
+      revision: 1,
+      name: "Fictional Profile",
+      imageBase64: avatarFixtures.png,
+    },
+  });
+  assert.equal(profile.status, 200);
+  const task = await f.request("/api/tasks", {
+    method: "POST",
+    body: { title: "Prepare references", dueDate: "2026-12-01" },
+  });
+  const op = await f.request("/api/opportunities", {
+    method: "POST",
+    body: opportunity,
+  });
+  for (const opportunityId of ["", op.data.id])
+    assert.equal(
+      (
+        await f.request("/api/documents", {
+          method: "POST",
+          body: {
+            opportunityId,
+            name: "fictional-reference.txt",
+            kind: "reference",
+            contentBase64: Buffer.from("Fictional reference").toString(
+              "base64",
+            ),
+          },
+        })
+      ).status,
+      201,
+    );
+  const board = await f.request("/api/board");
+  assert.equal(board.data.documentCount, 2);
+  assert.equal(board.data.referenceCount, 1);
+  assert.equal(board.data.profile.name, "Fictional Profile");
+  assert.equal(board.data.tasks.length, 1);
+  const exported = await f.request("/api/export");
+  assert.equal(exported.data.tasks[0].id, task.data.id);
+  assert.equal(exported.data.profile.name, "Fictional Profile");
+  assert.equal(
+    JSON.stringify(exported.data).includes(avatarFixtures.png),
+    false,
+  );
+  assert.equal(exported.data.profile.image, undefined);
+  assert.match(exported.data.limitations, /profile photo bytes/);
+  const backup = await f.request("/api/backup", { method: "POST", body: {} });
+  assert.equal(backup.status, 200);
+  const snapshot = new DatabaseSync(join(backup.data.location, "board.sqlite"));
+  try {
+    assert.equal(
+      snapshot.prepare("SELECT COUNT(*) AS count FROM tasks").get().count,
+      1,
+    );
+    const storedProfile = JSON.parse(
+      snapshot.prepare("SELECT data FROM config WHERE key='profile'").get()
+        .data,
+    );
+    assert.equal(storedProfile.name, "Fictional Profile");
+    assert.equal(storedProfile.image.base64, avatarFixtures.png);
+    assert.equal(
+      snapshot.prepare("SELECT COUNT(*) AS count FROM records").get().count,
+      1,
+    );
+    assert.equal(
+      snapshot.prepare("SELECT COUNT(*) AS count FROM documents").get().count,
+      2,
+    );
+    assert.ok(
+      snapshot.prepare("SELECT data FROM config WHERE key='auth'").get(),
+    );
+  } finally {
+    snapshot.close();
+  }
+});
+
+test("opening a pre-task database adds the new table without resetting legacy records or settings", async (t) => {
+  const legacy = {
+    id: "legacy-opportunity",
+    company: "Fictional Legacy",
+    role: "Architect",
+    stage: "review",
+    outcome: "",
+    revision: 7,
+    events: [],
+    activities: [],
+    createdAt: "2026-10-01T09:00:00.000Z",
+    updatedAt: "2026-10-02T09:00:00.000Z",
+  };
+  const f = await fixture(t, {
+    beforeOpen(options) {
+      mkdirSync(options.dataDir, { recursive: true });
+      const db = new DatabaseSync(join(options.dataDir, "board.sqlite"));
+      db.exec(
+        "CREATE TABLE records(id TEXT PRIMARY KEY,data TEXT NOT NULL);CREATE TABLE documents(id TEXT PRIMARY KEY,data TEXT NOT NULL);CREATE TABLE config(key TEXT PRIMARY KEY,data TEXT NOT NULL);",
+      );
+      db.prepare("INSERT INTO records VALUES (?,?)").run(
+        legacy.id,
+        JSON.stringify(legacy),
+      );
+      db.prepare("INSERT INTO config VALUES (?,?)").run(
+        "settings",
+        JSON.stringify({
+          timezone: "Europe/Paris",
+          documentsSubdir: "legacy-documents",
+        }),
+      );
+      db.close();
+    },
+  });
+  await f.setup();
+  const board = await f.request("/api/board");
+  assert.equal(board.data.opportunities[0].id, legacy.id);
+  assert.equal(board.data.opportunities[0].revision, 7);
+  assert.equal(board.data.settings.timezone, "Europe/Paris");
+  assert.equal(board.data.settings.documentsSubdir, "legacy-documents");
+  assert.equal(board.data.settings.theme, "forest");
+  assert.deepEqual(board.data.tasks, []);
+  const task = await f.request("/api/tasks", {
+    method: "POST",
+    body: { title: "Use retained opportunity", opportunityId: legacy.id },
+  });
+  assert.equal(task.status, 201);
+  await f.restart();
+  await f.login();
+  assert.equal(
+    (await f.request("/api/tasks")).data.tasks[0].opportunityId,
+    legacy.id,
+  );
 });
