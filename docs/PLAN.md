@@ -12,13 +12,13 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 
 ## Confirmed direction
 
-- A custom browser-based Kanban board for tracking job opportunities from identification through hire or rejection.
-- Accessible across several devices through a privately hosted service.
-- Easy to start and stop, with records and documents surviving shutdowns and upgrades.
-- Docker is an implementation detail: routine operation uses a single launcher command or host shortcut, with no manual Compose, mount, or environment-file editing.
-- Optional, pluggable AI support for identification, fit review, and document generation. Choose the provider later.
-- Automatically dated stages with editable dates, optional notes, and a combined opportunity summary.
-- Configurable document storage and a reusable library of previous JDs, CVs, and other evidence.
+- [x] A custom browser-based Kanban board for tracking job opportunities from identification through hire or rejection.
+- [x] Accessible across several devices through a privately hosted service.
+- [x] Easy to start and stop, with records and documents surviving shutdowns and upgrades.
+- [x] Docker is an implementation detail: routine operation uses a single launcher command or host shortcut, with no manual Compose, mount, or environment-file editing.
+- [x] Optional, pluggable AI support for identification, fit review, and document generation. Choose the provider later. *(Career Buddy supports OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs; Stage 1 AI extraction and per-stage toggles remain open.)*
+- [x] Automatically dated stages with editable dates, optional notes, and a combined opportunity summary.
+- [x] Configurable document storage and a reusable library of previous JDs, CVs, and other evidence.
 
 Initial assumption: one person using the board across several devices. Shared team access and unrelated project workflows can be considered later.
 
@@ -26,51 +26,65 @@ Initial assumption: one person using the board across several devices. Shared te
 
 One card represents one application opportunity, including a stable ID so repeat applications to the same employer remain distinct. Cards show employer, role, current stage, priority, deadline, next action/date, and time in stage. Support drag-and-drop and a stage selector, plus a list view for smaller screens. Search/filter by employer, role, stage, outcome, tags, deadline, and overdue action.
 
+- [x] Opportunity cards with stable ID, employer, role, current stage, priority, deadline, next action/date, and time in stage.
+- [x] Drag-and-drop Kanban board, stage selector in details, and a separate list view (`#/opportunities`).
+- [x] Search by employer, role, tags, and location; filter by active, completed, and specific outcomes.
+- [ ] Dedicated toolbar filters for stage, tags, deadline, and overdue action.
+
 | Stage | Information and behaviour |
 | --- | --- |
-| 1. Identification | Add a URL, upload a PDF/DOCX, or paste JD text. Capture role, employer, job reference, source, location, working arrangement, salary/rate/currency, employment type, contact, closing date, application route, requirements, and source documents. Unknown fields remain visibly unknown. |
-| 2. Review | Optional AI-assisted comparison against selected career evidence and preferences. Record strengths, gaps, questions, recommendation, and the user's proceed/ignore decision with an optional reason. Allow proceed, ignore, or defer. |
-| 3. Generate CV and cover letter | Select approved reference material and a template; create versioned drafts. Allow existing documents to be attached instead, and mark a cover letter as not required. |
-| 4. Application review | Read and revise the application pack, supporting statements, and application answers. Record which exact document versions are approved. |
-| 5. Application submitted | Explicitly record submission date, application route, reference/receipt, and the exact submitted pack. Reaching this stage is a user action; moving a card does not submit an application externally. |
-| 6. Communications and interviews | Record communications and any number of interview/assessment entries. Each has its own type, scheduled date, status, contacts, preparation, notes, documents, and follow-up. |
-| 7. Final interview | A milestone associated with a particular interview entry. Retain earlier interviews; support more than one final-stage meeting without losing history. |
-| 8. Outcome | Hired or rejected, with date, reason/feedback where known, and relevant documents. Also support ignored, withdrawn, and role closed. Record an offer and its decision separately so an offer is not automatically counted as a hire. |
+| 1. Identification | [x] Add a URL, upload a PDF/DOCX, or paste JD text. Capture role, employer, job reference, source, location, working arrangement, salary/rate/currency, employment type, contact, closing date, requirements, and source documents. Unknown fields remain visibly unknown.<br>[ ] Dedicated `applicationRoute` field (currently captured in notes/description). |
+| 2. Review | [x] Optional AI-assisted comparison against selected career evidence (via Career Buddy "Am I a good fit?" prompt) and manual proceed/ignore/defer transitions with notes.<br>[ ] Dedicated structured fields for strengths, gaps, questions, recommendation, user-defined fit criteria, and proceed/ignore/defer decision reason outside chat/notes. |
+| 3. Generate CV and cover letter | [x] Select reference material in Career Buddy and generate versioned editable `.docx` and `.md` drafts; allow existing documents to be uploaded/attached instead.<br>[ ] Template selection preserving custom layout/page targets, PDF generation, and an explicit "cover letter not required" toggle. |
+| 4. Application review | [x] Read and revise drafts in Career Buddy or upload revised versions; mark individual document versions as `draft`, `approved`, or `submitted`.<br>[ ] Dedicated fields for supporting statements / application answers and formal application-pack approval grouping. |
+| 5. Application submitted | [x] Reaching this stage is a user action; moving a card does not submit an application externally. Submitted documents are preserved as immutable snapshots.<br>[ ] Dedicated submission receipt/reference and application route fields on the submission record, and explicit linking of a multi-document submitted pack to the submission event. |
+| 6. Communications and interviews | [x] Record communications and any number of interview/assessment entries with type, scheduled date, status, contacts, preparation/notes, and revision history.<br>[ ] Per-activity document attachments, dedicated follow-up field on activities, explicit `incoming`/`outgoing` direction and channel on communications, custom interview types, and `rescheduled` as a distinct status value. |
+| 7. Final interview | [x] A milestone associated with a particular interview entry (`isFinal`). Retain earlier interviews; support more than one final-stage meeting without losing history. |
+| 8. Outcome | [x] Hired or rejected, with date, reason/feedback in notes, and relevant documents. Also support ignored, withdrawn, and role closed.<br>[ ] Record an offer and its decision separately so an offer is not automatically counted as a hire. |
 
-Ignored opportunities close directly from Review. Rejection, withdrawal, or role closure can occur at any stage. The default board shows active opportunities; a completed view retains closed records and their last active stage. Returning to an earlier stage or reopening an opportunity creates a new history event. Stages may be skipped when a hiring process does not require them; skipped stages do not acquire invented dates.
-
-Interview types: text/written, phone, video, in-person, technical assessment, and custom. Statuses include planned, completed, cancelled, and rescheduled. Communications have incoming/outgoing direction and channel. Recording a communication does not send it.
+- [x] Ignored opportunities close directly from Review. Rejection, withdrawal, or role closure can occur at any stage.
+- [x] The default board filter shows active opportunities; completed/outcome filters retain closed records.
+- [x] Returning to an earlier stage or reopening an opportunity creates a new history event.
+- [x] Stages may be skipped when a hiring process does not require them; skipped stages do not acquire invented dates.
+- [x] Recording a communication does not send it externally.
 
 ## Dates, notes, and summaries
 
-- On each stage transition, save the actual recording timestamp and a default effective date/time. The user can correct the effective date without erasing when the event was recorded or its correction history.
-- Keep a separate event for each visit to a stage, with entry/exit dates and optional notes. Never overwrite an earlier visit when a card moves backwards.
-- Separate scheduled interviews, deadlines, and next actions from completed events. Store timestamps consistently and display them in the configured timezone, initially Europe/London; retain date-only values as dates.
-- Save notes on the relevant stage or event. The Summary tab assembles all notes, decisions, communications, interviews, and document links chronologically, with source dates. This works without AI.
-- Optional AI summaries are derived views linked to their source events and show when they were generated. New events make an older summary visibly out of date.
-- Provide overdue/deadline indicators and next-action dates. Email/calendar reminders are a later integration; the stopped service does not process background reminders or AI work.
+- [x] On each stage transition, save the actual recording timestamp and a default effective date/time. The user can correct the effective date without erasing when the event was recorded or its correction history.
+- [x] Keep a separate event for each visit to a stage, with entry dates and optional notes. Never overwrite an earlier visit when a card moves backwards.
+- [x] Separate scheduled interviews, deadlines, and next actions from completed events. Store timestamps consistently and display them in the configured timezone, initially Europe/London; retain date-only values as dates.
+- [x] Save notes on the relevant stage or event. The Summary tab assembles all notes, decisions, communications, interviews, and document links chronologically, with source dates. This works without AI.
+- [ ] Optional AI summaries as derived views linked to their source events that show when they were generated and visibly mark themselves out of date when new events arrive. *(Currently Career Buddy provides interactive chat rather than a cached derived summary view.)*
+- [x] Provide overdue/deadline indicators and next-action dates (plus a dedicated To-do list and Dashboard queues).
+- [ ] Email/calendar reminders (later integration; the stopped service does not process background reminders or AI work).
 
 ## Main screens
 
-1. Board/list: active opportunities, search, filters, add opportunity, next actions.
-2. Opportunity detail: overview; stages/timeline; documents; communications/interviews; summary. Keep job source and employer/role identity easy to find.
-3. Reference library: approved career evidence, master CVs, role-specific CVs, templates, prior JDs, supporting statements, and interview stories. Tag and select material for an individual AI task.
-4. Settings: document locations, reference sources, AI connection and stage controls, timezone, backups, and export/import.
+1. [x] **Board/list (plus Dashboard & To-do list added in v0.3):** active opportunities, search, filters, add opportunity, next actions, live statistics, and manual/linked tasks.
+2. [x] **Opportunity detail:** overview; stages/timeline; documents; communications/interviews; summary; Career Buddy. Keeps job source and employer/role identity easy to find.
+3. [x] **Reference library (`Career library`):** store CVs, prior JDs, certificates, project notes, and other career material; prepare local text chunks and select material for individual Career Buddy tasks.
+   - [ ] Tagging and structured categorisation of library items (e.g. master CVs, role-specific CVs, templates, supporting statements, interview stories).
+4. [x] **Settings:** profile name/photo, themes & custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
+   - [ ] Record import / backup restore UI and per-stage AI enablement controls.
 
 ## Document storage and existing material
 
-Separate the board database, application documents, reference library, and backups. A document record tracks its purpose, version, source, storage location, and relationship to an opportunity or generation task. Mark draft, approved, and submitted versions explicitly. Preserve submitted files as snapshots so later edits cannot change the recorded submission.
-
-The current workspace has career evidence and approved assets under Career Transition, and current/historical application documents under Work/Applications. These are candidate reference sources, not an instruction to import every historical file. Preserve originals and let the user choose what becomes approved evidence.
+- [x] Separate the board database, application documents, reference library, and backups.
+- [x] A document record tracks its kind/purpose, version, sha256 hash, storage root, relative path, and relationship to an opportunity or AI generation task.
+- [x] Mark `draft`, `approved`, and `submitted` versions explicitly. Preserve `submitted` files as immutable snapshots so later edits cannot change the recorded submission.
+- [x] Preserve originals and let the user choose what becomes Career Buddy source evidence.
 
 Offer two document actions:
 
-- Upload/copy into managed storage: available from every device through the board.
-- Attach an existing document: use a configured server-accessible folder or supported cloud connector, with availability shown. A Google Docs link remains a cloud document rather than being treated as a local file.
+- [x] Upload/copy into managed storage: available from every device through the board.
+- [ ] Attach an existing document in-place from a configured server-accessible folder or supported cloud connector (e.g. Google Docs link remaining a cloud document with availability shown).
 
-Settings should expose an application-document root, one or more reference locations, and a backup destination. In a hosted installation, filesystem roots must be accessible to the host. A folder on the Mac is only usable by a separate server when it is mounted/synchronised there or connected through a suitable service. Selecting a folder on a client device does not give a remote server ongoing access to it.
+Storage configuration and folder browsing:
 
-The app owns document-location preferences. Use a server-side folder browser within available locations, clearly labelled as folders on the hosting machine. Browser uploads remain a separate way to bring files from the current device into the library. Save and validate preferences so they survive restarts. Docker exposure of a new host location is handled by the launcher as described below.
+- [x] Settings exposes an application-document root, reference subfolder, backup destination, and pending host document root handoff.
+- [x] Save and validate preferences so they survive restarts; retain earlier document roots when a new host root is applied.
+- [ ] Multiple independent reference locations (e.g. read-only reference roots outside the main document root).
+- [ ] Server-side folder browser within available locations on the hosting machine.
 
 Proposed managed layout:
 
@@ -87,104 +101,100 @@ Proposed managed layout:
       correspondence/
 ```
 
-Keep document paths relative to the configured storage root where possible. Detect missing/offline files and allow relinking. Changing storage roots needs an explicit attach-existing or copy-and-validate workflow, retaining the old location until migration is checked.
-
-Imports can identify likely duplicates using document hashes and job reference/URL/employer-role matches. Show possible duplicate opportunities for review; never silently merge separate applications.
+- [x] Keep document paths relative to the configured storage root (`opportunities/<id>/` and `references/`).
+- [ ] Use `<stable-id>-<company>-<role>/` folder naming with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories.
+- [ ] Detect missing/offline files in the UI with a relinking workflow, and provide a guided attach-existing or copy-and-validate migration workflow when changing storage roots.
+- [ ] Previewed import of existing folders (`Career Transition`, `Work/Applications`) with duplicate detection using document hashes and job reference/URL/employer-role matches.
 
 ## Pluggable AI design
 
-Keep the core board fully usable with AI disabled. Provide one adapter boundary with capabilities for extracting opportunity details, reviewing fit, and generating documents. Support provider/model configuration and independent enablement for stages 1–3.
-
-Stage 1 returns structured fields with source passages, missing information, and uncertainties. Preserve a copy of the JD because live listings may change or disappear. If a link cannot be retrieved, accept pasted text or an uploaded document; offer OCR when needed for scanned PDFs.
-
-Stage 2 evaluates against user-defined criteria and selected reference evidence. Show must-have requirements, supported matches, gaps, and questions. A recommendation should be explained with evidence; the user decides whether to proceed or ignore. Previous JDs provide role context and do not establish the applicant's skills.
-
-Stage 3 uses selected approved career evidence and templates. Preserve the chosen CV structure and page target; generate editable output and PDF. Keep claims traceable to reference evidence, identify unresolved gaps, and save each generation as a new version. Include document rendering/page-fit review before marking the pack ready.
-
-Every AI run records provider/model, task and prompt version, selected source versions, output, status, and usage/cost if available. Credentials remain on the server. Support queued, running, completed, failed, cancelled, and interrupted states. After a shutdown, show interrupted work and offer retry; do not silently repeat a paid generation or create duplicate document versions.
-
-An external-assistant route can initially export a task pack and import its result. A later API or agent integration can use the same task/result format. An existing chat does not automatically become connected to the hosted board.
+- [x] Keep the core board fully usable with AI disabled.
+- [x] Provide a clean provider adapter boundary (OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs) with automatic model discovery and connection testing.
+- [ ] Independent per-stage enablement toggles for Stages 1–3.
+- [x] Stage 1 deterministic public URL lookup (`JobPosting` structured data + visible HTML) with source provenance and fallback to pasted text or uploaded document.
+- [ ] Stage 1 AI-assisted extraction returning structured fields with source passages, missing information, uncertainties, full original HTML/PDF page snapshots, and OCR for scanned PDFs.
+- [x] Stage 2 fit, salary, and skills evaluation in Career Buddy against selected reference evidence, separating supported matches from gaps and questions while leaving decisions to the user.
+- [ ] User-defined persistent fit criteria profile for Stage 2 reviews.
+- [x] Stage 3 CV and cover letter drafting in Career Buddy using selected career evidence, saving editable `.docx` and `.md` versions without overwriting submitted files.
+- [ ] Stage 3 template layout/font/table preservation, page-target fit review inside the app, and direct PDF generation.
+- [x] Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.
+- [ ] Background AI task queue recording prompt version, token/cost usage, and `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted` states across restarts.
+- [ ] External-assistant task-pack export and result import.
 
 ## Launcher and first-run experience
 
-The normal user interface is the web app. Package it with a host launcher so Docker commands and configuration files are maintained automatically. The commands below are proposed interface names, not commands available yet.
+The normal user interface is the web app, packaged with a host launcher so Docker commands and configuration files are maintained automatically:
 
 ```text
 ./board start       # Start or open the existing instance
 ./board stop        # Stop without deleting data
 ./board restart     # Apply pending host-folder changes and restart
 ./board status      # Show running/stopped state and the board address
+./board logs        # Show container logs
 ```
 
-Supply a double-click Start Board shortcut where supported by the chosen host OS, using the same launcher. On a remote/headless host, show the board URL; open the browser automatically only when running on a host with a suitable desktop. Starting an already running instance should reuse it.
-
-First launch should:
-
-1. Check Docker/Compose availability and whether the engine is running. Where supported, start an already installed desktop engine; otherwise give a specific setup instruction. One-time installation, host folder-sharing permissions, or remote-access provisioning may still need host setup, which cannot be settled until the host is chosen.
-2. Choose persistent state in an OS-appropriate local application-data directory and default documents under the host user's `OpportunityBoard` folder. Keep the live database separate from any subsequently selected cloud-synchronised document directory.
-3. Allow an optional first-start document-folder argument, such as `./board start --files "/path/to/applications"`, or a simple first-run prompt. Accept the default without requiring custom input. Remember the choice rather than asking every time.
-4. Create the default application-owned folders, validate configured locations, generate mount configuration, and start the packaged service. Use plain-language errors for missing folders, unavailable drives, write permissions, and occupied ports. Never silently replace a missing configured drive with an empty default location.
-5. Wait for a health check, then display/open the board address and its initial in-app setup screen. Subsequent starts use the saved configuration and existing data.
-
-There are two levels of folder configuration:
-
-- Within folders already exposed to the app, users can choose document/reference/backup subfolders in Settings without restarting Docker. Changing an existing document root still uses the attach-existing or copy-and-validate workflow.
-- An entirely new host folder must be exposed when the container is recreated. Settings can record the requested host path as pending; the launcher validates it, updates mounts, and applies it on `./board restart` or the next start. Until then, keep the current location active. The app cannot browse or validate an unexposed host directory itself. Do not advertise arbitrary host-folder access as an immediate in-app setting.
-
-Use a structured pending-configuration file in persistent state for this handoff, not shell commands supplied by the web app. The host launcher validates requested paths and permissions. Expose selected document roots for writing and reference-only roots as read-only where appropriate. Do not require the web container to control Docker or mount the entire host filesystem just to support folder settings.
-
-This keeps normal operation to one action. Adding a host folder outside the currently available locations requires one launcher restart, without manual Docker editing. In a remote installation that action runs on the hosting machine or its management interface. Retain existing document locations until any requested migration is validated; do not orphan files by replacing a mount prematurely.
+- [x] `./board start`, `./board stop`, `./board restart`, `./board status`, and `./board logs` implemented in `./board` and `scripts/launcher.py`.
+- [x] Double-click macOS shortcuts (`scripts/Start Board.command` and `scripts/Stop Board.command`).
+- [x] Check Docker/Compose availability and start an installed Docker Desktop where supported; give plain-language setup instructions otherwise.
+- [x] Store persistent SQLite state in an OS-appropriate local application-data directory (`~/Library/Application Support/OpportunityBoard` on macOS, `~/.local/share/opportunity-board` on Linux) separate from `~/OpportunityBoard` documents.
+- [x] Support `--files "/path/to/applications"`, `--port`, `--bind`, and `--no-open` on `./board start`, remembering choices across runs.
+- [x] Create default application-owned folders, validate configured locations and write permissions, generate mount configuration, and refuse to silently replace a missing configured drive with an empty default location.
+- [x] Wait for `/api/health`, then display/open the board address with the initial `#setup=<token>` credential when needed.
+- [x] Two-level folder configuration: immediate in-app subfolder updates inside exposed roots, and structured `pending-storage.json` handoff for new host folders applied on `./board restart` while retaining earlier mounts.
 
 ## Hosting and persistence proposal
 
-Recommend a responsive TypeScript/React frontend, a small Node.js API and background task runner, and SQLite on the host's local disk for the initial single-user service. All devices use the API; none opens the database file directly. Revisit PostgreSQL if hosting requires multiple application replicas or the product expands to substantial concurrent use.
-
-Package the service with Docker Compose, persistent database storage, and document mounts managed by the launcher. Add private authenticated access through the chosen host's VPN or an HTTPS endpoint. The hosting machine and access route remain to be chosen. Access from different devices should serve documents through the application rather than depend on device-specific filesystem paths. Check record revisions on save to prevent a stale browser tab silently overwriting a newer edit from another device.
-
-Provide simple Start Board / Stop Board controls through the host's management interface or launcher. Start/stop must not delete data. When stopped, the board is unavailable on all devices; stopping the board does not necessarily power off or stop billing for the host. A stopped application cannot restart itself from its own unavailable webpage.
-
-Persist opportunities, event history, notes, settings, document metadata, approved reference selections, and AI task state independently of the running container. Documents also live outside the container's disposable layer. Keep the live database on server-local storage; use consistent snapshots for backup and cloud copying rather than synchronising an actively written database across devices.
-
-Provide automated backups while running, a backup action before upgrades, and a portable export containing records, history, documents or a clearly identified external-document manifest, and configuration excluding secrets. Restoring a backup must restore document associations as well as cards. External cloud documents are only included in a full backup when explicitly exported/copied.
+- [x] Responsive TypeScript/React frontend, Node.js API, and local SQLite (`node:sqlite` with WAL mode) accessed exclusively through the API.
+- [x] Packaged with Docker Compose, persistent database storage, and launcher-managed document mounts running with the host user's UID/GID.
+- [x] Optimistic concurrency (`revision` checks returning `409 Conflict`) so a stale browser tab on another device cannot silently overwrite newer edits.
+- [x] Persist opportunities, event history, notes, settings, profile, tasks, document metadata, extracted text chunks, and Career Buddy chat history independently of the container.
+- [x] On-demand consistent SQLite + managed document backup (`POST /api/backup`) and secret-free JSON record/manifest export (`GET /api/export`).
+- [ ] Automated scheduled backups while running, automatic pre-upgrade backup hook in the launcher, and guided portable restore/import with document reconciliation.
+- [ ] Production remote host selection and authenticated HTTPS reverse proxy or VPN deployment configuration.
 
 ## Initial data model
 
-- Opportunity: identity, source, job details, current stage, outcome, tags, priority, next action, revision.
-- Stage event: opportunity, transition, effective and recording timestamps, corrections, notes.
-- Activity: communication or interview, type/channel, dates, participants, status, notes, follow-up, final-stage marker.
-- Document/version: opportunity or library association, type, storage reference, version/hash, approval state, submitted snapshot association.
-- AI task: capability, provider/model, inputs and source versions, lifecycle, outputs, errors, usage.
-- Settings and reference profiles: approved sources, templates, fit criteria, storage providers, display preferences.
+- [x] **Opportunity:** identity, source, job details, current stage, outcome, tags, priority, next action, revision.
+- [x] **Stage event:** opportunity, transition, effective and recording timestamps, corrections, notes.
+- [x] **Activity:** communication or interview, type, dates, participants, status, notes, revision history, final-stage marker.
+- [x] **Document/version:** opportunity or library association, kind, storage root & relative path, version, sha256 hash, approval state (`draft`/`approved`/`submitted`), generation metadata.
+- [x] **Task & Profile (added in v0.3):** persisted to-do items with due dates and opportunity links; workspace profile name and avatar.
+- [x] **Career Buddy chat & prepared chunks (added in v0.4):** provider configuration, locally extracted document text chunks, conversation messages, reviewed change proposals, and saved draft references.
+- [ ] **Standalone AI task table & reference profiles:** background task lifecycle/usage records, reusable CV/cover templates, and saved fit criteria profiles.
 
 ## Delivery sequence
 
-1. Core workflow: board/list, opportunity detail, all stages/outcomes, date history, notes/summary, interviews/comms, uploads/reference library, document version labels, and export/import. Include minimal private hosting, persistent storage, and start/stop from the outset.
-2. Existing-workflow integration: configure the selected document/reference locations, add a previewed import of chosen historical records, and refine templates and document handling. Add backup/restore verification and concurrent-device editing checks before relying on the service for live applications.
-3. AI integration: implement the task/result contract and selected adapter, then extraction, evidence-based fit review, and template-based generation in that order. Keep per-stage controls and human review of outputs.
-4. Optional extensions: calendar/email integrations, reminders, richer reporting, more storage providers, and additional project templates if needed.
+1. [x] **Core workflow:** board/list, opportunity detail, all stages/outcomes, date history, notes/summary, interviews/comms, uploads/reference library, document version labels, local backup, and JSON export, with private local hosting, persistent storage, and launcher start/stop.
+2. [ ] **Existing-workflow integration:**
+   - [x] Concurrent-device editing checks (`409` revision handling) and host-folder retention across restarts.
+   - [ ] Previewed import of chosen historical records (`Career Transition`, `Work/Applications`), attach-existing file workflow, duplicate detection, and guided backup/restore verification.
+3. [ ] **AI integration:**
+   - [x] Multi-provider adapter, model discovery, local PDF/DOCX/text chunk retrieval, grounded opportunity chat, reviewed record updates, fit/salary/skills prompts, and versioned Word/Markdown draft generation.
+   - [ ] Stage 1 AI extraction, per-stage controls, template-preserving generation, PDF export, and external-assistant task-pack export/import.
+4. [ ] **Optional extensions:** calendar/email integrations, reminders, richer reporting, cloud storage providers (Google Drive/Docs), vector DB / Obsidian / directory sources, and Career Buddy sidebar chat.
 
 ## Acceptance examples
 
-- Create an opportunity on one device; reopen it on another with the same documents and history.
-- Upload a JD and save unknown job fields without inventing values; complete them later.
-- Move a card, correct its date, move it backwards, and verify that the complete history remains readable.
-- Ignore an opportunity during Review or record rejection before interview without forcing it through later stages.
-- Add a phone screen, two video interviews, an assessment, and an in-person final; reschedule one without losing its previous date.
-- Read/export all notes and communications as one chronological summary with AI disabled.
-- Submit version 2 of a CV; generate version 3 later; the submission record still opens the original version 2 snapshot.
-- Stop and restart the service; verify cards, dates, notes, attachments, settings, and task state survive. Interrupted AI work must not silently rerun.
-- Restore a backup into a clean installation and verify the same records and managed documents are accessible.
-- Edit the same card from two devices and receive a clear conflict/reload choice rather than silently losing one edit.
-- Start with the default launcher command, stop, and start again without editing Docker files or re-entering saved folders; verify the same board and documents reopen.
-- Change a document subfolder in Settings and verify it persists. Request a new host folder outside current mounts, apply it with one launcher restart, and verify existing document links still work.
-- Start while a configured drive is unavailable and receive an actionable message rather than an apparently empty replacement board or document library.
+- [x] Create an opportunity on one device; reopen it on another with the same documents and history.
+- [x] Upload a JD and save unknown job fields without inventing values; complete them later.
+- [x] Move a card, correct its date, move it backwards, and verify that the complete history remains readable.
+- [x] Ignore an opportunity during Review or record rejection before interview without forcing it through later stages.
+- [x] Add a phone screen, two video interviews, an assessment, and an in-person final; reschedule one without losing its previous date.
+- [x] Read/export all notes and communications as one chronological summary with AI disabled.
+- [x] Submit version 2 of a CV; generate version 3 later; the submission record still opens the original version 2 snapshot.
+- [x] Stop and restart the service; verify cards, dates, notes, attachments, settings, and task state survive. Interrupted AI work does not silently rerun.
+- [ ] Restore a backup into a clean installation through a guided restore workflow and verify the same records and managed documents are accessible *(backups are created with SQLite + files, but guided restore is not yet implemented)*.
+- [x] Edit the same card from two devices and receive a clear conflict/reload choice rather than silently losing one edit.
+- [x] Start with the default launcher command, stop, and start again without editing Docker files or re-entering saved folders; verify the same board and documents reopen.
+- [x] Change a document subfolder in Settings and verify it persists. Request a new host folder outside current mounts, apply it with one launcher restart, and verify existing document links still work.
+- [x] Start while a configured drive is unavailable and receive an actionable message rather than an apparently empty replacement board or document library.
 
 ## Remaining choices
 
-- Host: existing computer/home server/NAS or a private cloud server; confirm its OS, persistent disk, and remote-access method so the one-command launcher and optional desktop shortcut can be tailored appropriately.
-- Storage: which existing folders should be connected, which documents should be copied into managed storage, and whether native Google Docs editing/export is required initially.
-- AI: provider and model later; the adapter contract can be designed first.
-- Document templates: identify the initial approved CV/cover templates and their layout requirements before implementing generation.
+- [ ] **Host:** existing computer/home server/NAS or a private cloud server; confirm its OS, persistent disk, and remote-access method so the one-command launcher and optional desktop shortcut can be tailored appropriately.
+- [ ] **Storage:** which existing folders should be connected, which documents should be copied into managed storage, and whether native Google Docs editing/export is required initially.
+- [x] **AI adapter contract:** implemented in Career Buddy supporting OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible servers (specific live provider/model choice remains configurable by the user in Settings).
+- [ ] **Document templates:** identify the initial approved CV/cover templates and their layout requirements before implementing template-preserving generation and PDF export.
 
 ## Technical references
 
