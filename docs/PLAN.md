@@ -7,7 +7,7 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 - [x] Separate embedding provider, endpoint, model and server-side API key configuration from Career Buddy chat settings (OpenAI, Ollama and custom compatible endpoints). No embedding requests or indexing are triggered by saving.
 - [x] Bundle a pinned, checksum-verified local MiniLM embedding model in Docker with offline CPU inference and a fictional-text self-test. Use it by default for new embedding configurations; preserve saved external providers.
 - [ ] External embedding endpoint capability tests and embedding-specific model discovery.
-- [ ] Decision model placeholder: independently configurable provider/model for criteria-based opportunity assessments (for example, “does this opportunity fit my criteria?”). Define saved user criteria, evidence, uncertainty and reviewable recommendations; keep this separate from chat and embedding models. Detailed contract and implementation remain open.
+- [x] Independent decision-model settings and a saved required/preferred criteria profile. Opportunity Fit assessment records met/unmet/unknown results, evidence IDs, follow-up questions and a reviewable recommendation; retains criteria/model snapshots and marks changed inputs out of date. No automatic stage/outcome changes.
 - [x] Semantic search step 2: persistent SQLite vectors from the bundled MiniLM model, explicit library/read-only source selection, background progress, cancellation, retry, restart persistence, source-change invalidation and removal/reset cleanup. No automatic indexing or original-file changes.
 - [x] Semantic search step 3: combine local semantic and keyword retrieval in Career Buddy, scoped to selected sources, with passage references, visible fallback reasons, source freshness checks and fictional retrieval quality tests. Library list filtering remains metadata-only.
 - [ ] External embedding endpoint indexing and optional custom vector database integration. The initial built-in vector store needs no additional service.
@@ -16,7 +16,7 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 - [ ] Extend in-place read-only sources to independently mounted general directories and multiple roots.
 - [ ] Attach a host directory as a persistent in-place source. Folder uploads copy selected files into managed library storage instead.
 - [x] Drag and drop files and directories to the Career Library, with a warning above 500 files and optional manually continued batches of 500.
-- [ ] Career Buddy side bar option - open a chat which will allow you to describe projects and experience, which career buddy will turn into a CV bullet or Cover letter highlight.
+- [x] Standalone Career Buddy sidebar workspace: realistic encouragement coaching, multi-turn STAR stories and CV/cover highlights, reviewed recruiter intake with linked tasks, and explicit-target opportunity updates. Conversations/proposals persist; changes need confirmation.
 
 ## Confirmed direction
 
@@ -125,7 +125,7 @@ Proposed managed layout:
 - [x] Stage 1 deterministic public URL lookup (`JobPosting` structured data + visible HTML) with source provenance and fallback to pasted text or uploaded document.
 - [ ] Stage 1 AI-assisted extraction returning structured fields with source passages, missing information, uncertainties, full original HTML/PDF page snapshots, and OCR for scanned PDFs.
 - [x] Stage 2 fit, salary, and skills evaluation in Career Buddy against selected reference evidence, separating supported matches from gaps and questions while leaving decisions to the user.
-- [ ] User-defined persistent fit criteria profile for Stage 2 reviews.
+- [x] User-defined persistent fit criteria profile for Stage 2 reviews, with revision conflicts and assessment snapshots.
 - [x] Stage 3 CV and cover letter drafting in Career Buddy using selected career evidence, saving editable `.docx` and `.md` versions without overwriting submitted files.
 - [ ] Stage 3 template layout/font/table preservation, page-target fit review inside the app, and direct PDF generation.
 - [x] Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.

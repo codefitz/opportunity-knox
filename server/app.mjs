@@ -684,6 +684,7 @@ export function createApp(options = {}) {
     saveDocument,
     buddyFetch: options.buddyFetch,
     embeddingFn: options.embeddingFn,
+    createOpportunity,putTask,
   });
   obsidian = createObsidianIntegration({
     dataDir,
@@ -1630,6 +1631,10 @@ export function createApp(options = {}) {
             tasks: listTasks(),
             careerBuddy: buddy.publicSettings(),
             conversations: buddy.exportMessages(),
+            decisionAssessments: buddy.exportAssessments(),
+            buddyWorkspace:buddy.exportWorkspace(),
+            decisionSettings: buddy.publicDecisionSettings(),
+            fitCriteria: getConfig("fitCriteria"),
             opportunities: listRecords(),
             documents: getDocuments().map(publicDocument),
           });
@@ -1692,7 +1697,7 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
               for (const table of [
                 "records",
@@ -1702,6 +1707,8 @@ export function createApp(options = {}) {
                 "buddy_messages",
                 "document_text",
                 "document_vectors",
+                "decision_assessments",
+                "standalone_messages",
               ]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";

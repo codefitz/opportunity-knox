@@ -142,3 +142,21 @@ The production build and all 112 Node tests plus 18 launcher tests pass. Fiction
 In a read-only production container with networking disabled, the real bundled MiniLM model ranked the expected passage first for three fictional synonym queries: people management, infrastructure modernisation and information stewardship. Hybrid retrieval included each expected passage within a 140-character budget, retaining source/passage references; clearing the index produced an honest no-index fallback. This is a small regression corpus, not an accuracy benchmark for personal career documents. No personal documents were indexed or sent to a model during these tests. Browser inspection remained unavailable (`browser.user is unavailable`), so visual confirmation is pending.
 
 The tested image was deployed after an online SQLite backup. The service is healthy; checksums of records, document metadata, tasks, chats, prepared text, all 1,617 saved vector sources and configuration matched the pre-update snapshot. The vault remained mounted read-only. Deployment did not start an indexing job. The existing completed indexing job had 142 sources with no readable text; these need extraction/OCR before semantic indexing.
+
+
+## Criteria and independent decision-model assessments
+
+The production build and all 115 Node tests plus 18 launcher tests pass. Fictional tests validate criterion IDs/priorities/revision conflicts; complete per-criterion results; real allowed citation IDs; no proceed with unmet/unknown required criteria; independent model configuration and private API keys; selected source context; rejection of record edits; unchanged opportunity revision; criteria and changed-source staleness; persisted historical snapshots; secret-safe exports; and assessment table inclusion in full backups.
+
+A read-only production container with networking disabled ran the authenticated workflow using fictional records and a simulated provider. It verified independent model activation without enabling chat, unknown criteria and follow-up questions, saved assessments across restart, unchanged opportunity state, stale criteria and secret-safe exports. No live AI provider or real career documents were used in this verification. Live-provider assessment quality and browser visual checks remain pending.
+
+The tested decision-review image was deployed after an online SQLite backup. Docker reported healthy; checksums of records, documents, tasks, chats, prepared text, vectors and configuration matched the pre-update snapshot. The vault remained read-only. The new assessment table was empty and the decision model remained disabled. Browser inspection returned `browser.user is unavailable`; no live provider or user-data assessment was run.
+
+
+## Standalone Career Buddy workspace
+
+The production build and all 116 Node tests plus 18 launcher tests pass. New fictional integration coverage verifies authentication, coaching prompt constraints, no coach record edits, no update proposal without an explicit target, reviewed STAR library saves, idempotent saves, recruiter intake with linked tasks, no creation before confirmation, rejection update confirmation, stale-update conflicts, history across restart, JSON export and full backup table inclusion.
+
+An isolated read-only production container with networking disabled and a simulated provider exercised recruiter intake, verified no opportunity existed before confirmation, saved one opportunity and linked task, repeated confirmation without duplicates, restarted and verified applied conversation history and export. No real career documents or live AI calls were used. Live-provider coaching/STAR quality and browser visual verification remain pending.
+
+The tested workspace image was deployed after an online SQLite backup. Docker reported healthy. Checksums for existing records, documents, tasks, opportunity chats, text/vector caches, decision assessments and configuration matched the pre-update snapshot; the vault remained read-only. The standalone history table was empty: no user-data conversation, document generation or opportunity update was run during deployment.

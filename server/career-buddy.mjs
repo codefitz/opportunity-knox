@@ -1,3 +1,5 @@
+import {createStandaloneBuddy} from "./standalone-buddy.mjs";
+import { createDecisionReview } from "./decision-review.mjs";
 import { createVectorIndex } from "./vector-index.mjs";
 import { randomUUID } from "node:crypto";
 import { embedLocal, LOCAL_MODEL } from "./local-embedding.mjs";
@@ -403,13 +405,20 @@ export function createCareerBuddy(ctx) {
     return [...new Set(value)];
   };
   const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
+  const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges});
+  const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
   return {
+    exportAssessments: decisions.exportAssessments,
+    exportWorkspace:workspace.exportMessages,
+    publicDecisionSettings: decisions.publicSettings,
     close: () => vectors.close(),
     exportMessages: () => getRows("buddy_messages"),
     publicSettings: () => publicBuddy(config()),
     indexDocuments,
     getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
+      if(await workspace.handle(path,method,req,res,{json,readBody}))return true;
+      if(await decisions.handle(path,method,req,res,{json,readBody}))return true;
       if (path === "/api/buddy/vector-index") {
         try {
         if (method === "GET") json(res,vectors.status());

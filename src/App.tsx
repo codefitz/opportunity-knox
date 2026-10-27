@@ -1,3 +1,5 @@
+import BuddyWorkspace from "./components/BuddyWorkspace";
+import DecisionReview, { FitCriteria } from "./components/DecisionReview";
 import VectorIndex from "./components/VectorIndex";
 import {
   useState,
@@ -92,13 +94,14 @@ import ProfileSettings, {
 import "./themes.css";
 
 type Page =
-  "dashboard" | "opportunities" | "board" | "todos" | "library" | "settings";
+  "dashboard" | "opportunities" | "board" | "todos" | "library" | "buddy" | "settings";
 const PAGE_LABELS: Record<Page, string> = {
   dashboard: "Dashboard",
   opportunities: "Opportunities",
   board: "Kanban board",
   todos: "To-do list",
   library: "Career library",
+  buddy: "Career Buddy",
   settings: "Settings",
 };
 function routePage(): Page {
@@ -657,6 +660,7 @@ export default function App() {
               { id: "board", label: "Kanban board", icon: LayoutGrid },
               { id: "todos", label: "To-do list", icon: ListTodo },
               { id: "library", label: "Career library", icon: FolderOpen },
+              { id: "buddy", label: "Career Buddy", icon: Sparkles },
               { id: "settings", label: "Settings", icon: Settings2 },
             ] as const
           ).map((item) => (
@@ -1149,6 +1153,7 @@ export default function App() {
             )}
           </main>
         )}
+        {page === "buddy" && <BuddyWorkspace onError={report} onChanged={()=>void load(true)} />}
         {page === "library" && (
           <Library
             onError={report}
@@ -1776,6 +1781,7 @@ function OpportunityDetail({
       <div className="detail-tabs" role="tablist">
         {[
           ["overview", "Overview"],
+          ["decision", "Fit assessment"],
           ["timeline", "Timeline & notes"],
           ["activities", "Interviews & comms"],
           ["documents", "Documents"],
@@ -1850,6 +1856,7 @@ function OpportunityDetail({
             }}
           />
         )}{" "}
+        {tab === "decision" && <DecisionReview opportunity={o} onError={onError} />}
         {tab === "summary" && <Summary o={o} timezone={timezone} />}
         {tab === "buddy" && (
           <CareerBuddy
@@ -5233,6 +5240,8 @@ function SettingsPage({
       </section>
       <CareerBuddySettings onError={onError} />
       <EmbeddingSettings onError={onError} />
+      <FitCriteria onError={onError} />
+      <CareerBuddySettings decision onError={onError} />
     </main>
   );
 }

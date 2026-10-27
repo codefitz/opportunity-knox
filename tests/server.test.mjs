@@ -2732,3 +2732,58 @@ test('Career Buddy uses hybrid excerpts only from selected sources, persists cov
  fail=true;const fallback=await buddyChat(f,op.id,{message:'What leadership evidence can I highlight?',documentIds:[source.id]});assert.equal(fallback.status,200);assert.equal(fallback.data.messages.at(-1).context.retrieval.reason,'model-unavailable');
  await f.restart();await f.login();const saved=(await f.request('/api/opportunities/'+op.id+'/buddy')).data.messages.find(m=>m.id===answer.id);assert.equal(saved.context.retrieval.mode,'hybrid');assert.ok(saved.sources[0].excerpts.length);
 });
+
+test('criteria assessments use independent private settings, persist snapshots, reject edits and become stale',async t=>{
+ let payload,output,sourceId;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply(output));}});await f.setup();
+ assert.equal((await f.request('/api/buddy/fit-criteria',{auth:false})).status,401);
+ const chat=(await f.request('/api/buddy/settings')).data;
+ const initial=(await f.request('/api/buddy/decision-settings')).data;
+ const c=await f.request('/api/buddy/decision-settings',{method:'PATCH',body:{revision:initial.revision,enabled:true,provider:'custom',baseUrl:'https://fictional-model.example/v1',model:'fictional-decision',apiKey:'fictional-decision-private'}});assert.equal(c.status,200);assert.equal(c.data.apiKey,undefined);
+ assert.deepEqual((await f.request('/api/buddy/settings')).data,chat);
+ const criteria={revision:1,items:[{id:'location',description:'London based role',priority:'required'},{id:'salary',description:'GBP 80,000 base or more',priority:'preferred'}]};
+ const saved=await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:criteria});assert.equal(saved.status,200);
+ assert.equal((await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:criteria})).status,409);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,location:'London'}})).data;
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional reference.txt',contentBase64:Buffer.from('Fictional career evidence.').toString('base64')}})).data;sourceId=doc.id;
+ const route='/api/buddy/decisions/'+op.id,body={revision:op.revision,criteriaRevision:saved.data.revision,documentIds:[doc.id]};
+ output={reply:JSON.stringify({recommendation:'consider',summary:'Location fits; salary unknown.',criteria:[{id:'location',status:'met',reason:'Role location is London.',sourceIds:[op.id],questions:[]},{id:'salary',status:'unknown',reason:'Salary is not listed.',sourceIds:[],questions:['What is the base salary?']}]})};
+ const result=await f.request(route,{method:'POST',body});assert.equal(result.status,200);assert.equal(result.data.assessment.results.length,2);assert.equal(result.data.assessment.stale,false);assert.equal(payload.criteria[0].description,'London based role');assert.ok(payload.excerpts.some(c=>c.sourceId===sourceId));
+ assert.equal((await f.request('/api/opportunities/'+op.id)).data.revision,op.revision);
+ const storedSource=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);writeFileSync(join(storedSource.storageRoot,storedSource.relativePath),'Fictional revised evidence.');assert.equal((await f.request(route)).data.assessments[0].stale,true);
+ const invalid=await f.request(route,{method:'POST',body:{...body,documentIds:['unselected']}});assert.equal(invalid.status,400);
+ output={...output,changes:[buddyChange()]};assert.equal((await f.request(route,{method:'POST',body})).status,502);
+ await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{...saved.data,items:[{...criteria.items[0],description:'Remote role'}]}});
+ await f.restart();await f.login();const old=(await f.request(route)).data.assessments[0];assert.equal(old.stale,true);assert.equal(old.criteria.items[0].description,'London based role');
+ const exported=await f.request('/api/export');assert.equal(exported.data.decisionAssessments.length,1);assert.equal(JSON.stringify(exported.data).includes('fictional-decision-private'),false);
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM decision_assessments').get().n,1);db.close();
+});
+
+test('standalone Buddy coaches, builds reviewed STAR evidence, imports recruiter tasks and confirms scoped updates',async t=>{
+ let output,context,system;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{const b=JSON.parse(opts.body);system=b.messages[0].content;context=JSON.parse(b.messages.at(-1).content);return buddyResponse(buddyReply(output));}});await f.setup();await enableBuddy(f);
+ const route='/api/buddy/workspace';assert.equal((await f.request(route,{auth:false})).status,401);
+ const envelope=(reply,changes=[])=>({reply:JSON.stringify({message:'Fictional career reply',opportunity:null,star:null,tasks:[],...reply}),changes});
+ const send=(mode,extra={})=>f.request(route,{method:'POST',body:{mode,message:'Fictional career input',requestId:randomUUIDForTest(),documentIds:[],...extra}});
+ function randomUUIDForTest(){return 'fictional-'+Math.random();}
+ output=envelope({});assert.equal((await send('coach')).status,200);assert.match(system,/no flattery/);assert.equal(context.excerpts.length,0);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ output=envelope({},[buddyChange()]);assert.equal((await send('coach')).status,502);assert.equal((await send('update')).status,502);
+ output=envelope({star:{situation:'A fictional bug affected reports.',task:'Restore correct reports.',action:'I traced and fixed the parser.',result:'Reports matched the expected output.',cvBullet:'Fixed a reporting parser defect.',coverHighlight:'I diagnose and resolve reporting defects.'}});
+ const star=await send('star');assert.equal(star.status,200);const starMessage=star.data.messages.at(-1);
+ assert.equal((await f.request(route+'/'+starMessage.id+'/apply',{method:'POST',body:{confirm:false}})).status,400);
+ assert.equal((await f.request(route+'/'+starMessage.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);
+ assert.equal((await f.request(route+'/'+starMessage.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);
+ assert.equal((await f.request('/api/documents')).data.documents.length,1);
+ output=envelope({opportunity:{company:'Fictional recruiter employer',role:'Fictional analyst',description:'Pasted fictional recruiter notes.',location:'',salary:'',url:''},tasks:[{title:'Clarify salary',dueDate:'',notes:'Ask recruiter.'}]});
+ const intake=await send('recruiter');assert.equal(intake.status,200);const proposed=intake.data.messages.at(-1);assert.equal((await f.request('/api/board')).data.opportunities.length,1);
+ const created=await f.request(route+'/'+proposed.id+'/apply',{method:'POST',body:{confirm:true}});assert.equal(created.status,200);assert.equal((await f.request('/api/tasks')).data.tasks[0].opportunityId,created.data.result.opportunityId);
+ output=envelope({},[buddyChange({kind:'update',field:'outcome',value:'rejected'})]);const update=await send('update',{targetId:op.id});assert.equal(update.status,200);const proposal=update.data.messages.at(-1);
+ assert.equal((await f.request('/api/opportunities/'+op.id)).data.outcome,'');
+ assert.equal((await f.request(route+'/'+proposal.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);assert.equal((await f.request('/api/opportunities/'+op.id)).data.outcome,'rejected');
+ const stale=await send('update',{targetId:op.id});const staleId=stale.data.messages.at(-1).id;
+ const current=(await f.request('/api/opportunities/'+op.id)).data;await f.request('/api/opportunities/'+op.id,{method:'PATCH',body:{revision:current.revision,nextAction:'Changed manually'}});
+ assert.equal((await f.request(route+'/'+staleId+'/apply',{method:'POST',body:{confirm:true}})).status,409);
+ await f.restart();await f.login();assert.ok((await f.request(route)).data.messages.some(m=>m.id===starMessage.id&&m.appliedAt));assert.ok((await f.request('/api/export')).data.buddyWorkspace.length);
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.ok(db.prepare('SELECT COUNT(*) n FROM standalone_messages').get().n);db.close();
+});

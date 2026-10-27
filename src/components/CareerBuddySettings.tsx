@@ -29,8 +29,10 @@ const errorText = (error: unknown) =>
     : "Career Buddy could not complete the request.";
 export default function CareerBuddySettings({
   onError,
+  decision = false,
 }: {
   onError: (error: unknown) => void;
+  decision?: boolean;
 }) {
   const [saved, setSaved] = useState<BuddySettings | null>(null),
     [form, setForm] = useState<BuddySettings | null>(null);
@@ -51,7 +53,9 @@ export default function CareerBuddySettings({
   latest.current = { form, key, clearKey, manualModel };
   async function load() {
     try {
-      const result = await api<BuddySettings>("/buddy/settings");
+      const result = await api<BuddySettings>(
+        decision ? "/buddy/decision-settings" : "/buddy/settings",
+      );
       setSaved(result);
       setForm(result);
       setKey("");
@@ -103,10 +107,13 @@ export default function CareerBuddySettings({
     const timer = window.setTimeout(async () => {
       setFindingModels(true);
       try {
-        const found = await api<ModelList>("/buddy/models", {
-          ...json(draft),
-          signal: controller.signal,
-        });
+        const found = await api<ModelList>(
+          decision ? "/buddy/decision-models" : "/buddy/models",
+          {
+            ...json(draft),
+            signal: controller.signal,
+          },
+        );
         if (controller.signal.aborted) return;
         setModels(found.models);
         setModelHint(
@@ -167,7 +174,7 @@ export default function CareerBuddySettings({
     setNotice("");
     try {
       const result = await api<BuddySettings>(
-        "/buddy/settings",
+        decision ? "/buddy/decision-settings" : "/buddy/settings",
         json(
           {
             revision: form.revision,
@@ -188,7 +195,11 @@ export default function CareerBuddySettings({
       setKeyReady(false);
       setClearKey(false);
       setDirty(false);
-      setNotice("Career Buddy settings saved.");
+      setNotice(
+        decision
+          ? "Decision model settings saved."
+          : "Career Buddy settings saved.",
+      );
     } catch (error) {
       setError(errorText(error));
       onError(error);
@@ -203,7 +214,7 @@ export default function CareerBuddySettings({
     setNotice("");
     try {
       const result = await api<ConnectionResult>(
-        "/buddy/test",
+        decision ? "/buddy/decision-test" : "/buddy/test",
         json({
           revision: form.revision,
           provider: form.provider,
@@ -266,10 +277,11 @@ export default function CareerBuddySettings({
       <div className="settings-section-heading">
         <Bot size={24} />
         <div>
-          <h2>Career Buddy</h2>
+          <h2>{decision ? "Decision model" : "Career Buddy"}</h2>
           <p>
-            Your optional AI partner for opportunities, interviews and
-            application drafts.
+            {decision
+              ? "An independently configured model for reviewing opportunities against your saved criteria. Saving does not run an assessment."
+              : "Your optional AI partner for opportunities, interviews and application drafts."}
           </p>
         </div>
         <span className={"badge " + (saved?.enabled ? "green" : "muted")}>
@@ -286,7 +298,7 @@ export default function CareerBuddySettings({
               checked={form.enabled}
               onChange={(event) => update({ enabled: event.target.checked })}
             />
-            Enable Career Buddy
+            Enable {decision ? "decision model" : "Career Buddy"}
           </label>
           <div className="form-grid">
             <label className="field">
@@ -468,10 +480,17 @@ export default function CareerBuddySettings({
             </label>
           </details>
           <p className="buddy-privacy">
-            Chats send this opportunity and the document excerpts you select to
-            this API. Career Buddy can suggest changes and create drafts; you
-            review them before they are saved. Salary advice uses saved
-            information, without live market research.
+            {decision
+              ? "Assessments send your criteria, the opportunity and selected evidence to this API. Each result is saved for review; it never changes the opportunity. Unknown facts stay unknown. "
+              : ""}
+            {!decision && (
+              <>
+                Chats send this opportunity and the document excerpts you select
+                to this API. Career Buddy can suggest changes and create drafts;
+                you review them before they are saved. Salary advice uses saved
+                information, without live market research.
+              </>
+            )}
           </p>
           {error && (
             <p className="form-error" role="alert">
@@ -501,7 +520,7 @@ export default function CareerBuddySettings({
               ) : (
                 <Check size={16} />
               )}
-              Save Career Buddy
+              Save {decision ? "decision model" : "Career Buddy"}
             </button>
             <button
               type="button"
