@@ -2,6 +2,14 @@
 
 Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md` for delivered features and remaining work. The plan below describes the full intended product, rather than claiming every feature is available in the first increment.
 
+## Feature Requests
+
+- [ ] Add a vectorised DB as a source - default preinstalled or choose a custom one.
+- [ ] Ability to add obsidian vault as a source
+- [ ] Ability to add a directory as a source
+- [ ] Ability to drag and drop files and directories to the career library
+- [ ] Career Buddy side bar option - open a chat which will allow you to describe projects and experience, which career buddy will turn into a CV bullet or Cover letter highlight.
+
 ## Confirmed direction
 
 - A custom browser-based Kanban board for tracking job opportunities from identification through hire or rejection.
