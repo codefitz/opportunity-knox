@@ -458,6 +458,73 @@ test("Word drafts are editable DOCX files whose paragraphs, tables and Unicode c
   assert.match(result.text, /architecture reviews/);
 });
 
+test("PowerPoint (.pptx) slides and speaker notes, Word footnotes/comments, HTML, RTF, and video captions (.vtt/.srt) extract locally", async () => {
+  const { default: JSZip } = await import("jszip");
+
+  // 1. PowerPoint (.pptx) with slides and speaker notes
+  const pptxZip = new JSZip();
+  pptxZip.file(
+    "ppt/slides/slide1.xml",
+    '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:p><a:r><a:t>Platform Modernization Strategy</a:t></a:r></a:p></p:sld>',
+  );
+  pptxZip.file(
+    "ppt/notesSlides/notesSlide1.xml",
+    '<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:p><a:r><a:t>Cut deployment lead time by 60 percent</a:t></a:r></a:p></p:notes>',
+  );
+  const pptxBytes = await pptxZip.generateAsync({ type: "nodebuffer" });
+  const pptxRes = await extractDocument("Architecture-Deck.pptx", pptxBytes);
+  assert.equal(pptxRes.status, "ready");
+  assert.match(pptxRes.text, /\[Slide 1\]/);
+  assert.match(pptxRes.text, /Platform Modernization Strategy/);
+  assert.match(pptxRes.text, /Cut deployment lead time by 60 percent/);
+
+  // 2. Word (.docx) with footnotes and comments
+  const docxZip = new JSZip();
+  docxZip.file(
+    "word/document.xml",
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Main body text</w:t></w:r></w:p></w:body></w:document>',
+  );
+  docxZip.file(
+    "word/footnotes.xml",
+    '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Published in 2025 architecture review</w:t></w:r></w:p></w:footnotes>',
+  );
+  const docxBytes = await docxZip.generateAsync({ type: "nodebuffer" });
+  const docxRes = await extractDocument("With-Footnotes.docx", docxBytes);
+  assert.equal(docxRes.status, "ready");
+  assert.match(docxRes.text, /Main body text/);
+  assert.match(docxRes.text, /Published in 2025 architecture review/);
+
+  // 3. Video captions (.vtt and .srt)
+  const vtt = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.500\n<v Speaker>Designed the multi-region failover system.</v>\n`;
+  const vttRes = await extractDocument(
+    "Tech-Talk.vtt",
+    Buffer.from(vtt, "utf8"),
+  );
+  assert.equal(vttRes.status, "ready");
+  assert.match(vttRes.text, /Designed the multi-region failover system/);
+  assert.doesNotMatch(vttRes.text, /00:00:01/);
+
+  // 4. HTML and RTF
+  const htmlRes = await extractDocument(
+    "Portfolio.html",
+    Buffer.from(
+      "<html><head><script>alert(1)</script></head><body><h1>Case Study</h1><p>Scaled event pipeline.</p></body></html>",
+    ),
+  );
+  assert.equal(htmlRes.status, "ready");
+  assert.match(htmlRes.text, /Scaled event pipeline/);
+  assert.doesNotMatch(htmlRes.text, /alert\(1\)/);
+
+  const rtfRes = await extractDocument(
+    "Summary.rtf",
+    Buffer.from(
+      "{\\rtf1\\ansi{\\fonttbl{\\f0 Arial;}}\\f0\\pard Led Kubernetes migration.\\par}",
+    ),
+  );
+  assert.equal(rtfRes.status, "ready");
+  assert.match(rtfRes.text, /Led Kubernetes migration/);
+});
+
 function textPDF(text) {
   const stream =
     "BT /F1 12 Tf 50 780 Td (" + text.replace(/[()\\]/g, "\\$&") + ") Tj ET";

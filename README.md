@@ -73,10 +73,10 @@ Version 0.3 introduces the Opportunity Knox name and separate sidebar pages:
 - **Opportunities:** searchable list for detailed application tracking.
 - **Kanban board:** the eight-stage drag-and-drop board on its own page.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link a task to an opportunity when useful.
-- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; PDF, DOCX and text files can be prepared locally for Career Buddy retrieval.
+- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; supported files can be prepared locally for Career Buddy retrieval. Fold the prepared and unprepared sections, and move individual or selected files between folders inside the configured library. Submitted versions remain preserved.
 - **Settings:** profile name/photo, themes, file locations, backups, and Career Buddy connections.
 
-Choose Forest, Cappuccino, Ocean, Midnight, Lavender, Terracotta, Graphite, or Plum in Settings. You can customise the accent and background tint and save them across devices; reset restores the preset colours in the preview; save to keep the reset. The profile supports PNG, JPEG and WebP photos up to 2 MB. Preferences, profile and tasks persist in the database and private backups. Browser routes use `#/dashboard`, `#/opportunities`, `#/board`, `#/todos`, `#/library` and `#/settings`.
+Choose a theme in Settings, including contrasting light-and-dark options. Your theme, accent and background tint save automatically across devices; Reset colours returns to the preset colours. The profile supports PNG, JPEG and WebP photos up to 2 MB. Preferences, profile and tasks persist in the database and private backups. Browser routes use `#/dashboard`, `#/opportunities`, `#/board`, `#/todos`, `#/library` and `#/settings`.
 
 Existing installation directories, Docker project names and the `./board` command stay compatible. The default document directory remains `~/OpportunityBoard` and the Mac state directory remains `~/Library/Application Support/OpportunityBoard`.
 

@@ -155,6 +155,61 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(missing.exists())
         docker.assert_not_called()
 
+    def test_read_only_vault_is_mounted_without_a_write_probe(self):
+        config, _ = launcher.make_config(self.args(), self.state)
+        self.save(config)
+        vault = self.root / "fictional vault"
+        vault.mkdir()
+        (vault / "original.md").write_text("fictional", encoding="utf-8")
+        launcher.atomic_json(self.state / "pending-vault.json", {"hostPath": str(vault), "create": False, "readOnly": True})
+        original_host_folder = launcher.host_folder
+        calls = []
+        def spy(raw, *, writable=True):
+            calls.append((raw, writable))
+            return original_host_folder(raw, writable=writable)
+        with patch.object(launcher, "host_folder", side_effect=spy):
+            updated, _ = launcher.make_config(launcher.parse_args(["restart"]), self.state)
+        self.assertTrue(all(not writable for raw, writable in calls if raw == str(vault)))
+        service = launcher.compose_override(updated, self.state, "test")["services"]["board"]
+        mount = next(m for m in service["volumes"] if m["target"] == "/vault")
+        self.assertTrue(mount["read_only"])
+        self.assertEqual(service["environment"]["BOARD_VAULT_READ_ONLY"], "1")
+        self.assertEqual([p.name for p in vault.iterdir()], ["original.md"])
+
+    def test_watcher_reports_failed_restart_without_losing_pending_mount(self):
+        launcher.atomic_json(self.state / "pending-vault.json", {"hostPath": "/fictional", "readOnly": True})
+        launcher.atomic_json(self.state / "pending-restart.json", {"requestId": "test-id"})
+        with patch.object(launcher, "main", side_effect=launcher.LauncherError("simulated restart failure")):
+            launcher.watch_loop(self.state, once=True)
+        status = launcher.read_json(self.state / "restart-status.json")
+        self.assertEqual(status, {"requestId": "test-id", "state": "failed", "message": "simulated restart failure"})
+        self.assertTrue((self.state / "pending-vault.json").exists())
+
+    def test_watch_loop_applies_pending_restart_handoff(self):
+        launcher.atomic_json(self.state / "pending-restart.json", {"requestedAt": "2026-10-27T11:00:00Z"})
+        calls = []
+        with patch.object(launcher, "main", side_effect=lambda argv: calls.append(argv) or 0):
+            result = launcher.watch_loop(self.state, once=True)
+        self.assertEqual(result, 0)
+        self.assertFalse((self.state / "pending-restart.json").exists())
+        self.assertEqual(calls, [["restart", "--state-dir", str(self.state.resolve()), "--no-open", "--no-watch"]])
+
+    def test_pending_vault_creates_and_mounts_host_vault(self):
+        config, _ = launcher.make_config(self.args(), self.state)
+        self.save(config)
+        vault_dir = self.root / "My Obsidian Vault"
+        launcher.atomic_json(self.state / "pending-vault.json", {"hostPath": str(vault_dir), "create": True})
+        updated, has_pending = launcher.make_config(launcher.parse_args(["restart"]), self.state)
+        self.assertTrue(has_pending)
+        self.assertTrue(vault_dir.is_dir())
+        self.assertEqual(updated["vault"], str(vault_dir))
+        override = launcher.compose_override(updated, self.state, "test")
+        service = override["services"]["board"]
+        self.assertEqual(service["environment"]["BOARD_VAULT_DIR"], "/vault")
+        self.assertEqual(service["environment"]["BOARD_HOST_VAULT_DIR"], str(vault_dir))
+        self.assertEqual(service["volumes"][-1]["target"], "/vault")
+        self.assertFalse(service["volumes"][-1]["read_only"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,10 +4,11 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 
 ## Feature Requests
 
-- [ ] Add a vectorised DB as a source - default preinstalled or choose a custom one.
-- [ ] Ability to add obsidian vault as a source
-- [ ] Ability to add a directory as a source
-- [ ] Ability to drag and drop files and directories to the career library
+- [ ] Add a vectorised DB as a source - default preinstalled or choose a custom one. Current retrieval uses locally extracted text chunks and keyword matching, not embeddings.
+- [x] Connect an existing Obsidian vault, including a read-only host mount; explicitly sync eligible files into the Career Library when desired. Connecting alone does not automatically import files or make the vault searchable by Career Buddy.
+- [ ] Use existing vault notes directly in place as a live source without copying them into the library, if required.
+- [ ] Attach a host directory as a persistent in-place source. Folder uploads copy selected files into managed library storage instead.
+- [x] Drag and drop files and directories to the Career Library, with a warning above 500 files and optional manually continued batches of 500.
 - [ ] Career Buddy side bar option - open a chat which will allow you to describe projects and experience, which career buddy will turn into a CV bullet or Cover letter highlight.
 
 ## Confirmed direction
@@ -63,8 +64,9 @@ One card represents one application opportunity, including a stable ID so repeat
 1. [x] **Board/list (plus Dashboard & To-do list added in v0.3):** active opportunities, search, filters, add opportunity, next actions, live statistics, and manual/linked tasks.
 2. [x] **Opportunity detail:** overview; stages/timeline; documents; communications/interviews; summary; Career Buddy. Keeps job source and employer/role identity easy to find.
 3. [x] **Reference library (`Career library`):** store CVs, prior JDs, certificates, project notes, and other career material; prepare local text chunks and select material for individual Career Buddy tasks.
-   - [ ] Tagging and structured categorisation of library items (e.g. master CVs, role-specific CVs, templates, supporting statements, interview stories).
-4. [x] **Settings:** profile name/photo, themes & custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
+   - [x] Automatic/editable tags and tag filters; independently collapsible prepared and unprepared views and folder groups.
+   - [ ] Dedicated structured categories for master CVs, role-specific CVs, templates, supporting statements, and interview stories.
+4. [x] **Settings:** profile name/photo, light/dark and contrasting themes, automatically saved custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
    - [ ] Record import / backup restore UI and per-stage AI enablement controls.
 
 ## Document storage and existing material
@@ -76,7 +78,9 @@ One card represents one application opportunity, including a stable ID so repeat
 
 Offer two document actions:
 
-- [x] Upload/copy into managed storage: available from every device through the board.
+- [x] Upload/copy into managed storage: available from every device through the board. File count is not capped by the upload queue; the existing 15 MB per-file browser limit and hidden/system-folder exclusions still apply. A large queue is held in the browser until uploaded and is lost on reload.
+- [x] Move individual or selected library files between folders inside the configured library; preserve identifiers and prepared text. One bulk move is limited to 500 files; collision and submitted-document protections apply.
+- [x] Connect an Obsidian host vault read-only for inspection and optional explicit sync into the library. The read-only mount blocks exports into the vault; a sync copies eligible files into managed library storage and prepares their text.
 - [ ] Attach an existing document in-place from a configured server-accessible folder or supported cloud connector (e.g. Google Docs link remaining a cloud document with availability shown).
 
 Storage configuration and folder browsing:
@@ -141,6 +145,7 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Create default application-owned folders, validate configured locations and write permissions, generate mount configuration, and refuse to silently replace a missing configured drive with an empty default location.
 - [x] Wait for `/api/health`, then display/open the board address with the initial `#setup=<token>` credential when needed.
 - [x] Two-level folder configuration: immediate in-app subfolder updates inside exposed roots, and structured `pending-storage.json` handoff for new host folders applied on `./board restart` while retaining earlier mounts.
+- [x] In-app **Update & restart board** action (`POST /api/restart`) hands off to the host watcher, checks its heartbeat, and waits for the matching result before refreshing; failed host restarts are reported and pending mount settings remain available for retry.
 
 ## Hosting and persistence proposal
 
@@ -166,7 +171,8 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 
 1. [x] **Core workflow:** board/list, opportunity detail, all stages/outcomes, date history, notes/summary, interviews/comms, uploads/reference library, document version labels, local backup, and JSON export, with private local hosting, persistent storage, and launcher start/stop.
 2. [ ] **Existing-workflow integration:**
-   - [x] Concurrent-device editing checks (`409` revision handling) and host-folder retention across restarts.
+   - [x] Concurrent-device editing checks (`409` revision handling), host-folder retention across restarts, and read-only Obsidian mounting with explicit optional sync.
+   - [x] Organise uploaded library documents into folders and upload selections over 500 with optional batches.
    - [ ] Previewed import of chosen historical records (`Career Transition`, `Work/Applications`), attach-existing file workflow, duplicate detection, and guided backup/restore verification.
 3. [ ] **AI integration:**
    - [x] Multi-provider adapter, model discovery, local PDF/DOCX/text chunk retrieval, grounded opportunity chat, reviewed record updates, fit/salary/skills prompts, and versioned Word/Markdown draft generation.

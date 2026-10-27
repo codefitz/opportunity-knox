@@ -40,6 +40,125 @@ export async function readFile(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+export type DroppedFile = {
+  file: File;
+  path: string;
+};
+
+type WebkitEntry = {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  file?: (
+    success: (file: File) => void,
+    error?: (err: unknown) => void,
+  ) => void;
+  createReader?: () => {
+    readEntries: (
+      success: (entries: WebkitEntry[]) => void,
+      error?: (err: unknown) => void,
+    ) => void;
+  };
+};
+
+const IGNORED_DIRS = new Set([
+  ".git",
+  ".obsidian",
+  ".trash",
+  "node_modules",
+  "__macosx",
+]);
+
+function shouldIgnoreSegment(segment: string): boolean {
+  const lower = segment.toLowerCase();
+  return (
+    !segment ||
+    segment === "." ||
+    segment === ".." ||
+    segment.startsWith(".") ||
+    IGNORED_DIRS.has(lower)
+  );
+}
+
+export function cleanUploadPath(rawPath: string): string | null {
+  const segments = rawPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (!segments.length || segments.some(shouldIgnoreSegment)) return null;
+  const joined = segments.join("/");
+  return joined.length <= 500 ? joined : segments[segments.length - 1];
+}
+
+async function traverseEntry(
+  entry: WebkitEntry,
+  prefix = "",
+  out: DroppedFile[] = [],
+): Promise<DroppedFile[]> {
+  if (shouldIgnoreSegment(entry.name))
+    return out;
+  const currentPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+  if (entry.isFile && entry.file) {
+    const file = await new Promise<File | null>((resolve) => {
+      entry.file!(
+        (f) => resolve(f),
+        () => resolve(null),
+      );
+    });
+    const clean = cleanUploadPath(currentPath);
+    if (file && clean) out.push({ file, path: clean });
+    return out;
+  }
+  if (entry.isDirectory && entry.createReader) {
+    const reader = entry.createReader();
+    while (true) {
+      const batch = await new Promise<WebkitEntry[]>((resolve) => {
+        reader.readEntries(
+          (entries) => resolve(entries || []),
+          () => resolve([]),
+        );
+      });
+      if (!batch.length) break;
+      for (const child of batch) {
+        await traverseEntry(child, currentPath, out);
+      }
+    }
+  }
+  return out;
+}
+
+export async function collectDroppedFiles(
+  dataTransfer: DataTransfer,
+): Promise<DroppedFile[]> {
+  const items = Array.from(dataTransfer.items || []);
+  const entries = items
+    .map(
+      (item) =>
+        (item.webkitGetAsEntry?.() as unknown as WebkitEntry | null) || null,
+    )
+    .filter((entry): entry is WebkitEntry => entry !== null);
+  if (entries.length) {
+    const out: DroppedFile[] = [];
+    for (const entry of entries) {
+      await traverseEntry(entry, "", out);
+    }
+    if (out.length) return out;
+  }
+  return collectFileList(dataTransfer.files);
+}
+
+export function collectFileList(
+  files: FileList | File[] | null,
+): DroppedFile[] {
+  if (!files) return [];
+  const out: DroppedFile[] = [];
+  for (const file of Array.from(files)) {
+    const raw =
+      (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+      file.name;
+    const clean = cleanUploadPath(raw);
+    if (clean) out.push({ file, path: clean });
+  }
+  return out;
+}
 export function download(name: string, text: string, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const anchor = document.createElement("a");

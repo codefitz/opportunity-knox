@@ -40,6 +40,7 @@ export type BoardDocument = {
   version: number;
   revision?: number;
   notes: string;
+  tags?: string[];
   url: string;
 };
 export type Opportunity = {
@@ -77,7 +78,11 @@ export type Theme =
   | "lavender"
   | "terracotta"
   | "graphite"
-  | "plum";
+  | "plum"
+  | "espresso-cream"
+  | "harbour"
+  | "ink-paper"
+  | "moonlight";
 export type Appearance = {
   theme: Theme;
   themeAccent: string;
@@ -113,6 +118,28 @@ export type Session = {
   authenticated: boolean;
   setupRequired: boolean;
   setupTokenRequired: boolean;
+};
+export type ObsidianStatus = {
+  enabled: boolean;
+  readOnly: boolean;
+  locationType: "subpath" | "hostPath";
+  subpath: string;
+  hostPath: string;
+  vaultName: string;
+  resolvedHostPath: string;
+  obsidianUrl: string;
+  mountPending: boolean;
+  pendingHostPath: string;
+  vaultStats: {
+    exists: boolean;
+    hasObsidianConfig: boolean;
+    markdownCount: number;
+    attachmentCount: number;
+    totalFiles: number;
+    folders: string[];
+  };
+  lastSyncedAt: string;
+  lastImportedToVaultAt: string;
 };
 export const STAGES: Stage[] = [
   { id: "identification", label: "Identification" },

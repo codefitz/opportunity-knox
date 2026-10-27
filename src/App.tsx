@@ -21,6 +21,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  FolderInput,
   LayoutGrid,
   ChartNoAxesCombined,
   ListTodo,
@@ -30,10 +31,13 @@ import {
   MessageSquare,
   MoreHorizontal,
   Plus,
+  RotateCw,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Tag,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -42,11 +46,14 @@ import {
   ApiError,
   json,
   readFile,
+  collectDroppedFiles,
+  collectFileList,
   download,
   localInput,
   iso,
   formatDate,
   editedTimestamp,
+  type DroppedFile,
 } from "./api";
 import {
   STAGES,
@@ -62,6 +69,7 @@ import {
   type Profile,
   type Task,
   type Appearance,
+  type ObsidianStatus,
 } from "./types";
 
 import JobLookup, {
@@ -237,11 +245,15 @@ export default function App() {
   const [appearanceDraft, setAppearanceDraft] = useState<Appearance | null>(
       null,
     ),
-    [appearanceSaving, setAppearanceSaving] = useState(false);
+    [appearanceSaving, setAppearanceSaving] = useState(false),
+    [appearanceFailed, setAppearanceFailed] = useState(false);
   const appearanceDraftRef = useRef<Appearance | null>(null),
-    appearanceBaseRef = useRef<Appearance | null>(null),
+    appearanceSettingsRef = useRef<Settings | null>(null),
+    appearancePendingRef = useRef<Partial<Appearance>>({}),
+    appearanceTimerRef = useRef<number | null>(null),
     appearanceSavingRef = useRef(false),
     appearanceRevision = useRef(0);
+  appearanceSettingsRef.current = settings;
   const [page, setPage] = useState<Page>(routePage),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("active");
@@ -259,7 +271,8 @@ export default function App() {
   });
   const [tasks, setTasks] = useState<Task[]>([]),
     [referenceCount, setReferenceCount] = useState(0),
-    [refreshing, setRefreshing] = useState(false);
+    [refreshing, setRefreshing] = useState(false),
+    [restarting, setRestarting] = useState(false);
   const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
     [dragging, setDragging] = useState(""),
@@ -298,8 +311,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!settings) return;
-    const preview = page === "settings" && appearanceDraft;
-    applyTheme(preview || appearanceFrom(settings), !preview);
+    applyTheme(appearanceDraft || appearanceFrom(settings), !appearanceDraft);
   }, [
     page,
     settings?.theme,
@@ -368,46 +380,85 @@ export default function App() {
       window.removeEventListener("focus", refresh);
     };
   }, [session?.authenticated, page, newOpen, selected]);
+  function scheduleAppearanceSave() {
+    if (appearanceTimerRef.current !== null)
+      window.clearTimeout(appearanceTimerRef.current);
+    appearanceTimerRef.current = window.setTimeout(() => {
+      appearanceTimerRef.current = null;
+      void saveAppearance();
+    }, 250);
+  }
   function previewAppearance(patch: Partial<Appearance>) {
-    if (!settings || appearanceSavingRef.current) return;
-    const base = appearanceBaseRef.current || appearanceFrom(settings);
-    const next = { ...(appearanceDraftRef.current || base), ...patch };
-    const dirty =
-      next.theme !== base.theme ||
-      next.themeAccent !== base.themeAccent ||
-      next.themeBackground !== base.themeBackground;
-    appearanceBaseRef.current = dirty ? base : null;
-    appearanceDraftRef.current = dirty ? next : null;
-    setAppearanceDraft(appearanceDraftRef.current);
+    const saved = appearanceSettingsRef.current;
+    if (!saved) return;
+    const next = {
+      ...(appearanceDraftRef.current || appearanceFrom(saved)),
+      ...patch,
+    };
+    appearanceDraftRef.current = next;
+    appearancePendingRef.current = {
+      ...appearancePendingRef.current,
+      ...patch,
+    };
+    setAppearanceDraft(next);
+    setAppearanceFailed(false);
+    if (
+      patch.theme !== undefined ||
+      Object.keys(patch).length > 1 ||
+      Object.values(patch).every((value) => value === "")
+    ) {
+      if (appearanceTimerRef.current !== null)
+        window.clearTimeout(appearanceTimerRef.current);
+      appearanceTimerRef.current = null;
+      void saveAppearance();
+    } else scheduleAppearanceSave();
   }
   async function saveAppearance() {
-    const draft = appearanceDraftRef.current;
-    const base = appearanceBaseRef.current;
-    if (!draft || !base || appearanceSavingRef.current) return;
-    // Send only edited fields so a newer, unrelated change from another device is preserved.
-    const patch: Partial<Appearance> = {};
-    if (draft.theme !== base.theme) patch.theme = draft.theme;
-    if (draft.themeAccent !== base.themeAccent)
-      patch.themeAccent = draft.themeAccent;
-    if (draft.themeBackground !== base.themeBackground)
-      patch.themeBackground = draft.themeBackground;
+    if (
+      appearanceSavingRef.current ||
+      !Object.keys(appearancePendingRef.current).length
+    )
+      return;
+    const patch = appearancePendingRef.current;
+    appearancePendingRef.current = {};
     appearanceSavingRef.current = true;
     appearanceRevision.current++;
     setAppearanceSaving(true);
+    let failed = false;
     try {
-      const saved = await api<Settings>("/settings", json(patch, "PATCH"));
+      const saved = await api<Settings>("/settings", {
+        ...json(patch, "PATCH"),
+        keepalive: true,
+      });
       appearanceRevision.current++;
-      appearanceBaseRef.current = null;
-      appearanceDraftRef.current = null;
-      setAppearanceDraft(null);
+      appearanceSettingsRef.current = saved;
       setSettings(saved);
-      setNotice("Appearance saved across devices.");
+      if (Object.keys(appearancePendingRef.current).length) {
+        const next = {
+          ...appearanceFrom(saved),
+          ...appearancePendingRef.current,
+        };
+        appearanceDraftRef.current = next;
+        setAppearanceDraft(next);
+      } else {
+        appearanceDraftRef.current = null;
+        setAppearanceDraft(null);
+      }
+      setAppearanceFailed(false);
     } catch (e) {
       appearanceRevision.current++;
+      appearancePendingRef.current = {
+        ...patch,
+        ...appearancePendingRef.current,
+      };
+      setAppearanceFailed(true);
+      failed = true;
       report(e);
     } finally {
       appearanceSavingRef.current = false;
       setAppearanceSaving(false);
+      if (!failed && Object.keys(appearancePendingRef.current).length)
+        scheduleAppearanceSave();
     }
   }
   function report(e: unknown) {
@@ -418,6 +469,51 @@ export default function App() {
         setupRequired: false,
         setupTokenRequired: false,
       });
+  }
+  async function restartBoard() {
+    if (restarting) return;
+    setRestarting(true);
+    setError("");
+    setNotice(
+      "Updating and restarting your workspace… The page will refresh automatically once ready.",
+    );
+    try {
+      const restart = await api<{ requestId: string; hostManaged: boolean }>("/restart", json({}));
+      const deadline = Date.now() + 90000;
+      await new Promise((r) => window.setTimeout(r, 2500));
+      let reconnected = false;
+      while (Date.now() < deadline) {
+        try {
+          await api<{ ok: boolean }>("/health");
+          if (restart.hostManaged) {
+            const status = await api<{ requestId?: string; state: string; message?: string }>("/restart/status");
+            if (status.requestId !== restart.requestId || status.state === "queued" || status.state === "running") {
+              await new Promise((r) => window.setTimeout(r, 1000));
+              continue;
+            }
+            if (status.state === "failed") {
+              setError(status.message || "The host could not restart the board. Your settings are still pending.");
+              return;
+            }
+            if (status.state !== "succeeded") continue;
+          }
+          reconnected = true;
+          await new Promise((r) => window.setTimeout(r, 400));
+          window.location.reload();
+          return;
+        } catch {
+          await new Promise((r) => window.setTimeout(r, 1000));
+        }
+      }
+      if (!reconnected)
+        setError(
+          "The board is taking longer than expected to restart. Refresh the page or check ./board logs.",
+        );
+    } catch (e) {
+      report(e);
+    } finally {
+      setRestarting(false);
+    }
   }
   async function openOpportunity(id: string) {
     try {
@@ -611,6 +707,14 @@ export default function App() {
               <small>Edit your profile</small>
             </span>
             <Settings2 size={15} />
+          </button>
+          <button
+            className="signout-button"
+            disabled={restarting}
+            onClick={() => void restartBoard()}
+          >
+            <RotateCw size={14} className={restarting ? "spin" : undefined} />
+            {restarting ? "Restarting…" : "Update & restart"}
           </button>
           <button
             className="signout-button"
@@ -1046,6 +1150,10 @@ export default function App() {
         {page === "library" && (
           <Library
             onError={report}
+            onNotice={setNotice}
+            onChanged={() => void load(true)}
+            onRestart={() => void restartBoard()}
+            restarting={restarting}
             timezone={settings?.timezone || "Europe/London"}
           />
         )}
@@ -1054,12 +1162,17 @@ export default function App() {
             settings={settings}
             appearance={appearanceDraft || appearanceFrom(settings)}
             appearanceDirty={Boolean(appearanceDraft)}
-            appearanceSaving={appearanceSaving}
+            appearanceSaving={
+              appearanceSaving || Boolean(appearanceDraft && !appearanceFailed)
+            }
+            appearanceFailed={appearanceFailed}
             onAppearanceChange={previewAppearance}
             onAppearanceSave={() => void saveAppearance()}
             profile={profile}
             onProfileSaved={setProfile}
             onSaved={setSettings}
+            restarting={restarting}
+            onRestart={() => void restartBoard()}
             onError={report}
             onNotice={setNotice}
           />
@@ -2416,72 +2529,352 @@ function Documents({
   timezone,
   onChanged,
   onError,
+  onNotice,
   extraction,
+  externalQueue,
+  onExternalQueueConsumed,
+  groupByFolder = false,
+  splitByPrepared = false,
+  sourceFilter = "split",
+  onPrepareDocument,
+  selectedTag = "",
+  onSelectTag,
 }: {
   documents: BoardDocument[];
   opportunityId?: string;
   timezone: string;
   onChanged: () => void;
   onError: (e: unknown) => void;
+  onNotice?: (s: string) => void;
   extraction?: Record<string, BuddySource["extraction"]>;
+  externalQueue?: DroppedFile[];
+  onExternalQueueConsumed?: () => void;
+  groupByFolder?: boolean;
+  splitByPrepared?: boolean;
+  sourceFilter?: "split" | "used" | "unused";
+  onPrepareDocument?: (id: string, force: boolean) => Promise<void>;
+  selectedTag?: string;
+  onSelectTag?: (tag: string) => void;
 }) {
-  const [file, setFile] = useState<File | null>(null),
+  const [files, setFiles] = useState<DroppedFile[]>([]),
     [kind, setKind] = useState(opportunityId ? "jd" : "reference"),
     [status, setStatus] = useState("draft"),
     [notes, setNotes] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function upload(e: FormEvent) {
-    e.preventDefault();
-    if (!file) return;
-    setBusy(true);
+    [busy, setBusy] = useState(false),
+    [progress, setProgress] = useState(""),
+    [batchUploads, setBatchUploads] = useState(false),
+    [dragOver, setDragOver] = useState(false),
+    [deletingId, setDeletingId] = useState(""),
+    [confirmDeleteId, setConfirmDeleteId] = useState(""),
+    [confirmDeleteFolderKey, setConfirmDeleteFolderKey] = useState(""),
+    [deletingFolderKey, setDeletingFolderKey] = useState(""),
+    [preparingDocId, setPreparingDocId] = useState(""),
+    [editingTagsId, setEditingTagsId] = useState(""),
+    [tagInput, setTagInput] = useState(""),
+    [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>(
+      {},
+    ),
+    [expandedSources, setExpandedSources] = useState({
+      ready: true,
+      unprepared: true,
+    }),
+    [selectedForMove, setSelectedForMove] = useState<string[]>([]),
+    [moveDocuments, setMoveDocuments] = useState<BoardDocument[] | null>(null),
+    [moveFolder, setMoveFolder] = useState(""),
+    [moveError, setMoveError] = useState(""),
+    [moving, setMoving] = useState(false);
+  const movableDocuments = documents.filter((d) => {
+    const ready = extraction?.[d.id]?.status === "ready";
+    return (
+      !d.opportunityId &&
+      d.status !== "submitted" &&
+      (!splitByPrepared ||
+        sourceFilter === "split" ||
+        (sourceFilter === "used" ? ready : !ready))
+    );
+  });
+  useEffect(() => {
+    const available = new Set(movableDocuments.map((d) => d.id));
+    setSelectedForMove((current) =>
+      current.every((id) => available.has(id))
+        ? current
+        : current.filter((id) => available.has(id)),
+    );
+  }, [documents, sourceFilter, extraction]);
+  function startMove(items: BoardDocument[]) {
+    if (!items.length) return;
+    const dirs = new Set(
+      items.map((d) =>
+        d.name.includes("/") ? d.name.slice(0, d.name.lastIndexOf("/")) : "",
+      ),
+    );
+    setMoveFolder(dirs.size === 1 ? [...dirs][0] : "");
+    setMoveError("");
+    setMoveDocuments(items);
+  }
+  async function moveSelected(event: FormEvent) {
+    event.preventDefault();
+    if (!moveDocuments || moving) return;
+    setMoving(true);
+    setMoveError("");
     try {
-      await api(
-        "/documents",
+      const result = await api<{
+        documents: BoardDocument[];
+        retainedOriginals: number;
+      }>(
+        "/documents/move",
         json({
-          opportunityId,
-          name: file.name,
-          contentBase64: await readFile(file),
-          kind,
-          status,
-          notes,
+          folder: moveFolder,
+          documents: moveDocuments.map((d) => ({
+            id: d.id,
+            revision: d.revision ?? 1,
+          })),
         }),
       );
-      setFile(null);
-      setNotes("");
+      const movedIds = new Set(result.documents.map((d) => d.id));
+      setSelectedForMove((current) =>
+        current.filter((id) => !movedIds.has(id)),
+      );
+      setMoveDocuments(null);
       onChanged();
-    } catch (e) {
-      onError(e);
+      onNotice?.(
+        `Moved ${result.documents.length} document${result.documents.length === 1 ? "" : "s"}.${result.retainedOriginals ? ` ${result.retainedOriginals} original cop${result.retainedOriginals === 1 ? "y was" : "ies were"} retained in their previous location.` : ""}`,
+      );
+    } catch (error) {
+      setMoveError(displayError(error));
+      if (error instanceof ApiError && error.status === 401) onError(error);
     } finally {
-      setBusy(false);
+      setMoving(false);
     }
   }
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (groupByFolder) setExpandedFolders({});
+  }, [groupByFolder]);
+  function addQueued(incoming: DroppedFile[]) {
+    if (!incoming.length) return;
+    setFiles((current) => {
+      const seen = new Set(current.map((item) => item.path));
+      const merged = [...current];
+      for (const item of incoming) {
+        if (!seen.has(item.path)) {
+          seen.add(item.path);
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+  }
+  useEffect(() => {
+    if (externalQueue?.length) {
+      addQueued(externalQueue);
+      onExternalQueueConsumed?.();
+    }
+  }, [externalQueue]);
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (busy) return;
+    const dropped = await collectDroppedFiles(e.dataTransfer);
+    if (!dropped.length) {
+      onError(
+        new Error(
+          "No readable files were found in the dropped selection (hidden and system folders are skipped).",
+        ),
+      );
+      return;
+    }
+    addQueued(dropped);
+  }
+  async function upload(e: FormEvent) {
+    e.preventDefault();
+    if (!files.length || busy) return;
+    setBusy(true);
+    const batch = batchUploads ? files.slice(0, 500) : files;
+    const succeeded = new Set<string>();
+    const failed: { path: string; message: string }[] = [];
+    try {
+      for (let i = 0; i < batch.length; i++) {
+        const item = batch[i];
+        setProgress(
+          batch.length > 1
+            ? `Uploading ${i + 1} of ${batch.length}: ${item.path}…`
+            : `Uploading ${item.path}…`,
+        );
+        try {
+          await api(
+            "/documents",
+            json({
+              opportunityId,
+              name: item.path,
+              contentBase64: await readFile(item.file),
+              kind,
+              status,
+              notes,
+            }),
+          );
+          succeeded.add(item.path);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) throw err;
+          failed.push({ path: item.path, message: displayError(err) });
+        }
+      }
+      const remaining = files.length - succeeded.size;
+      if (succeeded.size && onNotice) {
+        onNotice(
+          `Uploaded ${succeeded.size} of ${batch.length} document${batch.length === 1 ? "" : "s"}.${remaining ? ` ${remaining} file${remaining === 1 ? " remains" : "s remain"} in the queue; upload the next batch when ready.` : ""}`,
+        );
+      }
+      if (failed.length) {
+        onError(new Error(
+          `Could not upload ${failed.length} file${failed.length === 1 ? "" : "s"}: ${failed.slice(0, 3).map((item) => `${item.path} (${item.message})`).join("; ")}${failed.length > 3 ? ` (+${failed.length - 3} more)` : ""}. Failed files remain in the queue.`,
+        ));
+      }
+      if (!remaining) setNotes("");
+    } catch (error) {
+      onError(error);
+    } finally {
+      if (succeeded.size) {
+        // Keep unattempted files ahead of failures, so later batches can proceed.
+        const failedPaths = new Set(failed.map((item) => item.path));
+        setFiles((current) => [
+          ...current.filter((item) => !succeeded.has(item.path) && !failedPaths.has(item.path)),
+          ...current.filter((item) => failedPaths.has(item.path)),
+        ]);
+        onChanged();
+      }
+      setBusy(false);
+      setProgress("");
+    }
+  }
+  const summaryLabel =
+    files.length === 0
+      ? opportunityId
+        ? "Drop files or a folder here, or click to choose documents"
+        : "Drop files or directories here, or click to choose documents"
+      : files.length === 1
+        ? files[0].path
+        : `${files.length} files queued (${Math.max(1, Math.round(files.reduce((sum, f) => sum + f.file.size, 0) / 1024))} KB total)`;
   return (
     <>
-      <div className="section-intro">
-        <h3>
-          {opportunityId
-            ? "The right documents, at every step."
-            : "Your experience is the starting point."}
-        </h3>
-        <p>
-          {opportunityId
-            ? "Each upload creates a separate version. Submitted files stay preserved."
-            : "Add any career-related files. Career Buddy can prepare PDF, DOCX and text sources locally for selected use in chat."}
-        </p>
+      <div className="section-intro with-action">
+        <div>
+          <h3>
+            {opportunityId
+              ? "The right documents, at every step."
+              : "Your experience is the starting point."}
+          </h3>
+          <p>
+            {opportunityId
+              ? "Each upload creates a separate version. Submitted files stay preserved."
+              : "Drag and drop files or entire directories into your library. Career Buddy prepares PDF, DOCX and text sources locally."}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="button secondary small"
+          disabled={busy}
+          onClick={() => folderInputRef.current?.click()}
+        >
+          <FolderOpen size={15} />
+          Choose folder
+        </button>
       </div>
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+        onChange={(e) => {
+          addQueued(collectFileList(e.target.files));
+          e.target.value = "";
+        }}
+      />
       <form className="document-upload" onSubmit={upload}>
-        <label className={`upload-drop ${file ? "has-file" : ""}`}>
+        <label
+          className={`upload-drop ${files.length ? "has-file" : ""} ${dragOver ? "drag-active" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!dragOver) setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node))
+              setDragOver(false);
+          }}
+          onDrop={(e) => void handleDrop(e)}
+        >
           <Upload size={21} />
-          <strong>{file ? file.name : "Choose a document"}</strong>
-          <span>PDF, Word, or text · up to 15 MB</span>
+          <strong>{summaryLabel}</strong>
+          <span>
+            PDF, Word, PowerPoint, Markdown, HTML, RTF, captions (.vtt/.srt), or
+            text · multiple files or folders · up to 15 MB per file
+          </span>
           <input
-            key={file?.name || "empty"}
+            key={files.map((f) => f.path).join("|") || "empty"}
             type="file"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            multiple
+            disabled={busy}
+            onChange={(e) => addQueued(collectFileList(e.target.files))}
           />
         </label>
-        {file && (
+        {files.length > 0 && (
           <>
+            {(files.length > 500 || batchUploads) && (
+              <div className="upload-large-warning" role="status">
+                {files.length > 500 && <p><strong>Large upload:</strong> {files.length} files are queued. Uploading may take some time; keep this page open.</p>}
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={batchUploads} disabled={busy} onChange={(e) => setBatchUploads(e.target.checked)} />
+                  <span>Upload in batches of 500, pausing between batches</span>
+                </label>
+                {batchUploads && <small>After each batch, the remaining files stay queued. Select the upload button to continue.</small>}
+              </div>
+            )}
+            {files.length > 1 && (
+              <div className="upload-queue" aria-label="Queued files">
+                <div className="upload-queue-header">
+                  <strong>{files.length} files ready to upload</strong>
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => setFiles([])}
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <ul className="upload-queue-list">
+                  {files.slice(0, 25).map((item) => (
+                    <li key={item.path}>
+                      <span>{item.path}</span>
+                      <small>
+                        {Math.max(1, Math.round(item.file.size / 1024))} KB
+                      </small>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        disabled={busy}
+                        aria-label={`Remove ${item.path}`}
+                        onClick={() =>
+                          setFiles((current) =>
+                            current.filter((x) => x.path !== item.path),
+                          )
+                        }
+                      >
+                        <X size={13} />
+                      </button>
+                    </li>
+                  ))}
+                  {files.length > 25 && (
+                    <li className="upload-queue-more">
+                      +{files.length - 25} more files in queue
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
             <div className="form-grid">
               <Field label="Document type">
                 <select value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -2520,17 +2913,22 @@ function Documents({
               <button
                 type="button"
                 className="button secondary small"
-                onClick={() => setFile(null)}
+                disabled={busy}
+                onClick={() => setFiles([])}
               >
                 Cancel
               </button>
               <button className="button primary small" disabled={busy}>
                 {busy ? (
-                  <Busy text="Uploading…" />
+                  <Busy text={progress || "Uploading…"} />
                 ) : (
                   <>
                     <Upload size={15} />
-                    Upload document
+                    {files.length === 1
+                      ? "Upload document"
+                      : batchUploads && files.length > 500
+                        ? "Upload next 500 documents"
+                        : `Upload ${files.length} documents`}
                   </>
                 )}
               </button>
@@ -2538,73 +2936,744 @@ function Documents({
           </>
         )}
       </form>
-      <div className="document-list">
-        {documents.map((doc) => (
-          <article className="document-row" key={doc.id}>
-            <span className="document-icon">
-              <FileText size={21} />
-            </span>
-            <div className="document-name">
-              <a href={doc.url || `/api/documents/${doc.id}/content`} download>
-                {doc.name}
-              </a>
-              <small>
-                {doc.kind} · v{doc.version} ·{" "}
-                {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
-                {formatDate(doc.createdAt, timezone)}
-              </small>
-              {!opportunityId && (
-                <span className="library-file-status">
-                  Stored ·{" "}
-                  {extraction?.[doc.id]?.status === "ready"
-                    ? `${extraction[doc.id].chunkCount} text chunk${extraction[doc.id].chunkCount === 1 ? "" : "s"} ready`
-                    : extraction?.[doc.id]?.warnings.join(" ") ||
-                      "Text prepared when selected for Career Buddy"}
-                </span>
-              )}
-              {doc.notes && <p>{doc.notes}</p>}
-            </div>
-            {doc.status === "submitted" ? (
-              <Badge kind="green">
-                <ShieldCheck size={11} />
-                Submitted
-              </Badge>
-            ) : (
-              <select
-                className="compact-select"
-                aria-label={`Status of ${doc.name}`}
-                value={doc.status}
-                onChange={async (e) => {
-                  try {
-                    await api(
-                      `/documents/${doc.id}`,
-                      json(
-                        { status: e.target.value, revision: doc.revision },
-                        "PATCH",
-                      ),
-                    );
-                    onChanged();
-                  } catch (error) {
-                    onError(error);
-                  }
-                }}
-              >
-                <option value="draft">Draft</option>
-                <option value="approved">Approved</option>
-                <option value="submitted">Submitted</option>
-              </select>
-            )}
-            <a
-              className="icon-button"
-              href={doc.url || `/api/documents/${doc.id}/content`}
-              download
-              aria-label={`Download ${doc.name}`}
+      {!opportunityId && movableDocuments.length > 0 && (
+        <div className="library-move-toolbar">
+          <label>
+            <input
+              type="checkbox"
+              checked={
+                movableDocuments.length <= 500 &&
+                movableDocuments.every((d) => selectedForMove.includes(d.id))
+              }
+              onChange={(e) =>
+                setSelectedForMove(
+                  e.target.checked
+                    ? movableDocuments.slice(0, 500).map((d) => d.id)
+                    : [],
+                )
+              }
+            />{" "}
+            {movableDocuments.length > 500
+              ? "Select first 500 matching files"
+              : "Select all matching files"}
+          </label>
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={!selectedForMove.length}
+            onClick={() =>
+              startMove(
+                movableDocuments.filter((d) => selectedForMove.includes(d.id)),
+              )
+            }
+          >
+            <FolderInput size={14} /> Move selected
+            {selectedForMove.length ? ` (${selectedForMove.length})` : ""}
+          </button>
+        </div>
+      )}
+      {moveDocuments && (
+        <Modal
+          title={
+            moveDocuments.length === 1
+              ? "Move library file"
+              : `Move ${moveDocuments.length} library files`
+          }
+          subtitle="Choose a folder within your configured Career Library location."
+          onClose={() => {
+            if (!moving) setMoveDocuments(null);
+          }}
+        >
+          <form onSubmit={moveSelected}>
+            <p className="library-move-help">
+              Files move into the chosen folder; their document records and
+              prepared text stay linked. Leave the folder blank for top-level
+              files.
+            </p>
+            <Field
+              label="Destination folder"
+              hint="Use a relative path, such as Projects/2026. New folders are created if needed."
             >
-              <ArrowDownToLine size={17} />
-            </a>
-          </article>
-        ))}
-      </div>
+              <input
+                autoFocus
+                value={moveFolder}
+                onChange={(e) => setMoveFolder(e.target.value)}
+                list="library-move-folders"
+                maxLength={480}
+                placeholder="Top-level files"
+              />
+            </Field>
+            <datalist id="library-move-folders">
+              {[
+                ...new Set(
+                  documents
+                    .map((d) =>
+                      d.name.includes("/")
+                        ? d.name.slice(0, d.name.lastIndexOf("/"))
+                        : "",
+                    )
+                    .filter(Boolean),
+                ),
+              ]
+                .sort()
+                .map((folder) => (
+                  <option key={folder} value={folder} />
+                ))}
+            </datalist>
+            {moveError && (
+              <p className="form-error" role="alert">
+                {moveError}
+              </p>
+            )}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={moving}
+                onClick={() => setMoveDocuments(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="button primary"
+                disabled={moving}
+              >
+                {moving ? "Moving…" : "Move files"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {(() => {
+        function folderEntries(sectionDocs: BoardDocument[]) {
+          const map = new Map<string, BoardDocument[]>();
+          for (const doc of sectionDocs) {
+            const idx = doc.name.lastIndexOf("/");
+            const folderName = idx > 0 ? doc.name.slice(0, idx) : "";
+            if (!map.has(folderName)) map.set(folderName, []);
+            map.get(folderName)!.push(doc);
+          }
+          return [...map.entries()].sort(([a], [b]) =>
+            !a ? 1 : !b ? -1 : a.localeCompare(b),
+          );
+        }
+        function renderDocumentGroups(
+          sectionDocs: BoardDocument[],
+          sectionKey: string,
+        ) {
+          const groups = groupByFolder
+            ? folderEntries(sectionDocs)
+            : ([["", sectionDocs]] as [string, BoardDocument[]][]);
+          return (
+            <div className="document-list">
+              {groups.map(([folderName, groupDocs]) => {
+                const collapseKey = `${sectionKey}:${folderName || "__root__"}`;
+                const isCollapsed = Boolean(
+                  groupByFolder && !expandedFolders[collapseKey],
+                );
+                const removableFolderDocs = groupDocs.filter(
+                  (d) => d.status !== "submitted",
+                );
+                return (
+                  <div
+                    key={collapseKey}
+                    className={
+                      groupByFolder && folderName ? "document-folder-group" : ""
+                    }
+                  >
+                    {groupByFolder && (
+                      <div className="document-folder-bar">
+                        <button
+                          type="button"
+                          className="document-folder-header"
+                          aria-expanded={!isCollapsed}
+                          onClick={() =>
+                            setExpandedFolders((current) => ({
+                              ...current,
+                              [collapseKey]: !current[collapseKey],
+                            }))
+                          }
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight size={14} />
+                          ) : (
+                            <ChevronDown size={14} />
+                          )}
+                          <Folder size={14} />
+                          <strong>{folderName || "Top-level files"}</strong>
+                          <span className="badge muted">
+                            {groupDocs.length}
+                          </span>
+                        </button>
+                        {!opportunityId && removableFolderDocs.length > 0 && (
+                          <button
+                            type="button"
+                            className="button secondary small"
+                            onClick={() => startMove(removableFolderDocs)}
+                            disabled={removableFolderDocs.length > 500}
+                            title={
+                              removableFolderDocs.length > 500
+                                ? "Select up to 500 files at a time."
+                                : undefined
+                            }
+                            aria-label={`Move ${removableFolderDocs.length} file${removableFolderDocs.length === 1 ? "" : "s"} from ${folderName || "Top-level files"}`}
+                          >
+                            <FolderInput size={13} /> Move files
+                          </button>
+                        )}
+                        {removableFolderDocs.length > 0 &&
+                          (confirmDeleteFolderKey === collapseKey ? (
+                            <div className="document-delete-confirm">
+                              <span>
+                                Delete {removableFolderDocs.length} file
+                                {removableFolderDocs.length === 1 ? "" : "s"}?
+                              </span>
+                              <button
+                                type="button"
+                                className="button danger small"
+                                disabled={deletingFolderKey === collapseKey}
+                                onClick={async () => {
+                                  setDeletingFolderKey(collapseKey);
+                                  try {
+                                    const params = new URLSearchParams({
+                                      ...(opportunityId
+                                        ? { opportunityId }
+                                        : { scope: "library" }),
+                                      folder: folderName || "__root__",
+                                      ids: removableFolderDocs
+                                        .map((d) => d.id)
+                                        .join(","),
+                                    });
+                                    const res = await api<{
+                                      deletedCount: number;
+                                      preservedSubmittedCount: number;
+                                    }>(`/documents?${params.toString()}`, {
+                                      method: "DELETE",
+                                    });
+                                    setConfirmDeleteFolderKey("");
+                                    onChanged();
+                                    onNotice?.(
+                                      `Deleted ${res.deletedCount} document${res.deletedCount === 1 ? "" : "s"} from ${folderName || "Top-level files"}.`,
+                                    );
+                                  } catch (err) {
+                                    onError(err);
+                                  } finally {
+                                    setDeletingFolderKey("");
+                                  }
+                                }}
+                              >
+                                {deletingFolderKey === collapseKey
+                                  ? "Deleting…"
+                                  : "Confirm"}
+                              </button>
+                              <button
+                                type="button"
+                                className="button secondary small"
+                                disabled={deletingFolderKey === collapseKey}
+                                onClick={() => setConfirmDeleteFolderKey("")}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="button secondary small danger-text folder-delete-btn"
+                              aria-label={`Delete folder ${folderName || "Top-level files"}`}
+                              onClick={() =>
+                                setConfirmDeleteFolderKey(collapseKey)
+                              }
+                            >
+                              <Trash2 size={13} />
+                              Delete folder
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                    {!isCollapsed &&
+                      groupDocs.map((doc) => {
+                        const displayName =
+                          groupByFolder &&
+                          folderName &&
+                          doc.name.startsWith(folderName + "/")
+                            ? doc.name.slice(folderName.length + 1)
+                            : doc.name;
+                        const isReady =
+                          extraction?.[doc.id]?.status === "ready";
+                        return (
+                          <article className="document-row" key={doc.id}>
+                            {!opportunityId && doc.status !== "submitted" && (
+                              <input
+                                className="document-move-select"
+                                type="checkbox"
+                                aria-label={`Select ${doc.name} for moving`}
+                                checked={selectedForMove.includes(doc.id)}
+                                disabled={
+                                  !selectedForMove.includes(doc.id) &&
+                                  selectedForMove.length >= 500
+                                }
+                                onChange={(e) =>
+                                  setSelectedForMove((current) =>
+                                    e.target.checked
+                                      ? current.length < 500
+                                        ? [...current, doc.id]
+                                        : current
+                                      : current.filter((id) => id !== doc.id),
+                                  )
+                                }
+                              />
+                            )}
+                            <span className="document-icon">
+                              <FileText size={21} />
+                            </span>
+                            <div className="document-name">
+                              <a
+                                href={
+                                  doc.url || `/api/documents/${doc.id}/content`
+                                }
+                                download
+                              >
+                                {displayName}
+                              </a>
+                              <small>
+                                {doc.kind} · v{doc.version} ·{" "}
+                                {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
+                                {formatDate(doc.createdAt, timezone)}
+                              </small>
+                              <div className="document-tags">
+                                {(doc.tags || []).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className={`document-tag-pill ${selectedTag && selectedTag.toLowerCase() === tag.toLowerCase() ? "active" : ""}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="document-tag-click"
+                                      onClick={() =>
+                                        onSelectTag?.(
+                                          selectedTag.toLowerCase() ===
+                                            tag.toLowerCase()
+                                            ? ""
+                                            : tag,
+                                        )
+                                      }
+                                    >
+                                      <Tag size={10} />
+                                      {tag}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="document-tag-remove"
+                                      aria-label={`Remove tag ${tag} from ${doc.name}`}
+                                      onClick={async () => {
+                                        try {
+                                          await api(
+                                            `/documents/${doc.id}`,
+                                            json(
+                                              {
+                                                tags: (doc.tags || []).filter(
+                                                  (t) => t !== tag,
+                                                ),
+                                                revision: doc.revision,
+                                              },
+                                              "PATCH",
+                                            ),
+                                          );
+                                          onChanged();
+                                        } catch (error) {
+                                          onError(error);
+                                        }
+                                      }}
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </span>
+                                ))}
+                                {editingTagsId === doc.id ? (
+                                  <form
+                                    className="document-tag-form"
+                                    onSubmit={async (e) => {
+                                      e.preventDefault();
+                                      const nextTag = tagInput
+                                        .trim()
+                                        .replace(/^#+/, "");
+                                      if (!nextTag) {
+                                        setEditingTagsId("");
+                                        return;
+                                      }
+                                      try {
+                                        await api(
+                                          `/documents/${doc.id}`,
+                                          json(
+                                            {
+                                              tags: [
+                                                ...(doc.tags || []),
+                                                nextTag,
+                                              ],
+                                              revision: doc.revision,
+                                            },
+                                            "PATCH",
+                                          ),
+                                        );
+                                        setTagInput("");
+                                        setEditingTagsId("");
+                                        onChanged();
+                                      } catch (error) {
+                                        onError(error);
+                                      }
+                                    }}
+                                  >
+                                    <input
+                                      autoFocus
+                                      aria-label={`New tag for ${doc.name}`}
+                                      placeholder="Add tag…"
+                                      value={tagInput}
+                                      onChange={(e) =>
+                                        setTagInput(e.target.value)
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Escape") {
+                                          setEditingTagsId("");
+                                          setTagInput("");
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      type="submit"
+                                      className="button primary small"
+                                    >
+                                      Add
+                                    </button>
+                                  </form>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="document-tag-add"
+                                    aria-label={`Add tag to ${doc.name}`}
+                                    onClick={() => {
+                                      setEditingTagsId(doc.id);
+                                      setTagInput("");
+                                    }}
+                                  >
+                                    <Plus size={10} />
+                                    Tag
+                                  </button>
+                                )}
+                              </div>
+                              {!opportunityId && (
+                                <span className="library-file-status">
+                                  Stored ·{" "}
+                                  {isReady
+                                    ? `${extraction[doc.id].chunkCount} text chunk${extraction[doc.id].chunkCount === 1 ? "" : "s"} ready`
+                                    : extraction?.[doc.id]?.warnings.join(
+                                        " ",
+                                      ) ||
+                                      "Text prepared when selected for Career Buddy"}
+                                </span>
+                              )}
+                              {doc.notes && <p>{doc.notes}</p>}
+                            </div>
+                            {!opportunityId && onPrepareDocument && (
+                              <button
+                                type="button"
+                                className="button secondary small"
+                                disabled={preparingDocId === doc.id}
+                                title={
+                                  isReady
+                                    ? "Re-extract and prepare text chunks for this source"
+                                    : "Prepare readable text chunks for Career Buddy"
+                                }
+                                onClick={async () => {
+                                  setPreparingDocId(doc.id);
+                                  try {
+                                    await onPrepareDocument(doc.id, true);
+                                  } finally {
+                                    setPreparingDocId("");
+                                  }
+                                }}
+                              >
+                                {preparingDocId === doc.id ? (
+                                  <LoaderCircle size={13} className="spin" />
+                                ) : (
+                                  <RotateCw size={13} />
+                                )}
+                                {isReady ? "Re-prepare" : "Prepare"}
+                              </button>
+                            )}
+                            {doc.status === "submitted" ? (
+                              <Badge kind="green">
+                                <ShieldCheck size={11} />
+                                Submitted
+                              </Badge>
+                            ) : (
+                              <select
+                                className="compact-select"
+                                aria-label={`Status of ${doc.name}`}
+                                value={doc.status}
+                                onChange={async (e) => {
+                                  try {
+                                    await api(
+                                      `/documents/${doc.id}`,
+                                      json(
+                                        {
+                                          status: e.target.value,
+                                          revision: doc.revision,
+                                        },
+                                        "PATCH",
+                                      ),
+                                    );
+                                    onChanged();
+                                  } catch (error) {
+                                    onError(error);
+                                  }
+                                }}
+                              >
+                                <option value="draft">Draft</option>
+                                <option value="approved">Approved</option>
+                                <option value="submitted">Submitted</option>
+                              </select>
+                            )}
+                            {!opportunityId && doc.status !== "submitted" && (
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={`Move ${doc.name}`}
+                                title="Move to another library folder"
+                                onClick={() => startMove([doc])}
+                              >
+                                <FolderInput size={17} />
+                              </button>
+                            )}
+                            <a
+                              className="icon-button"
+                              href={
+                                doc.url || `/api/documents/${doc.id}/content`
+                              }
+                              download
+                              aria-label={`Download ${doc.name}`}
+                            >
+                              <ArrowDownToLine size={17} />
+                            </a>
+                            {doc.status !== "submitted" &&
+                              (confirmDeleteId === doc.id ? (
+                                <div className="document-delete-confirm">
+                                  <button
+                                    type="button"
+                                    className="button danger small"
+                                    disabled={deletingId === doc.id}
+                                    onClick={async () => {
+                                      setDeletingId(doc.id);
+                                      try {
+                                        await api(`/documents/${doc.id}`, {
+                                          method: "DELETE",
+                                        });
+                                        setConfirmDeleteId("");
+                                        onChanged();
+                                        onNotice?.(`Deleted ${doc.name}.`);
+                                      } catch (err) {
+                                        onError(err);
+                                      } finally {
+                                        setDeletingId("");
+                                      }
+                                    }}
+                                  >
+                                    {deletingId === doc.id
+                                      ? "Deleting…"
+                                      : "Confirm"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button secondary small"
+                                    disabled={deletingId === doc.id}
+                                    onClick={() => setConfirmDeleteId("")}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="icon-button danger-icon"
+                                  aria-label={`Delete ${doc.name}`}
+                                  onClick={() => setConfirmDeleteId(doc.id)}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              ))}
+                          </article>
+                        );
+                      })}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        }
+        const preparedDocs = documents.filter(
+          (doc) => extraction?.[doc.id]?.status === "ready",
+        );
+        const unpreparedDocs = documents.filter(
+          (doc) => extraction?.[doc.id]?.status !== "ready",
+        );
+        const allFolderKeys = groupByFolder
+          ? splitByPrepared
+            ? [
+                ...(sourceFilter !== "unused"
+                  ? folderEntries(preparedDocs).map(
+                      ([name]) => `ready:${name || "__root__"}`,
+                    )
+                  : []),
+                ...(sourceFilter !== "used"
+                  ? folderEntries(unpreparedDocs).map(
+                      ([name]) => `unprepared:${name || "__root__"}`,
+                    )
+                  : []),
+              ]
+            : folderEntries(documents).map(
+                ([name]) => `all:${name || "__root__"}`,
+              )
+          : [];
+        const expandedCount = allFolderKeys.filter(
+          (k) => expandedFolders[k],
+        ).length;
+        const folderToolbar =
+          groupByFolder && allFolderKeys.length > 0 ? (
+            <div className="document-folder-toolbar">
+              <span className="folder-toolbar-summary">
+                {allFolderKeys.length} folder
+                {allFolderKeys.length === 1 ? "" : "s"} · {expandedCount}{" "}
+                expanded
+              </span>
+              <div className="folder-toolbar-actions">
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={expandedCount === allFolderKeys.length}
+                  onClick={() =>
+                    setExpandedFolders(
+                      Object.fromEntries(allFolderKeys.map((k) => [k, true])),
+                    )
+                  }
+                >
+                  <ChevronDown size={13} />
+                  Expand all
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={expandedCount === 0}
+                  onClick={() => setExpandedFolders({})}
+                >
+                  <ChevronRight size={13} />
+                  Collapse all
+                </button>
+              </div>
+            </div>
+          ) : null;
+        if (splitByPrepared && documents.length > 0) {
+          return (
+            <div className="document-split-sections">
+              {folderToolbar}
+              {sourceFilter !== "unused" && (
+                <section
+                  className="document-split-section"
+                  aria-label="Used (prepared) sources"
+                >
+                  <button
+                    type="button"
+                    className="document-split-heading document-split-toggle"
+                    aria-expanded={expandedSources.ready}
+                    onClick={() =>
+                      setExpandedSources((current) => ({
+                        ...current,
+                        ready: !current.ready,
+                      }))
+                    }
+                  >
+                    <div>
+                      <h4>
+                        {expandedSources.ready ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronRight size={14} />
+                        )}{" "}
+                        <Check size={14} /> Used sources (prepared for Career
+                        Buddy)
+                      </h4>
+                      <p>
+                        Readable text chunks extracted locally and ready to be
+                        matched when you ask Career Buddy a question.
+                      </p>
+                    </div>
+                    <Badge kind="green">{preparedDocs.length} used</Badge>
+                  </button>
+                  {expandedSources.ready &&
+                    (preparedDocs.length > 0 ? (
+                      renderDocumentGroups(preparedDocs, "ready")
+                    ) : (
+                      <p className="quiet-empty">
+                        No used (prepared) sources yet. Click &ldquo;Prepare
+                        library text&rdquo; above or &ldquo;Prepare&rdquo; on
+                        any unused source below.
+                      </p>
+                    ))}
+                </section>
+              )}
+              {sourceFilter !== "used" && (
+                <section
+                  className="document-split-section"
+                  aria-label="Unused (unprepared) sources"
+                >
+                  <button
+                    type="button"
+                    className="document-split-heading document-split-toggle"
+                    aria-expanded={expandedSources.unprepared}
+                    onClick={() =>
+                      setExpandedSources((current) => ({
+                        ...current,
+                        unprepared: !current.unprepared,
+                      }))
+                    }
+                  >
+                    <div>
+                      <h4>
+                        {expandedSources.unprepared ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronRight size={14} />
+                        )}{" "}
+                        Unused sources (not yet prepared)
+                      </h4>
+                      <p>
+                        Stored safely in your library, but not yet prepared into
+                        searchable text chunks (or no readable text could be
+                        extracted).
+                      </p>
+                    </div>
+                    <Badge kind="muted">{unpreparedDocs.length} unused</Badge>
+                  </button>
+                  {expandedSources.unprepared &&
+                    (unpreparedDocs.length > 0 ? (
+                      renderDocumentGroups(unpreparedDocs, "unprepared")
+                    ) : (
+                      <p className="quiet-empty">
+                        All matching sources are prepared and ready for Career
+                        Buddy.
+                      </p>
+                    ))}
+                </section>
+              )}
+            </div>
+          );
+        }
+        return (
+          <>
+            {folderToolbar}
+            {renderDocumentGroups(documents, "all")}
+          </>
+        );
+      })()}
       {!documents.length && (
         <p className="quiet-empty">
           No documents yet. Add one above to keep everything together.
@@ -2676,56 +3745,696 @@ function Summary({ o, timezone }: { o: Opportunity; timezone: string }) {
     </>
   );
 }
+function ObsidianVaultPanel({
+  obsidian,
+  totalDocs,
+  preparedDocsCount,
+  timezone,
+  restarting,
+  onRestart,
+  onReload,
+  onNotice,
+  onError,
+}: {
+  obsidian: ObsidianStatus | null;
+  totalDocs: number;
+  preparedDocsCount: number;
+  timezone: string;
+  restarting?: boolean;
+  onRestart?: () => void;
+  onReload: () => Promise<void>;
+  onNotice: (s: string) => void;
+  onError: (e: unknown) => void;
+}) {
+  const [expanded, setExpanded] = useState(false),
+    [action, setAction] = useState<"create" | "connect">("create"),
+    [locationType, setLocationType] = useState<"subpath" | "hostPath">(
+      obsidian?.locationType || "subpath",
+    ),
+    [subpath, setSubpath] = useState(obsidian?.subpath || "obsidian-vault"),
+    [hostPath, setHostPath] = useState(obsidian?.hostPath || ""),
+    [vaultName, setVaultName] = useState(
+      obsidian?.vaultName || "Opportunity Knox Vault",
+    ),
+    [importExisting, setImportExisting] = useState(false),
+    [importOnlyPrepared, setImportOnlyPrepared] = useState(false),
+    [syncOnConnect, setSyncOnConnect] = useState(false),
+    [readOnly, setReadOnly] = useState(true),
+    [onlyPreparedExport, setOnlyPreparedExport] = useState(false),
+    [includeExtractedText, setIncludeExtractedText] = useState(true),
+    [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    if (obsidian) {
+      setLocationType(obsidian.locationType || "subpath");
+      if (obsidian.subpath) setSubpath(obsidian.subpath);
+      if (obsidian.hostPath) setHostPath(obsidian.hostPath);
+      if (obsidian.vaultName) setVaultName(obsidian.vaultName);
+    }
+  }, [
+    obsidian?.enabled,
+    obsidian?.locationType,
+    obsidian?.subpath,
+    obsidian?.hostPath,
+    obsidian?.vaultName,
+  ]);
+
+  async function submitConfigure(e: FormEvent) {
+    e.preventDefault();
+    setBusy("configure");
+    try {
+      const res = await api<{
+        ok: boolean;
+        obsidian: ObsidianStatus;
+        importedToVault?: {
+          importedNotesCount: number;
+          copiedAttachmentsCount: number;
+        };
+        syncedFromVault?: {
+          importedCount: number;
+          updatedCount: number;
+        };
+      }>(
+        "/obsidian/configure",
+        json({
+          action,
+          locationType,
+          subpath,
+          hostPath,
+          vaultName,
+          readOnly: action === "connect" && readOnly,
+          importExisting: action === "connect" && readOnly ? false : importExisting,
+          importOnlyPrepared,
+          syncFromVault: action === "connect" ? syncOnConnect : false,
+        }),
+      );
+      await onReload();
+      if (res.obsidian.mountPending) {
+        onNotice(
+          "Obsidian host vault path saved. Click Update & restart to attach the host folder.",
+        );
+      } else {
+        const parts = [
+          action === "create"
+            ? `Created Obsidian vault "${res.obsidian.vaultName}".`
+            : `Connected Obsidian vault "${res.obsidian.vaultName}".`,
+        ];
+        if (res.importedToVault) {
+          parts.push(
+            `Exported ${res.importedToVault.importedNotesCount} note${res.importedToVault.importedNotesCount === 1 ? "" : "s"} (${res.importedToVault.copiedAttachmentsCount} attachment${res.importedToVault.copiedAttachmentsCount === 1 ? "" : "s"}) into the vault.`,
+          );
+        }
+        if (res.syncedFromVault) {
+          parts.push(
+            `Imported ${res.syncedFromVault.importedCount} new and ${res.syncedFromVault.updatedCount} updated file${res.syncedFromVault.importedCount + res.syncedFromVault.updatedCount === 1 ? "" : "s"} from the vault.`,
+          );
+        }
+        onNotice(parts.join(" "));
+      }
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleImportToVault() {
+    setBusy("export");
+    try {
+      const res = await api<{
+        importedNotesCount: number;
+        copiedAttachmentsCount: number;
+        skippedCount: number;
+      }>(
+        "/obsidian/import-to-vault",
+        json({
+          onlyPrepared: onlyPreparedExport,
+          includeExtractedText,
+        }),
+      );
+      await onReload();
+      onNotice(
+        `Imported ${res.importedNotesCount} source${res.importedNotesCount === 1 ? "" : "s"} (${res.copiedAttachmentsCount} original attachment${res.copiedAttachmentsCount === 1 ? "" : "s"}) into your Obsidian vault.`,
+      );
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleSyncFromVault() {
+    setBusy("sync");
+    try {
+      const res = await api<{
+        importedCount: number;
+        updatedCount: number;
+        unchangedCount: number;
+        preparedCount: number;
+      }>("/obsidian/sync-from-vault", json({ autoPrepare: true }));
+      await onReload();
+      onNotice(
+        `Synced from Obsidian vault: ${res.importedCount} new, ${res.updatedCount} updated, ${res.unchangedCount} unchanged (${res.preparedCount} prepared for Career Buddy).`,
+      );
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleDisconnect() {
+    setBusy("disconnect");
+    try {
+      await api("/obsidian/configure", json({ action: "disconnect" }));
+      await onReload();
+      onNotice("Disconnected Obsidian vault. Vault files remain untouched.");
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const isConnected = Boolean(obsidian?.enabled);
+  const isReady = Boolean(
+    obsidian?.enabled &&
+    !obsidian?.mountPending &&
+    obsidian?.vaultStats?.exists,
+  );
+
+  return (
+    <div className="obsidian-panel">
+      <div className="obsidian-panel-header">
+        <button
+          type="button"
+          className="obsidian-panel-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          <FolderOpen size={16} />
+          <strong>Obsidian Vault</strong>
+          {isReady ? (
+            <Badge kind="green">
+              <Check size={11} />
+              {obsidian?.vaultName}{obsidian?.readOnly ? " · Read-only" : ""} · {obsidian?.vaultStats.markdownCount} note
+              {obsidian?.vaultStats.markdownCount === 1 ? "" : "s"}
+              {obsidian?.vaultStats.attachmentCount
+                ? ` · ${obsidian.vaultStats.attachmentCount} attachment${obsidian.vaultStats.attachmentCount === 1 ? "" : "s"}`
+                : ""}
+            </Badge>
+          ) : obsidian?.mountPending ? (
+            <Badge kind="amber">Restart needed to attach host vault</Badge>
+          ) : (
+            <Badge kind="muted">Not connected</Badge>
+          )}
+        </button>
+        <div className="obsidian-header-actions">
+          {isReady && (
+            <>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={Boolean(busy)}
+                onClick={() => void handleSyncFromVault()}
+                title="Import new or edited Markdown notes and files from your Obsidian vault into your Career Library"
+              >
+                {busy === "sync" ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <RotateCw size={14} />
+                )}
+                Sync from vault
+              </button>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={Boolean(busy) || totalDocs === 0 || Boolean(obsidian?.readOnly)}
+                onClick={() => void handleImportToVault()}
+                title="Export existing Career Library sources into your Obsidian vault"
+              >
+                {busy === "export" ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <Upload size={14} />
+                )}
+                Import sources to vault
+              </button>
+              {obsidian?.obsidianUrl && (
+                <a
+                  className="button secondary small"
+                  href={obsidian.obsidianUrl}
+                  title={`Open ${obsidian.resolvedHostPath} in Obsidian desktop`}
+                >
+                  <ArrowUpRight size={14} />
+                  Open in Obsidian
+                </a>
+              )}
+            </>
+          )}
+          {obsidian?.mountPending && onRestart && (
+            <button
+              type="button"
+              className="button primary small"
+              disabled={restarting}
+              onClick={onRestart}
+            >
+              <RotateCw size={14} className={restarting ? "spin" : ""} />
+              {restarting ? "Restarting…" : "Mount & restart board"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded
+              ? "Hide settings"
+              : isConnected
+                ? "Manage vault"
+                : "Set up vault"}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="obsidian-panel-body">
+          {isConnected && obsidian && (
+            <div className="obsidian-status-card">
+              <div className="obsidian-status-details">
+                <div>
+                  <span className="eyebrow">ACTIVE VAULT LOCATION</span>
+                  <p className="obsidian-vault-path">
+                    <code>{obsidian.resolvedHostPath}</code>
+                  </p>
+                  <small>
+                    {obsidian.mountPending
+                      ? "Waiting for container restart to mount this host directory."
+                      : `Open this folder in Obsidian via "Open folder as vault" or click "Open in Obsidian" above.${obsidian.lastSyncedAt ? ` · Last synced from vault: ${formatDate(obsidian.lastSyncedAt, timezone, true)}` : ""}${obsidian.lastImportedToVaultAt ? ` · Last imported to vault: ${formatDate(obsidian.lastImportedToVaultAt, timezone, true)}` : ""}`}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="button secondary small danger-text"
+                  disabled={Boolean(busy)}
+                  onClick={() => void handleDisconnect()}
+                >
+                  Disconnect vault
+                </button>
+              </div>
+              {isReady && (
+                <div className="obsidian-sync-cards">
+                  <div className="obsidian-sync-box">
+                    <h4>Import existing library sources into vault</h4>
+                    {obsidian.readOnly && <p>This vault is read-only. No files can be exported to it.</p>}
+                    <p>
+                      Writes Markdown notes into <code>Career Library/</code>{" "}
+                      and copies PDFs, Word docs, PowerPoints, and transcripts
+                      into <code>Attachments/</code> with companion notes.
+                    </p>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={onlyPreparedExport}
+                        onChange={(e) =>
+                          setOnlyPreparedExport(e.target.checked)
+                        }
+                      />
+                      <span>
+                        Import only <strong>Used (prepared)</strong> sources (
+                        {preparedDocsCount} of {totalDocs})
+                      </span>
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={includeExtractedText}
+                        onChange={(e) =>
+                          setIncludeExtractedText(e.target.checked)
+                        }
+                      />
+                      <span>
+                        Include extracted text inside companion Markdown notes
+                        so PDFs, DOCX &amp; slides are searchable in Obsidian
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      className="button primary small"
+                      disabled={Boolean(busy) || totalDocs === 0 || Boolean(obsidian?.readOnly)}
+                      onClick={() => void handleImportToVault()}
+                    >
+                      {busy === "export" ? (
+                        <Busy text="Importing to vault…" />
+                      ) : (
+                        <>
+                          <Upload size={14} />
+                          Import{" "}
+                          {onlyPreparedExport
+                            ? preparedDocsCount
+                            : totalDocs}{" "}
+                          source
+                          {(onlyPreparedExport
+                            ? preparedDocsCount
+                            : totalDocs) === 1
+                            ? ""
+                            : "s"}{" "}
+                          into vault
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="obsidian-sync-box">
+                    <h4>Sync notes from Obsidian vault into library</h4>
+                    <p>
+                      Scans <code>{obsidian.vaultName}</code> for new or updated
+                      Markdown notes and attachments, adds them to your Career
+                      Library with <code>#Obsidian</code> and frontmatter tags,
+                      and prepares their text for Career Buddy.
+                    </p>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      disabled={Boolean(busy)}
+                      onClick={() => void handleSyncFromVault()}
+                    >
+                      {busy === "sync" ? (
+                        <Busy text="Syncing vault…" />
+                      ) : (
+                        <>
+                          <RotateCw size={14} />
+                          Sync vault into library (
+                          {obsidian.vaultStats.totalFiles} file
+                          {obsidian.vaultStats.totalFiles === 1 ? "" : "s"} in
+                          vault)
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <form className="obsidian-config-form" onSubmit={submitConfigure}>
+            <div className="obsidian-mode-tabs" role="group">
+              <button
+                type="button"
+                className={action === "create" ? "active" : ""}
+                onClick={() => {
+                  setAction("create");
+                  setImportExisting(false);
+                }}
+              >
+                <Plus size={13} />
+                Create a new vault
+              </button>
+              <button
+                type="button"
+                className={action === "connect" ? "active" : ""}
+                onClick={() => {
+                  setAction("connect");
+                  setSyncOnConnect(false);
+                  setImportExisting(false);
+                  setReadOnly(true);
+                }}
+              >
+                <FolderOpen size={13} />
+                Point to an existing vault
+              </button>
+            </div>
+            <div className="form-grid">
+              <Field label="Vault location">
+                <select
+                  value={locationType}
+                  onChange={(e) =>
+                    setLocationType(e.target.value as "subpath" | "hostPath")
+                  }
+                >
+                  <option value="subpath">
+                    Subfolder inside workspace document folder (instant, no
+                    restart)
+                  </option>
+                  <option value="hostPath">
+                    Custom absolute path on host computer
+                  </option>
+                </select>
+              </Field>
+              <Field label="Vault display name">
+                <input
+                  value={vaultName}
+                  onChange={(e) => setVaultName(e.target.value)}
+                  placeholder="Opportunity Knox Vault"
+                />
+              </Field>
+              {locationType === "subpath" ? (
+                <Field label="Vault subfolder name" wide>
+                  <input
+                    value={subpath}
+                    onChange={(e) => setSubpath(e.target.value)}
+                    placeholder="obsidian-vault"
+                  />
+                </Field>
+              ) : (
+                <Field label="Absolute folder path on host machine" wide>
+                  <input
+                    value={hostPath}
+                    onChange={(e) => setHostPath(e.target.value)}
+                    placeholder="/Users/you/Documents/Obsidian/CareerVault"
+                  />
+                </Field>
+              )}
+            </div>
+            <div className="obsidian-options-list">
+              {action === "connect" && <label className="checkbox-row">
+                <input type="checkbox" checked={readOnly} onChange={(e) => { setReadOnly(e.target.checked); if (e.target.checked) setImportExisting(false); }} />
+                <span>Connect read-only (do not write files to the vault)</span>
+              </label>}
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={importExisting}
+                  disabled={action === "connect" && readOnly}
+                  onChange={(e) => setImportExisting(e.target.checked)}
+                />
+                <span>
+                  Import existing Career Library sources into this vault right
+                  away ({totalDocs} document{totalDocs === 1 ? "" : "s"})
+                </span>
+              </label>
+              {importExisting && totalDocs > 0 && (
+                <label className="checkbox-row nested">
+                  <input
+                    type="checkbox"
+                    checked={importOnlyPrepared}
+                    onChange={(e) => setImportOnlyPrepared(e.target.checked)}
+                  />
+                  <span>
+                    Import only <strong>Used (prepared)</strong> sources (
+                    {preparedDocsCount} ready)
+                  </span>
+                </label>
+              )}
+              {action === "connect" && (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={syncOnConnect}
+                    onChange={(e) => setSyncOnConnect(e.target.checked)}
+                  />
+                  <span>
+                    Import existing notes and attachments from this Obsidian
+                    vault into your Career Library
+                  </span>
+                </label>
+              )}
+            </div>
+            <div className="form-actions">
+              <button
+                type="submit"
+                className="button primary small"
+                disabled={Boolean(busy)}
+              >
+                {busy === "configure" ? (
+                  <Busy
+                    text={
+                      action === "create"
+                        ? "Creating vault…"
+                        : "Connecting vault…"
+                    }
+                  />
+                ) : action === "create" ? (
+                  <>
+                    <Plus size={14} />
+                    Create Obsidian vault
+                  </>
+                ) : (
+                  <>
+                    <FolderOpen size={14} />
+                    Connect existing vault
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
 function Library({
   onError,
+  onNotice,
+  onChanged,
+  onRestart,
+  restarting,
   timezone,
 }: {
   onError: (e: unknown) => void;
+  onNotice: (s: string) => void;
+  onChanged?: () => void;
+  onRestart?: () => void;
+  restarting?: boolean;
   timezone: string;
 }) {
   const [extraction, setExtraction] = useState<
       Record<string, BuddySource["extraction"]>
     >({}),
-    [preparing, setPreparing] = useState(false);
+    [obsidian, setObsidian] = useState<ObsidianStatus | null>(null),
+    [preparing, setPreparing] = useState(false),
+    [resetting, setResetting] = useState(false),
+    [clearing, setClearing] = useState(false),
+    [confirmClearAll, setConfirmClearAll] = useState(false);
   const [docs, setDocs] = useState<BoardDocument[]>([]),
     [loading, setLoading] = useState(true),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""),
+    [selectedTag, setSelectedTag] = useState(""),
+    [tagsExpanded, setTagsExpanded] = useState(false),
+    [confirmDeleteTag, setConfirmDeleteTag] = useState(""),
+    [deletingTag, setDeletingTag] = useState(""),
+    [sourceFilter, setSourceFilter] = useState<"split" | "used" | "unused">(
+      "split",
+    ),
+    [groupByFolder, setGroupByFolder] = useState(true),
+    [pageDragOver, setPageDragOver] = useState(false),
+    [droppedQueue, setDroppedQueue] = useState<DroppedFile[]>([]);
   async function load() {
     try {
-      const [r, prepared] = await Promise.all([
+      const [r, prepared, obs] = await Promise.all([
         api<{ documents: BoardDocument[] }>("/documents"),
         api<{ documents: BuddySource[] }>("/buddy/documents"),
+        api<ObsidianStatus>("/obsidian"),
       ]);
       setExtraction(
         Object.fromEntries(prepared.documents.map((d) => [d.id, d.extraction])),
       );
       setDocs(r.documents.filter((d) => !d.opportunityId));
+      setObsidian(obs);
+      onChanged?.();
     } catch (e) {
       onError(e);
     } finally {
       setLoading(false);
     }
   }
-  async function prepare() {
+  async function prepare(force = false) {
     setPreparing(true);
     try {
+      if (force) {
+        await api("/buddy/index", { method: "DELETE" });
+      }
       for (let i = 0; i < docs.length; i += 50)
         await api(
           "/buddy/index",
-          json({ documentIds: docs.slice(i, i + 50).map((doc) => doc.id) }),
+          json({
+            documentIds: docs.slice(i, i + 50).map((doc) => doc.id),
+            force,
+          }),
         );
       await load();
+      onNotice(
+        force
+          ? "Library text reset and re-prepared."
+          : "Library text prepared for Career Buddy.",
+      );
     } catch (error) {
       onError(error);
     } finally {
       setPreparing(false);
     }
   }
+  async function resetPrepared() {
+    setResetting(true);
+    try {
+      const res = await api<{ resetCount: number }>("/buddy/index", {
+        method: "DELETE",
+      });
+      await load();
+      onNotice(
+        `Reset prepared text for ${res.resetCount} library document${res.resetCount === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      onError(error);
+    } finally {
+      setResetting(false);
+    }
+  }
+  async function prepareSingleDocument(id: string, force: boolean) {
+    try {
+      await api("/buddy/index", json({ documentIds: [id], force }));
+      await load();
+      onNotice(force ? "Source re-prepared." : "Source prepared.");
+    } catch (error) {
+      onError(error);
+    }
+  }
+  async function clearLibrary() {
+    setClearing(true);
+    try {
+      const res = await api<{
+        deletedCount: number;
+        preservedSubmittedCount: number;
+      }>("/documents?scope=library", { method: "DELETE" });
+      setConfirmClearAll(false);
+      await load();
+      onNotice(
+        res.preservedSubmittedCount > 0
+          ? `Cleared ${res.deletedCount} library document${res.deletedCount === 1 ? "" : "s"} (${res.preservedSubmittedCount} submitted preserved).`
+          : `Cleared ${res.deletedCount} library document${res.deletedCount === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      onError(error);
+    } finally {
+      setClearing(false);
+    }
+  }
   useEffect(() => {
     void load();
   }, []);
   return (
-    <main className="content-page">
+    <main
+      className={`content-page ${pageDragOver ? "page-drag-active" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!pageDragOver) setPageDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node))
+          setPageDragOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setPageDragOver(false);
+        void collectDroppedFiles(e.dataTransfer).then((items) => {
+          if (items.length) setDroppedQueue(items);
+          else
+            onError(
+              new Error(
+                "No readable files were found in the dropped selection (hidden and system folders are skipped).",
+              ),
+            );
+        });
+      }}
+    >
       <div className="page-heading">
         <div>
           <div className="eyebrow">BUILT ON YOUR EXPERIENCE</div>
@@ -2747,7 +4456,7 @@ function Library({
           <h2>Your career, in its own words.</h2>
           <p>
             Drop in CVs, old job descriptions, project notes, achievements,
-            certificates, interview notes, articles, and any other
+            certificates, interview notes, articles, or entire folders of
             career-related evidence. This is your source library; you can select
             what Career Buddy reads for each conversation.
           </p>
@@ -2759,11 +4468,11 @@ function Library({
           </span>
           <span className="badge muted">Local text preparation</span>
           <p>
-            PDF, DOCX and text files can be prepared locally as text chunks.
-            Career Buddy selects excerpts by matching words; it does not use
-            vector or semantic search. Selected excerpts are sent only when you
-            message Career Buddy. Scanned PDFs need OCR first; originals stay
-            unchanged.
+            PDF, DOCX, PPTX, HTML, RTF, captions (.vtt/.srt), and text files can
+            be prepared locally as text chunks. Career Buddy selects excerpts by
+            matching words; it does not use vector or semantic search. Selected
+            excerpts are sent only when you message Career Buddy. Scanned PDFs
+            need OCR first; originals stay unchanged.
           </p>
         </div>
       </div>
@@ -2773,42 +4482,380 @@ function Library({
           of {docs.length} documents have readable text ready. Preparation is
           local and needs no API key.
         </p>
-        <button
-          type="button"
-          className="button secondary small"
-          disabled={preparing || !docs.length}
-          onClick={() => void prepare()}
-        >
-          {preparing ? (
-            <LoaderCircle size={15} className="spin" />
-          ) : (
-            <Sparkles size={15} />
-          )}{" "}
-          {preparing ? "Preparing text…" : "Prepare library text"}
-        </button>
-      </div>
-      <div className="content-panel">
-        <div className="search-input library-search">
-          <Search size={16} />
-          <input
-            aria-label="Search reference documents"
-            placeholder="Find a reference document…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="library-tool-actions">
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={preparing || resetting || clearing || !docs.length}
+            onClick={() => void prepare(false)}
+          >
+            {preparing ? (
+              <LoaderCircle size={15} className="spin" />
+            ) : (
+              <Sparkles size={15} />
+            )}{" "}
+            {preparing ? "Preparing text…" : "Prepare library text"}
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={preparing || resetting || clearing || !docs.length}
+            onClick={() => void prepare(true)}
+            title="Clear cached text chunks and re-prepare all library documents from scratch"
+          >
+            <RotateCw size={15} className={preparing ? "spin" : ""} />
+            Reset &amp; re-prepare
+          </button>
+          {docs.some((doc) => extraction[doc.id]?.status === "ready") && (
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={preparing || resetting || clearing}
+              onClick={() => void resetPrepared()}
+              title="Clear prepared text cache so sources move back to Unprepared"
+            >
+              {resetting ? "Resetting…" : "Reset prepared"}
+            </button>
+          )}
+          {docs.some((doc) => doc.status !== "submitted") &&
+            (confirmClearAll ? (
+              <div className="library-clear-confirm">
+                <span>
+                  Clear{" "}
+                  {docs.filter((doc) => doc.status !== "submitted").length}{" "}
+                  library document
+                  {docs.filter((doc) => doc.status !== "submitted").length === 1
+                    ? ""
+                    : "s"}
+                  ?
+                </span>
+                <button
+                  type="button"
+                  className="button danger small"
+                  disabled={clearing}
+                  onClick={() => void clearLibrary()}
+                >
+                  {clearing ? "Clearing…" : "Confirm clear all"}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={clearing}
+                  onClick={() => setConfirmClearAll(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button secondary small danger-text"
+                disabled={preparing || resetting || clearing}
+                onClick={() => setConfirmClearAll(true)}
+              >
+                <Trash2 size={15} />
+                Clear all
+              </button>
+            ))}
         </div>
+      </div>
+      <ObsidianVaultPanel
+        obsidian={obsidian}
+        totalDocs={docs.length}
+        preparedDocsCount={
+          docs.filter((doc) => extraction[doc.id]?.status === "ready").length
+        }
+        timezone={timezone}
+        restarting={restarting}
+        onRestart={onRestart}
+        onReload={load}
+        onNotice={onNotice}
+        onError={onError}
+      />
+      <div className="content-panel">
+        <div className="library-browse-bar">
+          <div className="search-input library-search">
+            <Search size={16} />
+            <input
+              aria-label="Search reference documents"
+              placeholder="Find a reference document, folder, or #tag…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          {docs.length > 0 && (
+            <div className="library-browse-controls">
+              <div
+                className="library-view-toggle"
+                role="group"
+                aria-label="Source preparation view"
+              >
+                <button
+                  type="button"
+                  className={sourceFilter === "split" ? "active" : ""}
+                  onClick={() => setSourceFilter("split")}
+                >
+                  Split view
+                </button>
+                <button
+                  type="button"
+                  className={sourceFilter === "used" ? "active" : ""}
+                  onClick={() => setSourceFilter("used")}
+                >
+                  <Check size={12} />
+                  Used (
+                  {
+                    docs.filter((d) => extraction[d.id]?.status === "ready")
+                      .length
+                  }
+                  )
+                </button>
+                <button
+                  type="button"
+                  className={sourceFilter === "unused" ? "active" : ""}
+                  onClick={() => setSourceFilter("unused")}
+                >
+                  Unused (
+                  {
+                    docs.filter((d) => extraction[d.id]?.status !== "ready")
+                      .length
+                  }
+                  )
+                </button>
+              </div>
+              <div
+                className="library-view-toggle"
+                role="group"
+                aria-label="Library view mode"
+              >
+                <button
+                  type="button"
+                  className={groupByFolder ? "active" : ""}
+                  onClick={() => setGroupByFolder(true)}
+                >
+                  <Folder size={13} />
+                  By folder
+                </button>
+                <button
+                  type="button"
+                  className={!groupByFolder ? "active" : ""}
+                  onClick={() => setGroupByFolder(false)}
+                >
+                  <List size={13} />
+                  Flat list
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        {(() => {
+          const counts = new Map<
+            string,
+            { label: string; count: number; removableCount: number }
+          >();
+          for (const doc of docs) {
+            for (const tag of doc.tags || []) {
+              const key = tag.toLowerCase();
+              const existing = counts.get(key);
+              const isRemovable = doc.status !== "submitted" ? 1 : 0;
+              if (existing) {
+                existing.count++;
+                existing.removableCount += isRemovable;
+              } else {
+                counts.set(key, {
+                  label: tag,
+                  count: 1,
+                  removableCount: isRemovable,
+                });
+              }
+            }
+          }
+          const tagEntries = [...counts.values()].sort(
+            (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+          );
+          if (!tagEntries.length) return null;
+          const activeTagEntry = selectedTag
+            ? counts.get(selectedTag.toLowerCase())
+            : undefined;
+          const pendingDeleteEntry = confirmDeleteTag
+            ? counts.get(confirmDeleteTag.toLowerCase())
+            : undefined;
+          return (
+            <div className="library-tags-section">
+              <div className="library-tags-header">
+                <button
+                  type="button"
+                  className="library-tags-toggle"
+                  aria-expanded={tagsExpanded}
+                  onClick={() => setTagsExpanded((v) => !v)}
+                >
+                  {tagsExpanded ? (
+                    <ChevronDown size={14} />
+                  ) : (
+                    <ChevronRight size={14} />
+                  )}
+                  <Tag size={13} />
+                  <strong>Tags</strong>
+                  <span className="badge muted">{tagEntries.length}</span>
+                </button>
+                {selectedTag && (
+                  <div className="library-tags-active-bar">
+                    <span className="badge green">
+                      <Tag size={11} />
+                      {selectedTag}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        setSelectedTag("");
+                        setConfirmDeleteTag("");
+                      }}
+                    >
+                      Clear filter
+                    </button>
+                    {activeTagEntry &&
+                      activeTagEntry.removableCount > 0 &&
+                      confirmDeleteTag.toLowerCase() !==
+                        selectedTag.toLowerCase() && (
+                        <button
+                          type="button"
+                          className="button secondary small danger-text"
+                          onClick={() => setConfirmDeleteTag(selectedTag)}
+                        >
+                          <Trash2 size={13} />
+                          Delete #{selectedTag} ({activeTagEntry.removableCount}
+                          )
+                        </button>
+                      )}
+                  </div>
+                )}
+                {confirmDeleteTag && pendingDeleteEntry && (
+                  <div className="document-delete-confirm">
+                    <span>
+                      Delete {pendingDeleteEntry.removableCount} document
+                      {pendingDeleteEntry.removableCount === 1 ? "" : "s"}{" "}
+                      tagged #{pendingDeleteEntry.label}?
+                    </span>
+                    <button
+                      type="button"
+                      className="button danger small"
+                      disabled={Boolean(deletingTag)}
+                      onClick={async () => {
+                        const targetTag = pendingDeleteEntry.label;
+                        setDeletingTag(targetTag);
+                        try {
+                          const res = await api<{
+                            deletedCount: number;
+                            preservedSubmittedCount: number;
+                          }>(
+                            `/documents?scope=library&tag=${encodeURIComponent(targetTag)}`,
+                            { method: "DELETE" },
+                          );
+                          setConfirmDeleteTag("");
+                          if (
+                            selectedTag.toLowerCase() ===
+                            targetTag.toLowerCase()
+                          )
+                            setSelectedTag("");
+                          await load();
+                          onNotice(
+                            `Deleted ${res.deletedCount} document${res.deletedCount === 1 ? "" : "s"} tagged #${targetTag}.`,
+                          );
+                        } catch (err) {
+                          onError(err);
+                        } finally {
+                          setDeletingTag("");
+                        }
+                      }}
+                    >
+                      {deletingTag ? "Deleting…" : "Confirm delete"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      disabled={Boolean(deletingTag)}
+                      onClick={() => setConfirmDeleteTag("")}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+              {tagsExpanded && (
+                <div className="library-tag-filters" aria-label="Filter by tag">
+                  <button
+                    type="button"
+                    className={`library-tag-filter ${!selectedTag ? "active" : ""}`}
+                    onClick={() => setSelectedTag("")}
+                  >
+                    All ({docs.length})
+                  </button>
+                  {tagEntries.map((item) => (
+                    <span
+                      key={item.label}
+                      className={`library-tag-chip ${selectedTag.toLowerCase() === item.label.toLowerCase() ? "active" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        className="library-tag-chip-select"
+                        onClick={() =>
+                          setSelectedTag(
+                            selectedTag.toLowerCase() ===
+                              item.label.toLowerCase()
+                              ? ""
+                              : item.label,
+                          )
+                        }
+                      >
+                        <Tag size={11} />
+                        {item.label}
+                        <span>{item.count}</span>
+                      </button>
+                      {item.removableCount > 0 && (
+                        <button
+                          type="button"
+                          className="library-tag-chip-delete"
+                          aria-label={`Delete all documents tagged ${item.label}`}
+                          title={`Delete ${item.removableCount} document${item.removableCount === 1 ? "" : "s"} tagged #${item.label}`}
+                          onClick={() => setConfirmDeleteTag(item.label)}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {loading ? (
           <Busy text="Opening your library…" />
         ) : (
           <Documents
-            documents={docs.filter((d) =>
-              `${d.name} ${d.notes} ${d.kind}`
-                .toLowerCase()
-                .includes(search.toLowerCase()),
+            documents={docs.filter(
+              (d) =>
+                (!selectedTag ||
+                  (d.tags || []).some(
+                    (t) => t.toLowerCase() === selectedTag.toLowerCase(),
+                  )) &&
+                `${d.name} ${d.notes} ${d.kind} ${(d.tags || []).join(" ")}`
+                  .toLowerCase()
+                  .includes(search.toLowerCase()),
             )}
             timezone={timezone}
             extraction={extraction}
+            externalQueue={droppedQueue}
+            onExternalQueueConsumed={() => setDroppedQueue([])}
+            groupByFolder={groupByFolder}
+            splitByPrepared={true}
+            sourceFilter={sourceFilter}
+            onPrepareDocument={prepareSingleDocument}
+            selectedTag={selectedTag}
+            onSelectTag={setSelectedTag}
             onChanged={() => void load()}
+            onNotice={onNotice}
             onError={onError}
           />
         )}
@@ -2828,11 +4875,14 @@ function SettingsPage({
   appearance,
   appearanceDirty,
   appearanceSaving,
+  appearanceFailed,
   onAppearanceChange,
   onAppearanceSave,
   profile,
   onProfileSaved,
   onSaved,
+  restarting,
+  onRestart,
   onError,
   onNotice,
 }: {
@@ -2840,17 +4890,29 @@ function SettingsPage({
   appearance: Appearance;
   appearanceDirty: boolean;
   appearanceSaving: boolean;
+  appearanceFailed: boolean;
   onAppearanceChange: (patch: Partial<Appearance>) => void;
   onAppearanceSave: () => void;
   profile: Profile;
   onProfileSaved: (profile: Profile) => void;
   onSaved: (s: Settings) => void;
+  restarting: boolean;
+  onRestart: () => void;
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
 }) {
   const [form, setForm] = useState(settings),
     [busy, setBusy] = useState(false),
     [backingUp, setBackingUp] = useState(false);
+  useEffect(() => {
+    setForm(settings);
+  }, [
+    settings.timezone,
+    settings.documentsSubdir,
+    settings.referenceSubdir,
+    settings.backupSubdir,
+    settings.pendingHostPath,
+  ]);
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -2872,7 +4934,7 @@ function SettingsPage({
       setForm(s);
       onNotice(
         s.pendingHostPath
-          ? "Settings saved. Apply the new host folder with ./board restart on the hosting machine."
+          ? "Settings saved. Use Update & restart board below (or run ./board restart on the host) to apply the new folder."
           : "Settings saved.",
       );
     } catch (e) {
@@ -2905,7 +4967,8 @@ function SettingsPage({
         onReset={() =>
           onAppearanceChange({ themeAccent: "", themeBackground: "" })
         }
-        saving={appearanceSaving || busy}
+        saving={appearanceSaving}
+        failed={appearanceFailed}
         dirty={appearanceDirty}
       />
       <form onSubmit={save}>
@@ -2990,8 +5053,21 @@ function SettingsPage({
               <span>
                 New location pending: <code>{settings.pendingHostPath}</code>
                 <br />
-                Apply with <code>./board restart</code> on your host.
+                Apply with <strong>Update &amp; restart board</strong> or{" "}
+                <code>./board restart</code> on your host.
               </span>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={restarting || busy}
+                onClick={onRestart}
+              >
+                <RotateCw
+                  size={14}
+                  className={restarting ? "spin" : undefined}
+                />
+                {restarting ? "Restarting…" : "Apply & restart"}
+              </button>
             </div>
           )}
           <div className="form-actions">
@@ -3084,6 +5160,26 @@ function SettingsPage({
           >
             <ArrowDownToLine size={16} />
             Export records
+          </button>
+        </div>
+        <div className="settings-action">
+          <div>
+            <strong>Update &amp; restart board</strong>
+            <p>
+              Rebuild and restart the workspace service, apply any pending host
+              document-folder changes, and reconnect automatically. Your
+              opportunities, documents, and active sign-in session are
+              preserved.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={restarting || backingUp}
+            onClick={onRestart}
+          >
+            <RotateCw size={16} className={restarting ? "spin" : undefined} />
+            {restarting ? "Restarting…" : "Update & restart board"}
           </button>
         </div>
       </section>

@@ -16,6 +16,9 @@ import {
   writeFileSync,
   statSync,
   copyFileSync,
+  openSync,
+  closeSync,
+  fsyncSync,
   renameSync,
   unlinkSync,
   rmSync,
@@ -34,6 +37,7 @@ import { fetchJobPage } from "./job-fetch.mjs";
 import { parseJobPage } from "./job-parser.mjs";
 import { validateAvatar } from "./profile.mjs";
 import { createCareerBuddy } from "./career-buddy.mjs";
+import { createObsidianIntegration } from "./obsidian-vault.mjs";
 
 export const stages = [
   ["identification", "Identification"],
@@ -166,8 +170,129 @@ function folder(root, subpath) {
   }
   return result;
 }
-const publicDocument = ({ storageRoot, relativePath, sha256, ...rest }) => ({
+function cleanDocumentName(raw, allowFolders = false) {
+  const value = cleanText(raw, "Filename", allowFolders ? 500 : 250);
+  if (!allowFolders) {
+    if (!value || /[/\\]/.test(value) || value === "." || value === "..")
+      fail(400, "Use a filename without folder separators.");
+    return value;
+  }
+  const normalized = value.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  if (
+    !segments.length ||
+    segments.some(
+      (s) =>
+        !s || s === "." || s === ".." || s.length > 250 || s.startsWith("."),
+    )
+  )
+    fail(
+      400,
+      "Use a valid relative path without hidden or parent folder segments.",
+    );
+  return segments.join("/");
+}
+function inferDocumentTags(name, kind, content) {
+  const tags = [];
+  const add = (raw) => {
+    const clean = String(raw || "")
+      .trim()
+      .replace(/^#+/, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 60);
+    if (
+      clean &&
+      !tags.some((t) => t.toLowerCase() === clean.toLowerCase()) &&
+      tags.length < 20
+    )
+      tags.push(clean);
+  };
+  const segments = name.split("/").slice(0, -1);
+  for (const seg of segments) add(seg);
+  const ext = extname(name).toLowerCase();
+  const extMap = {
+    ".pdf": "PDF",
+    ".docx": "Word",
+    ".pptx": "Slides",
+    ".md": "Markdown",
+    ".markdown": "Markdown",
+    ".txt": "Text",
+    ".vtt": "Transcript",
+    ".srt": "Transcript",
+    ".html": "HTML",
+    ".htm": "HTML",
+    ".rtf": "RTF",
+    ".csv": "Data",
+    ".tsv": "Data",
+    ".json": "Data",
+    ".yaml": "Config",
+    ".yml": "Config",
+  };
+  if (extMap[ext]) add(extMap[ext]);
+  const kindMap = {
+    jd: "Job Description",
+    cv: "CV",
+    cover: "Cover Letter",
+  };
+  if (kindMap[kind]) add(kindMap[kind]);
+  if (
+    content &&
+    [".md", ".markdown", ".txt"].includes(ext) &&
+    content.length <= 500000
+  ) {
+    const sample = content.subarray(0, 16384).toString("utf8");
+    const fm = sample.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (fm) {
+      const inline = fm[1].match(/^\s*tags\s*:\s*\[([^\]]*)\]/im);
+      if (inline) {
+        for (const item of inline[1].split(","))
+          add(item.trim().replace(/^['"]|['"]$/g, ""));
+      } else {
+        const list = fm[1].match(
+          /^\s*tags\s*:\s*\r?\n((?:\s*-\s*.+\r?\n?)+)/im,
+        );
+        if (list) {
+          for (const line of list[1].split(/\r?\n/)) {
+            const m = line.match(/^\s*-\s*(.+)/);
+            if (m) add(m[1].trim().replace(/^['"]|['"]$/g, ""));
+          }
+        }
+      }
+    }
+    const body = fm ? sample.slice(fm[0].length) : sample;
+    for (const m of body.matchAll(/(?:^|[\s(])#([a-zA-Z][\w/-]{1,35})\b/g)) {
+      add(m[1]);
+    }
+  }
+  return tags;
+}
+function cleanDocumentTags(raw) {
+  if (!Array.isArray(raw) || raw.length > 30)
+    fail(400, "Tags must be a list of up to 30 items.");
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const tag = cleanText(item, "Tag", 60).replace(/^#+/, "").trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(tag);
+    }
+  }
+  return out;
+}
+const publicDocument = ({
+  storageRoot,
+  relativePath,
+  sha256,
+  tags,
+  ...rest
+}) => ({
   ...rest,
+  tags: Array.isArray(tags)
+    ? tags
+    : inferDocumentTags(rest.name || "", rest.kind || ""),
   url: `/api/documents/${rest.id}/content`,
 });
 function writeAtomic(path, data) {
@@ -321,6 +446,16 @@ export function createApp(options = {}) {
         "INSERT INTO documents(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
       )
       .run(doc.id, JSON.stringify(doc));
+  const removeDocument = (doc) => {
+    db.prepare("DELETE FROM documents WHERE id=?").run(doc.id);
+    db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+    try {
+      const target = documentPath(doc);
+      if (inside(filesDir, target)) rmSync(target, { force: true });
+    } catch {
+      /* Missing or read-only prior storage root; metadata is already removed. */
+    }
+  };
   const fullRecord = (record) => ({
     ...record,
     documents: getDocuments()
@@ -363,7 +498,17 @@ export function createApp(options = {}) {
   };
   for (const key of ["documentsSubdir", "referenceSubdir", "backupSubdir"])
     folder(filesDir, settings()[key]);
-  const sessions = new Map();
+  const loadSessions = () => {
+    const stored = getConfig("sessions") || {};
+    const valid = {};
+    const nowMs = Date.now();
+    for (const [k, exp] of Object.entries(stored))
+      if (typeof exp === "number" && exp > nowMs) valid[k] = exp;
+    return valid;
+  };
+  const sessions = new Map(Object.entries(loadSessions()));
+  const persistSessions = () =>
+    putConfig("sessions", Object.fromEntries(sessions.entries()));
   const attempts = new Map();
   const authCookie = (req) => {
     const match = (req.headers.cookie || "")
@@ -374,7 +519,7 @@ export function createApp(options = {}) {
     const key = createHash("sha256").update(match.slice(14)).digest("hex");
     const expires = sessions.get(key);
     if (!expires || expires < Date.now()) {
-      sessions.delete(key);
+      if (sessions.delete(key)) persistSessions();
       return false;
     }
     return true;
@@ -385,6 +530,7 @@ export function createApp(options = {}) {
       createHash("sha256").update(token).digest("hex"),
       Date.now() + 14 * 86400000,
     );
+    persistSessions();
     const secure =
       req.socket.encrypted ||
       (process.env.BOARD_TRUST_PROXY === "1" &&
@@ -470,6 +616,7 @@ export function createApp(options = {}) {
     opportunityId,
     content,
     notes = "",
+    tags,
     generation,
   }) => {
     const version =
@@ -490,6 +637,10 @@ export function createApp(options = {}) {
     const relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
     const target = safePath(filesDir, relativePath);
     writeFileSync(target, content, { flag: "wx", mode: 0o600 });
+    const resolvedTags =
+      tags !== undefined
+        ? cleanDocumentTags(tags)
+        : inferDocumentTags(name, kind, content);
     const document = {
       id,
       name,
@@ -500,6 +651,7 @@ export function createApp(options = {}) {
       size: content.length,
       version,
       notes: notes,
+      tags: resolvedTags,
       storageRoot: filesDir,
       relativePath,
       sha256: createHash("sha256").update(content).digest("hex"),
@@ -526,6 +678,23 @@ export function createApp(options = {}) {
     settings,
     saveDocument,
     buddyFetch: options.buddyFetch,
+  });
+  const obsidian = createObsidianIntegration({
+    dataDir,
+    filesDir,
+    hostFilesDir,
+    vaultDir: options.vaultDir ?? process.env.BOARD_VAULT_DIR ?? "",
+    hostVaultDir:
+      options.hostVaultDir ?? process.env.BOARD_HOST_VAULT_DIR ?? "",
+    getConfig,
+    putConfig,
+    getDocuments,
+    putDocument,
+    saveDocument,
+    documentPath,
+    safePath,
+    buddy,
+    fail,
   });
   async function readBody(req) {
     if (!(req.headers["content-type"] || "").startsWith("application/json"))
@@ -562,9 +731,9 @@ export function createApp(options = {}) {
       const parsed = new URL(req.url, "http://localhost");
       const path = parsed.pathname;
       const method = req.method;
-      if (!["GET", "HEAD", "POST", "PATCH"].includes(method))
+      if (!["GET", "HEAD", "POST", "PATCH", "DELETE"].includes(method))
         fail(405, "Method not allowed.");
-      if (["POST", "PATCH"].includes(method) && req.headers.origin) {
+      if (["POST", "PATCH", "DELETE"].includes(method) && req.headers.origin) {
         let origin;
         try {
           origin = new URL(req.headers.origin);
@@ -659,10 +828,12 @@ export function createApp(options = {}) {
           .split(";")
           .map((s) => s.trim())
           .find((s) => s.startsWith("board_session="));
-        if (cookie)
+        if (cookie) {
           sessions.delete(
             createHash("sha256").update(cookie.slice(14)).digest("hex"),
           );
+          persistSessions();
+        }
         res.setHeader(
           "Set-Cookie",
           "board_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
@@ -671,6 +842,10 @@ export function createApp(options = {}) {
       }
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
+        if (path === "/api/obsidian" || path.startsWith("/api/obsidian/")) {
+          if (await obsidian.handle(path, method, req, res, { json, readBody }))
+            return;
+        }
         if (
           path.startsWith("/api/buddy/") ||
           /^\/api\/opportunities\/[^/]+\/buddy(?:\/|$)/.test(path)
@@ -1005,15 +1180,70 @@ export function createApp(options = {}) {
         }
         if (path === "/api/documents" && method === "GET")
           return json(res, { documents: getDocuments().map(publicDocument) });
+        if (path === "/api/documents" && method === "DELETE") {
+          const scope = parsed.searchParams.get("scope") || "library";
+          const opportunityId =
+            parsed.searchParams.get("opportunityId")?.trim() || "";
+          if (scope !== "library" && !opportunityId)
+            fail(
+              400,
+              "Specify scope=library or an opportunityId for bulk document deletion.",
+            );
+          const folderFilter = parsed.searchParams.get("folder");
+          const tagFilter = parsed.searchParams.get("tag")?.trim() || "";
+          const idsParam = parsed.searchParams.get("ids")?.trim() || "";
+          const idSet = idsParam
+            ? new Set(
+                idsParam
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              )
+            : null;
+          const matching = getDocuments().filter((d) => {
+            if (
+              opportunityId
+                ? d.opportunityId !== opportunityId
+                : d.opportunityId
+            )
+              return false;
+            if (idSet && !idSet.has(d.id)) return false;
+            if (folderFilter !== null) {
+              const idx = d.name.lastIndexOf("/");
+              const docFolder = idx > 0 ? d.name.slice(0, idx) : "__root__";
+              if (
+                docFolder !== folderFilter &&
+                (folderFilter === "__root__" ||
+                  !d.name.startsWith(`${folderFilter}/`))
+              )
+                return false;
+            }
+            if (tagFilter) {
+              const tags = Array.isArray(d.tags)
+                ? d.tags
+                : inferDocumentTags(d.name || "", d.kind || "");
+              if (
+                !tags.some((t) => t.toLowerCase() === tagFilter.toLowerCase())
+              )
+                return false;
+            }
+            return true;
+          });
+          const removable = matching.filter((d) => d.status !== "submitted");
+          for (const doc of removable) removeDocument(doc);
+          return json(res, {
+            ok: true,
+            deletedCount: removable.length,
+            preservedSubmittedCount: matching.length - removable.length,
+          });
+        }
         if (path === "/api/documents" && method === "POST") {
           const body = await readBody(req);
           const opportunityId = body.opportunityId
             ? cleanText(body.opportunityId, "Opportunity ID", 100)
             : "";
           if (opportunityId) getRecord(opportunityId);
-          const name = cleanText(body.name, "Filename", 250);
-          if (!name || /[/\\]/.test(name) || name === "." || name === "..")
-            fail(400, "Use a filename without folder separators.");
+          const name = cleanDocumentName(body.name, true);
           const kind = choice(
             body.kind ?? "other",
             ["jd", "cv", "cover", "reference", "other"],
@@ -1040,8 +1270,173 @@ export function createApp(options = {}) {
             opportunityId,
             content,
             notes: cleanText(body.notes ?? "", "Notes", 50000),
+            tags: body.tags,
           });
           return json(res, document, 201);
+        }
+        if (path === "/api/documents/move" && method === "POST") {
+          const body = await readBody(req);
+          if (
+            !Array.isArray(body.documents) ||
+            !body.documents.length ||
+            body.documents.length > 500
+          )
+            fail(400, "Select between 1 and 500 library documents.");
+          if (
+            Object.keys(body).some(
+              (key) => !["documents", "folder"].includes(key),
+            )
+          )
+            fail(400, "Unsupported move option.");
+          const rawFolder = cleanText(
+            body.folder ?? "",
+            "Destination folder",
+            480,
+          ).replace(/\\/g, "/");
+          const destinationFolder = rawFolder
+            ? cleanDocumentName(rawFolder + "/placeholder", true).slice(0, -12)
+            : "";
+          const seen = new Set();
+          const allDocs = getDocuments();
+          const planned = body.documents.map((item) => {
+            if (
+              !item ||
+              typeof item !== "object" ||
+              typeof item.id !== "string" ||
+              !Number.isInteger(item.revision) ||
+              Object.keys(item).some((k) => !["id", "revision"].includes(k)) ||
+              seen.has(item.id)
+            )
+              fail(400, "Choose each document once with its current revision.");
+            seen.add(item.id);
+            const doc = getDocument(item.id);
+            if (doc.opportunityId)
+              fail(400, "Only Career Library documents can be moved here.");
+            if (doc.status === "submitted")
+              fail(
+                409,
+                "Submitted versions are preserved and cannot be moved.",
+              );
+            if (doc.revision !== item.revision)
+              fail(
+                409,
+                "A document changed. Reload the library before moving it.",
+              );
+            const source = documentPath(doc);
+            try {
+              if (!statSync(source).isFile()) throw Error("not a file");
+            } catch {
+              fail(404, "A source file is unavailable. No files were moved.");
+            }
+            const filename = doc.name.split("/").pop();
+            const name = cleanDocumentName(
+              destinationFolder ? destinationFolder + "/" + filename : filename,
+              true,
+            );
+            const subdir =
+              settings().referenceSubdir +
+              (destinationFolder ? "/" + destinationFolder : "");
+            const relativePath =
+              subdir +
+              "/" +
+              doc.id +
+              extname(doc.relativePath).replace(/[^.a-zA-Z0-9]/g, "");
+            return {
+              doc,
+              source,
+              name,
+              subdir,
+              relativePath,
+            };
+          });
+          const created = [];
+          try {
+            for (const item of planned) {
+              folder(filesDir, item.subdir);
+              item.target = safePath(filesDir, item.relativePath);
+              if (resolve(item.source) === resolve(item.target)) continue;
+              const bytes = readFileSync(item.source);
+              item.sourceHash = createHash("sha256")
+                .update(bytes)
+                .digest("hex");
+              let fd;
+              try {
+                fd = openSync(item.target, "wx", 0o600);
+              } catch (error) {
+                if (error.code === "EEXIST")
+                  fail(
+                    409,
+                    "A destination file already exists. No files were moved.",
+                  );
+                throw error;
+              }
+              created.push(item.target);
+              try {
+                writeFileSync(fd, bytes);
+                fsyncSync(fd);
+              } finally {
+                closeSync(fd);
+              }
+            }
+            db.exec("BEGIN IMMEDIATE");
+            try {
+              for (const item of planned)
+                putDocument({
+                  ...item.doc,
+                  name: item.name,
+                  storageRoot: filesDir,
+                  relativePath: item.relativePath,
+                  revision: item.doc.revision + 1,
+                });
+              db.exec("COMMIT");
+            } catch (error) {
+              db.exec("ROLLBACK");
+              throw error;
+            }
+          } catch (error) {
+            for (const file of created)
+              try {
+                unlinkSync(file);
+              } catch {}
+            if (error instanceof HttpError) throw error;
+            fail(
+              500,
+              "The move could not be completed. The original files were retained.",
+            );
+          }
+          let retained = 0;
+          for (const item of planned) {
+            if (resolve(item.source) === resolve(item.target)) continue;
+            const shared = allDocs.some(
+              (d) =>
+                !seen.has(d.id) &&
+                d.storageRoot === item.doc.storageRoot &&
+                d.relativePath === item.doc.relativePath,
+            );
+            if (shared || resolve(item.doc.storageRoot) !== resolve(filesDir)) {
+              retained++;
+              continue;
+            }
+            try {
+              const current = readFileSync(item.source);
+              if (
+                createHash("sha256").update(current).digest("hex") !==
+                item.sourceHash
+              ) {
+                retained++;
+                continue;
+              }
+              unlinkSync(item.source);
+            } catch {
+              retained++;
+            }
+          }
+          return json(res, {
+            documents: planned.map((item) =>
+              publicDocument(getDocument(item.doc.id)),
+            ),
+            retainedOriginals: retained,
+          });
         }
         const docMatch = path.match(/^\/api\/documents\/([^/]+)(\/content)?$/);
         if (docMatch) {
@@ -1066,7 +1461,7 @@ export function createApp(options = {}) {
                   ? "application/pdf"
                   : "application/octet-stream",
               "Content-Length": content.length,
-              "Content-Disposition": `attachment; filename="${doc.name.replace(/[^a-zA-Z0-9._ -]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(doc.name)}`,
+              "Content-Disposition": `attachment; filename="${(doc.name.split("/").pop() || doc.name).replace(/[^a-zA-Z0-9._ -]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(doc.name.split("/").pop() || doc.name)}`,
             });
             return res.end(content);
           }
@@ -1074,28 +1469,42 @@ export function createApp(options = {}) {
             const body = await readBody(req);
             if (body.revision !== undefined && body.revision !== doc.revision)
               fail(409, "Document changed. Reload before saving.");
-            if (doc.status === "submitted")
-              fail(
-                409,
-                "Submitted document versions are preserved. Upload a new version to make changes.",
-              );
             if (
               Object.keys(body).some(
-                (key) => !["status", "revision"].includes(key),
+                (key) => !["status", "tags", "notes", "revision"].includes(key),
               )
             )
               fail(
                 400,
                 "Document contents cannot be overwritten. Upload a new version.",
               );
-            doc.status = choice(
-              body.status,
-              ["draft", "approved", "submitted"],
-              "document status",
-            );
+            if (doc.status === "submitted" && body.status !== undefined)
+              fail(
+                409,
+                "Submitted document versions are preserved. Upload a new version to make changes.",
+              );
+            if (body.status !== undefined)
+              doc.status = choice(
+                body.status,
+                ["draft", "approved", "submitted"],
+                "document status",
+              );
+            if (body.tags !== undefined)
+              doc.tags = cleanDocumentTags(body.tags);
+            if (body.notes !== undefined)
+              doc.notes = cleanText(body.notes, "Notes", 50000);
             doc.revision++;
             putDocument(doc);
             return json(res, publicDocument(doc));
+          }
+          if (!docMatch[2] && method === "DELETE") {
+            if (doc.status === "submitted")
+              fail(
+                409,
+                "Submitted document versions are preserved and cannot be deleted.",
+              );
+            removeDocument(doc);
+            return json(res, { ok: true, id: doc.id });
           }
           fail(405, "Method not allowed.");
         }
@@ -1116,6 +1525,10 @@ export function createApp(options = {}) {
                 "terracotta",
                 "graphite",
                 "plum",
+                "espresso-cream",
+                "harbour",
+                "ink-paper",
+                "moonlight",
               ],
               "theme",
             );
@@ -1293,6 +1706,47 @@ export function createApp(options = {}) {
             throw error;
           }
           return json(res, { name, createdAt, location: completedDestination });
+        }
+        if (path === "/api/restart/status" && method === "GET") {
+          try { return json(res, JSON.parse(readFileSync(join(dataDir, "restart-status.json"), "utf8"))); }
+          catch { return json(res, { state: "unknown" }); }
+        }
+        if (path === "/api/restart" && method === "POST") {
+          await readBody(req);
+          if (dataDir === "/data") {
+            try {
+              if (Date.now() - statSync(join(dataDir, ".watcher.heartbeat")).mtimeMs > 5000) throw Error();
+            } catch {
+              fail(503, "The host restart helper is not running. Start the board using its launcher, then try again.");
+            }
+          }
+          const requestId = randomUUID();
+          const requestedAt = now();
+          if (dataDir === "/data") writeAtomic(join(dataDir, "restart-status.json"), JSON.stringify({ requestId, state: "queued" }));
+          const currentSettings = settings();
+          writeAtomic(
+            join(dataDir, "pending-restart.json"),
+            JSON.stringify({
+              requestId,
+              requestedAt,
+              pendingHostPath: currentSettings.pendingHostPath || "",
+            }),
+          );
+          res.once("finish", () => {
+            if (options.onRestart) setImmediate(() => options.onRestart());
+          });
+          return json(
+            res,
+            {
+              ok: true,
+              restarting: true,
+              requestId,
+              hostManaged: dataDir === "/data",
+              requestedAt,
+              pendingHostPath: currentSettings.pendingHostPath || "",
+            },
+            202,
+          );
         }
         if (path === "/api/demo" && method === "POST") {
           if (listRecords().length)

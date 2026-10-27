@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -94,16 +95,17 @@ def validate_bind(value: str) -> str:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Start or stop your Opportunity Knox without managing Docker.")
-    parser.add_argument("command", nargs="?", default="start", choices=["start", "stop", "restart", "status", "logs"])
+    parser.add_argument("command", nargs="?", default="start", choices=["start", "stop", "restart", "status", "logs", "watch"])
     parser.add_argument("--files", help="Existing document folder on the hosting machine; remembered for future starts")
     parser.add_argument("--port", type=int, help="Browser port (default: 4318)")
     parser.add_argument("--bind", type=validate_bind, help="Host IP to bind (default: 127.0.0.1)")
     parser.add_argument("--no-open", action="store_true", help="Show the URL without opening a browser")
+    parser.add_argument("--no-watch", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--state-dir", type=Path, default=Path(os.environ.get("BOARD_STATE_DIR", str(default_state_dir()))), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.port is not None and not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
-    if args.command in ("stop", "status", "logs") and (args.files or args.port is not None or args.bind):
+    if args.command in ("stop", "status", "logs", "watch") and (args.files or args.port is not None or args.bind):
         parser.error("Folder, port and bind changes apply with start or restart.")
     return args
 
@@ -140,6 +142,33 @@ def make_config(args, state_dir: Path) -> tuple[dict, bool]:
     config["roots"] = list(dict.fromkeys(host_folder(root, writable=(root == config["files"])) for root in config["roots"]))
     if config["files"] not in config["roots"]:
         config["roots"].append(config["files"])
+    pending_vault_path = state_dir / "pending-vault.json"
+    if pending_vault_path.exists():
+        vault_req = read_json(pending_vault_path)
+        vault_raw = vault_req.get("hostPath")
+        if vault_raw == "":
+            config.pop("vault", None)
+            config.pop("vaultReadOnly", None)
+        elif isinstance(vault_raw, str) and vault_raw.strip():
+            candidate_vault = Path(vault_raw).expanduser()
+            if not candidate_vault.is_absolute():
+                raise LauncherError("Obsidian vault locations must be absolute paths on the hosting machine.")
+            read_only = bool(vault_req.get("readOnly", not vault_req.get("create")))
+            config["vaultReadOnly"] = read_only
+            if bool(vault_req.get("create")) and read_only:
+                raise LauncherError("A new vault cannot be created in read-only mode.")
+            if bool(vault_req.get("create")):
+                try:
+                    candidate_vault.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise LauncherError(f"Could not create Obsidian vault folder at {candidate_vault}: {exc}") from exc
+            config["vault"] = host_folder(str(candidate_vault), writable=not read_only)
+        else:
+            raise LauncherError("The pending Obsidian vault request has no valid hostPath.")
+    if config.get("vault"):
+        config["vault"] = host_folder(config["vault"], writable=not config.get("vaultReadOnly", False))
+        if config.get("vaultReadOnly") and (Path(config["vault"]) == Path(config["files"]) or Path(config["files"]) in Path(config["vault"]).parents or Path(config["vault"]) in Path(config["files"]).parents):
+            raise LauncherError("A read-only vault must be outside the writable document folder.")
     if args.port is not None:
         config["port"] = args.port
     if args.bind:
@@ -150,7 +179,7 @@ def make_config(args, state_dir: Path) -> tuple[dict, bool]:
             raise ValueError("invalid port")
     except (ValueError, argparse.ArgumentTypeError, KeyError) as exc:
         raise LauncherError("Saved port or bind address is invalid. Use --port and --bind to set them.") from exc
-    return config, pending_path.exists()
+    return config, (pending_path.exists() or pending_vault_path.exists())
 
 
 def setup_token(state_dir: Path) -> str:
@@ -166,11 +195,22 @@ def setup_token(state_dir: Path) -> str:
 
 def compose_override(config: dict, state_dir: Path, token: str) -> dict:
     roots = config["roots"]
+    vault_host = config.get("vault")
     mounts = [{"type": "bind", "source": str(state_dir), "target": "/data", "bind": {"create_host_path": False}}]
-    mounts += [{"type": "bind", "source": root, "target": mount_path(root), "read_only": root != config["files"], "bind": {"create_host_path": False}} for root in roots]
+    mounts += [{"type": "bind", "source": root, "target": mount_path(root), "read_only": (root != config["files"] and (root != vault_host or config.get("vaultReadOnly", False))), "bind": {"create_host_path": False}} for root in roots]
+    env = {"BOARD_DATA_DIR": "/data", "BOARD_FILES_DIR": mount_path(config["files"]), "BOARD_HOST_FILES_DIR": config["files"], "BOARD_DOCUMENT_ROOTS": json.dumps([mount_path(root) for root in roots]), "BOARD_SETUP_TOKEN": token}
+    if vault_host:
+        if vault_host in roots and not config.get("vaultReadOnly", False):
+            vault_target = mount_path(vault_host)
+        else:
+            vault_target = "/vault"
+            mounts.append({"type": "bind", "source": vault_host, "target": "/vault", "read_only": bool(config.get("vaultReadOnly", False)), "bind": {"create_host_path": False}})
+        env["BOARD_VAULT_DIR"] = vault_target
+        env["BOARD_HOST_VAULT_DIR"] = vault_host
+        env["BOARD_VAULT_READ_ONLY"] = "1" if config.get("vaultReadOnly", False) else "0"
     override = {"services": {"board": {
         "ports": [{"target": 4318, "published": str(config["port"]), "host_ip": config["bind"], "protocol": "tcp"}],
-        "environment": {"BOARD_DATA_DIR": "/data", "BOARD_FILES_DIR": mount_path(config["files"]), "BOARD_HOST_FILES_DIR": config["files"], "BOARD_DOCUMENT_ROOTS": json.dumps([mount_path(root) for root in roots]), "BOARD_SETUP_TOKEN": token},
+        "environment": env,
         "volumes": mounts,
     }}}
     if os.name == "posix":
@@ -238,9 +278,73 @@ def fetch_json(url: str, timeout=2) -> dict | None:
         return None
 
 
+def stop_watcher(state_dir: Path) -> None:
+    pid_path = state_dir / ".watcher.pid"
+    if not pid_path.exists():
+        return
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        if pid != os.getpid():
+            os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+    pid_path.unlink(missing_ok=True)
+
+
+def start_watcher(state_dir: Path) -> None:
+    stop_watcher(state_dir)
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "watch", "--state-dir", str(state_dir)],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        (state_dir / ".watcher.pid").write_text(f"{proc.pid}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def watch_loop(state_dir: Path, *, once: bool = False) -> int:
+    pid_path = state_dir / ".watcher.pid"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    request_path = state_dir / "pending-restart.json"
+    heartbeat_path = state_dir / ".watcher.heartbeat"
+    status_path = state_dir / "restart-status.json"
+    try:
+        while True:
+            heartbeat_path.touch()
+            if request_path.exists():
+                try:
+                    request = read_json(request_path)
+                    request_path.unlink(missing_ok=True)
+                    request_id = request.get("requestId", "")
+                    atomic_json(status_path, {"requestId": request_id, "state": "running"})
+                    main(["restart", "--state-dir", str(state_dir), "--no-open", "--no-watch"])
+                    atomic_json(status_path, {"requestId": request_id, "state": "succeeded"})
+                except (LauncherError, OSError) as exc:
+                    atomic_json(status_path, {"requestId": locals().get("request_id", ""), "state": "failed", "message": str(exc)})
+                if once:
+                    return 0
+            if once:
+                return 0
+            time.sleep(1.0)
+    finally:
+        heartbeat_path.unlink(missing_ok=True)
+        try:
+            if pid_path.exists() and pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     state_dir = args.state_dir.expanduser().absolute()
+    if args.command == "watch":
+        return watch_loop(state_dir)
     config_path = state_dir / "launcher.json"
     if args.command in ("stop", "status", "logs"):
         if not config_path.exists():
@@ -250,6 +354,7 @@ def main(argv=None) -> int:
         ensure_docker(auto_start=False)
         command = compose_command(state_dir)
         if args.command == "stop":
+            stop_watcher(state_dir)
             run(command + ["stop", "--timeout", "15"])
             print("Board stopped. Your board and documents are saved.")
         elif args.command == "logs":
@@ -290,6 +395,10 @@ def main(argv=None) -> int:
     atomic_json(config_path, config)
     if has_pending:
         (state_dir / "pending-storage.json").unlink(missing_ok=True)
+        (state_dir / "pending-vault.json").unlink(missing_ok=True)
+    (state_dir / "pending-restart.json").unlink(missing_ok=True)
+    if not args.no_watch:
+        start_watcher(state_dir)
     session = fetch_json(url + "/api/session")
     launch_url = url + "/"
     if session and session.get("setupRequired"):

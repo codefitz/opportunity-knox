@@ -91,3 +91,21 @@ A separate Docker installation with fictional data was checked in the browser. L
 An independent simulation exercised the actual theme application code against all eight preset palettes and 280 combinations of tints and accents. It checked text contrast against the main surfaces and the generated accent, soft surface and button text combinations. This calculation supplements, rather than replaces, desktop visual checks. The new library copy describes keyword matching and the absence of vector or semantic search. The existing responsive layout is retained; this increment was not separately tested in a phone browser.
 
 The existing installation was rebuilt and restarted with `./board restart --no-open`; Docker reported it healthy at version 0.4.3. Opportunities, documents, tasks, settings, chats and prepared-text caches exactly matched a private SQLite snapshot taken immediately before the update. The existing appearance and Career Buddy settings were preserved. Restarting invalidated the browser session, so the user must sign in again to use the updated interface.
+
+
+## Version 0.4.5 — automatic appearance and library organisation
+
+`npm run check` passes: the production build, 94 Node tests and 16 launcher tests. New integration tests move single and multiple fictional library files, verify their document IDs, hashes, notes, tags and prepared text remain linked, and verify persistence after restart. Tests reject traversal, stale revisions, duplicate selections, submitted versions and destination collisions without losing originals or overwriting existing files. Moving from a previous storage root keeps the old copy.
+
+A separate Docker installation with fictional documents was checked in the browser. Theme and custom accent changes saved automatically, including rapid changes, survived reload, and showed a retry control after a simulated outage. The used and unused source sections folded independently. Two sources were moved together to a nested library folder and one moved back to the top level; prepared text remained ready. An invalid destination produced an in-dialog error. These are isolated test data and do not verify arbitrary host folders: the supported destination is within the configured Career Library folder.
+
+The existing service was updated to 0.4.5 using the tested image. Its prior server and frontend matched the current repository snapshot before this change, and its environment, storage mounts and port binding were preserved. Opportunities, documents, tasks, settings, chats and prepared-text caches matched the private pre-update database snapshot. The other uncommitted repository changes were retained.
+
+
+## Read-only Obsidian and large uploads — 27 October 2026
+
+The combined production build and test suite passed: 97 Node tests and 18 launcher tests. Collection tests cover 1,007 fictional files for both folder-picker and dropped-directory paths. Read-only vault tests check that connecting and a rejected export leave a fictional vault unchanged; launcher tests check the read-only mount and failed-restart reporting.
+
+A separate Docker board with a fictional vault completed the host restart handoff, and its vault mount was confirmed read-only with its test contents unchanged. The user's already selected vault was subsequently connected in read-only mode; the running container's mount was verified read-only, and no vault import or export was performed. This is a mount/connection check, not a test of syncing the user's vault contents.
+
+A second isolated Docker board and browser test selected 501 fictional files, displayed the large-upload warning, uploaded 500 with batching selected, retained the final file in the queue, and uploaded it on the next action. Automated collection tests cover more than 1,000 selections; they do not establish a performance guarantee for arbitrarily large folders. The queue is in browser memory, and existing per-file size and hidden-folder rules still apply. The isolated test board was removed; no fictional documents were added to the user's board.

@@ -327,7 +327,7 @@ export function createCareerBuddy(ctx) {
           : { status: "pending", chunkCount: 0, warnings: [] },
       };
     });
-  async function indexDocuments(ids) {
+  async function indexDocuments(ids, force = false) {
     if (indexing)
       throw buddyError(
         429,
@@ -347,8 +347,9 @@ export function createCareerBuddy(ctx) {
           if (statSync(file).size > 20 * 1024 * 1024) throw Error("size");
           const bytes = readFileSync(file),
             hash = fingerprint(bytes);
-          cached = getRow("document_text", id);
+          cached = force ? null : getRow("document_text", id);
           if (
+            force ||
             !cached ||
             cached.fingerprint !== hash ||
             cached.status === "unavailable"
@@ -402,6 +403,8 @@ export function createCareerBuddy(ctx) {
   return {
     exportMessages: () => getRows("buddy_messages"),
     publicSettings: () => publicBuddy(config()),
+    indexDocuments,
+    getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
       if (path === "/api/buddy/settings") {
         if (method === "GET") {
@@ -494,6 +497,19 @@ export function createCareerBuddy(ctx) {
         json(res, { documents: summaries() });
         return true;
       }
+      if (path === "/api/buddy/index" && method === "DELETE") {
+        const libraryIds = getDocuments()
+          .filter((d) => !d.opportunityId)
+          .map((d) => d.id);
+        const del = db.prepare("DELETE FROM document_text WHERE id=?");
+        for (const id of libraryIds) del.run(id);
+        json(res, {
+          ok: true,
+          resetCount: libraryIds.length,
+          documents: summaries(),
+        });
+        return true;
+      }
       if (path === "/api/buddy/index" && method === "POST") {
         const body = await readBody(req),
           ids = readIds(
@@ -501,7 +517,7 @@ export function createCareerBuddy(ctx) {
             getDocuments().map((d) => d.id),
             50,
           );
-        await indexDocuments(ids);
+        await indexDocuments(ids, Boolean(body.force));
         json(res, { documents: summaries() });
         return true;
       }

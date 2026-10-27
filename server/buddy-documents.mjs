@@ -1,8 +1,83 @@
 import { Worker } from "node:worker_threads";
 import { extname } from "node:path";
 import { createHash } from "node:crypto";
+import { load } from "cheerio";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import { buddyError } from "./buddy-provider.mjs";
+
+const TEXT_EXTENSIONS = [
+  ".txt",
+  ".md",
+  ".markdown",
+  ".csv",
+  ".tsv",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".log",
+  ".py",
+  ".js",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".mjs",
+  ".sql",
+  ".sh",
+  ".go",
+  ".rs",
+  ".java",
+  ".c",
+  ".cpp",
+  ".cs",
+  ".rb",
+  ".php",
+];
+
+function cleanCaptions(raw) {
+  return raw
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (!t || /^WEBVTT\b/i.test(t) || /^NOTE\b/i.test(t) || /^\d+$/.test(t))
+        return false;
+      if (
+        /^\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s*-->\s*\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}/.test(
+          t,
+        )
+      )
+        return false;
+      return true;
+    })
+    .map((line) => line.replace(/<[^>]+>/g, "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function cleanRtf(raw) {
+  return raw
+    .replace(/\\par[d]?\b/g, "\n")
+    .replace(/\\line\b/g, "\n")
+    .replace(/\\tab\b/g, "\t")
+    .replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16)),
+    )
+    .replace(/\\u(-?\d+)\??/g, (_, code) => {
+      const n = Number(code);
+      return String.fromCodePoint(n < 0 ? n + 65536 : n);
+    })
+    .replace(/\{\\\*[^{}]*\}/g, "")
+    .replace(
+      /\\(?:fonttbl|colortbl|stylesheet|info)[^{}]*(?:\{[^{}]*\}[^{}]*)*/g,
+      "",
+    )
+    .replace(/\\[a-zA-Z]+-?\d*\s?/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 export function chunkText(text, size = 1500) {
   const clean = text.replace(/\0/g, "").replace(/\r\n?/g, "\n").trim();
@@ -29,36 +104,57 @@ export async function extractDocument(name, bytes) {
       chunks: [],
       warnings: ["This file exceeds the 20 MB extraction limit."],
     };
-  if ([".txt", ".md", ".csv", ".json"].includes(extension)) {
-    const text = bytes
+  if (
+    TEXT_EXTENSIONS.includes(extension) ||
+    [".vtt", ".srt", ".html", ".htm", ".rtf"].includes(extension)
+  ) {
+    const raw = bytes
       .toString("utf8")
       .replace(/^\uFEFF/, "")
-      .slice(0, 300000);
-    if (text.includes("\uFFFD") || text.includes("\0"))
+      .slice(0, 400000);
+    if (raw.includes("\uFFFD") || raw.includes("\0"))
       return {
         status: "unavailable",
         text: "",
         chunks: [],
         warnings: ["Use a UTF-8 text copy of this file."],
       };
+    let text = raw.slice(0, 300000);
+    const extraWarnings = [];
+    if (extension === ".vtt" || extension === ".srt") {
+      text = cleanCaptions(raw).slice(0, 300000);
+      extraWarnings.push("Caption cues and timestamps stripped for reading.");
+    } else if (extension === ".html" || extension === ".htm") {
+      const $ = load(raw);
+      $("script, style, noscript, svg, template").remove();
+      text = ($("body").text() || $.root().text())
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+        .slice(0, 300000);
+    } else if (extension === ".rtf") {
+      text = cleanRtf(raw).slice(0, 300000);
+    }
     const chunks = chunkText(text);
     return {
       status: chunks.length ? "ready" : "unavailable",
       text,
       chunks,
-      warnings:
-        bytes.length > 300000
+      warnings: [
+        ...extraWarnings,
+        ...(bytes.length > 300000
           ? ["Text was limited to 300,000 characters."]
-          : [],
+          : []),
+      ],
     };
   }
-  if (![".pdf", ".docx"].includes(extension))
+  if (![".pdf", ".docx", ".pptx"].includes(extension))
     return {
       status: "unsupported",
       text: "",
       chunks: [],
       warnings: [
-        "Use PDF, DOCX, TXT or Markdown for Career Buddy. The original is still stored.",
+        "Use PDF, DOCX, PPTX, TXT, Markdown, HTML, RTF, or caption (.vtt/.srt) files for Career Buddy. The original is still stored.",
       ],
     };
   const result = await new Promise((resolve) => {

@@ -7,6 +7,7 @@ import {
   symlinkSync,
   existsSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
   realpathSync,
 } from "node:fs";
@@ -807,6 +808,46 @@ test("additional themes and custom colours validate, reset and persist without c
     body: { themeBackground: "" },
   });
   assert.equal(resetBackground.data.themeBackground, "");
+});
+
+test("mixed contrast themes persist while preserving custom colours and existing opportunities", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const created = await f.request("/api/opportunities", {
+    method: "POST",
+    body: opportunity,
+  });
+  assert.equal(created.status, 201);
+  const customized = await f.request("/api/settings", {
+    method: "PATCH",
+    body: {
+      themeAccent: "#13579b",
+      themeBackground: "#e5bb77",
+      timezone: "Europe/Paris",
+    },
+  });
+  assert.equal(customized.status, 200);
+  for (const theme of ["espresso-cream", "harbour", "ink-paper", "moonlight"]) {
+    const changed = await f.request("/api/settings", {
+      method: "PATCH",
+      body: { theme },
+    });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.data.theme, theme);
+    assert.equal(changed.data.themeAccent, "#13579b");
+    assert.equal(changed.data.themeBackground, "#e5bb77");
+    assert.equal(changed.data.timezone, "Europe/Paris");
+    await f.restart();
+    await f.login();
+    const board = (await f.request("/api/board")).data;
+    assert.equal(board.settings.theme, theme);
+    assert.equal(board.settings.themeAccent, "#13579b");
+    assert.equal(board.settings.themeBackground, "#e5bb77");
+    assert.equal(board.settings.timezone, "Europe/Paris");
+    assert.equal(board.opportunities.length, 1);
+    assert.equal(board.opportunities[0].id, created.data.id);
+    assert.equal(board.opportunities[0].role, created.data.role);
+  }
 });
 
 test("profile name and photo validate, preserve revision conflicts, survive restart and allow removal", async (t) => {
@@ -1783,4 +1824,776 @@ test("temporary model searches do not forward a stored key to a different provid
   const current = (await f.request("/api/buddy/settings")).data;
   assert.equal(current.provider, "custom");
   assert.equal(current.hasKey, true);
+});
+
+test("directory and multi-file uploads preserve relative folder labels and reject traversal or hidden segments", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const uploaded = await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Obsidian Vault\\Projects/2026/Cloud Migration.md",
+      kind: "reference",
+      contentBase64: Buffer.from(
+        "---\ntags: [kubernetes, platform]\n---\n# Cloud Migration\nDelivered 40% latency reduction. #architecture",
+      ).toString("base64"),
+    },
+  });
+  assert.equal(uploaded.status, 201);
+  assert.equal(
+    uploaded.data.name,
+    "Obsidian Vault/Projects/2026/Cloud Migration.md",
+  );
+  assert.deepEqual(uploaded.data.tags, [
+    "Obsidian Vault",
+    "Projects",
+    "2026",
+    "Markdown",
+    "kubernetes",
+    "platform",
+    "architecture",
+  ]);
+  const updatedTags = await f.request(`/api/documents/${uploaded.data.id}`, {
+    method: "PATCH",
+    body: {
+      tags: ["Obsidian Vault", "Custom Tag", "#architecture"],
+      revision: uploaded.data.revision,
+    },
+  });
+  assert.equal(updatedTags.status, 200);
+  assert.deepEqual(updatedTags.data.tags, [
+    "Obsidian Vault",
+    "Custom Tag",
+    "architecture",
+  ]);
+  const downloaded = await f.request(uploaded.data.url);
+  assert.equal(downloaded.status, 200);
+  assert.match(
+    downloaded.response.headers.get("content-disposition") || "",
+    /filename="Cloud Migration\.md"/,
+  );
+  assert.match(downloaded.data, /Delivered 40% latency reduction/);
+  const indexed = await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [uploaded.data.id] },
+  });
+  assert.equal(indexed.status, 200);
+  assert.equal(
+    indexed.data.documents.find((d) => d.id === uploaded.data.id).extraction
+      .status,
+    "ready",
+  );
+  for (const invalidName of [
+    "",
+    ".",
+    "..",
+    "../secret.txt",
+    "Vault/../secret.txt",
+    ".obsidian/workspace.json",
+    "Vault/.git/config",
+    "Vault//empty-segment.md",
+    "/absolute/path.md",
+  ]) {
+    const res = await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: invalidName,
+        kind: "reference",
+        contentBase64: Buffer.from("test").toString("base64"),
+      },
+    });
+    assert.equal(res.status, 400, `Expected 400 for ${invalidName}`);
+  }
+});
+
+test("board restart requires authentication, writes structured handoff, triggers onRestart, and preserves session across restart", async (t) => {
+  let restartCount = 0;
+  const f = await fixture(t, {
+    onRestart: () => {
+      restartCount++;
+    },
+  });
+  const unauth = await f.request("/api/restart", {
+    method: "POST",
+    body: {},
+    auth: false,
+  });
+  assert.equal(unauth.status, 401);
+  assert.equal(restartCount, 0);
+
+  await f.setup();
+  const sessionCookie = (
+    await f.request("/api/login", {
+      method: "POST",
+      body: { password: "correct horse battery staple" },
+    })
+  ).response.headers
+    .get("set-cookie")
+    .split(";")[0];
+
+  await f.request("/api/settings", {
+    method: "PATCH",
+    body: { pendingHostPath: "/Volumes/Archive/OpportunityBoard" },
+  });
+
+  const restarted = await f.request("/api/restart", {
+    method: "POST",
+    body: {},
+  });
+  assert.equal(restarted.status, 202);
+  assert.equal(restarted.data.restarting, true);
+  assert.equal(
+    restarted.data.pendingHostPath,
+    "/Volumes/Archive/OpportunityBoard",
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(restartCount, 1);
+
+  const pendingRestart = JSON.parse(
+    readFileSync(join(f.options.dataDir, "pending-restart.json"), "utf8"),
+  );
+  assert.equal(
+    pendingRestart.pendingHostPath,
+    "/Volumes/Archive/OpportunityBoard",
+  );
+
+  // Simulate process restart and verify the browser session cookie remains authenticated
+  await f.restart();
+  const sessionAfterRestart = await f.request("/api/session", {
+    auth: false,
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(sessionAfterRestart.status, 200);
+  assert.equal(sessionAfterRestart.data.authenticated, true);
+});
+
+test("delete individual document and clear all library documents remove files and text cache while preserving submitted versions and opportunity files", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  const opp = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { company: "Fictional Corp", role: "Principal Engineer" },
+    })
+  ).data;
+
+  const lib1 = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Notes/Career-Summary.md",
+        kind: "reference",
+        status: "draft",
+        contentBase64: Buffer.from("# Summary\n10 years experience.").toString(
+          "base64",
+        ),
+      },
+    })
+  ).data;
+  const lib2 = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Notes/Project-Outcomes.md",
+        kind: "reference",
+        status: "approved",
+        contentBase64: Buffer.from("# Outcomes\nShipped v2.").toString(
+          "base64",
+        ),
+      },
+    })
+  ).data;
+  const libSubmitted = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Submitted-Reference.txt",
+        kind: "reference",
+        status: "submitted",
+        contentBase64: Buffer.from("Submitted reference snapshot").toString(
+          "base64",
+        ),
+      },
+    })
+  ).data;
+  const oppDoc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        opportunityId: opp.id,
+        name: "Tailored-CV.md",
+        kind: "cv",
+        status: "draft",
+        contentBase64: Buffer.from("# Tailored CV").toString("base64"),
+      },
+    })
+  ).data;
+
+  await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [lib1.id, lib2.id] },
+  });
+
+  // Delete single library document
+  const delOne = await f.request(`/api/documents/${lib1.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(delOne.status, 200);
+  assert.equal((await f.request(lib1.url)).status, 404);
+
+  // Submitted document cannot be deleted individually
+  const delSubmitted = await f.request(`/api/documents/${libSubmitted.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(delSubmitted.status, 409);
+
+  // Clear all library documents removes remaining non-submitted library items, preserves submitted & opportunity docs
+  const cleared = await f.request("/api/documents?scope=library", {
+    method: "DELETE",
+  });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.data.deletedCount, 1);
+  assert.equal(cleared.data.preservedSubmittedCount, 1);
+
+  const remaining = (await f.request("/api/documents")).data.documents;
+  assert.deepEqual(
+    remaining.map((d) => d.id).sort(),
+    [libSubmitted.id, oppDoc.id].sort(),
+  );
+});
+
+test("buddy index reset clears prepared library text and force re-prepare rebuilds chunks", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  const doc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Portfolio/Architecture-Deck.md",
+        kind: "reference",
+        status: "approved",
+        contentBase64: Buffer.from(
+          "# Architecture\nLed platform reliability and zero-downtime migrations.",
+        ).toString("base64"),
+      },
+    })
+  ).data;
+
+  // Initially pending (not prepared)
+  const initialBuddyDocs = (await f.request("/api/buddy/documents")).data
+    .documents;
+  assert.equal(
+    initialBuddyDocs.find((d) => d.id === doc.id).extraction.status,
+    "pending",
+  );
+
+  // Prepare library text
+  const prepared = await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [doc.id] },
+  });
+  assert.equal(prepared.status, 200);
+  assert.equal(
+    prepared.data.documents.find((d) => d.id === doc.id).extraction.status,
+    "ready",
+  );
+
+  // Reset prepared library text
+  const reset = await f.request("/api/buddy/index", {
+    method: "DELETE",
+  });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.data.ok, true);
+  assert.equal(reset.data.resetCount, 1);
+  assert.equal(
+    reset.data.documents.find((d) => d.id === doc.id).extraction.status,
+    "pending",
+  );
+
+  // Re-prepare with force: true
+  const reprepared = await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [doc.id], force: true },
+  });
+  assert.equal(reprepared.status, 200);
+  assert.equal(
+    reprepared.data.documents.find((d) => d.id === doc.id).extraction.status,
+    "ready",
+  );
+});
+
+test("bulk delete by folder and by tag removes matching non-submitted documents and preserves others", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  const folderDoc1 = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Talks/2025/Keynote.md",
+        kind: "reference",
+        status: "approved",
+        tags: ["speaking", "2025"],
+        contentBase64: Buffer.from("# Keynote 2025").toString("base64"),
+      },
+    })
+  ).data;
+  const folderSubmitted = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Talks/2025/Submitted-Deck.md",
+        kind: "reference",
+        status: "submitted",
+        tags: ["speaking", "2025"],
+        contentBase64: Buffer.from("# Submitted Deck").toString("base64"),
+      },
+    })
+  ).data;
+  const taggedDoc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Notes/Python-Case-Study.md",
+        kind: "reference",
+        status: "draft",
+        tags: ["python", "case-study"],
+        contentBase64: Buffer.from("# Python Case Study").toString("base64"),
+      },
+    })
+  ).data;
+  const rootDoc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "General-Bio.txt",
+        kind: "reference",
+        status: "draft",
+        tags: ["bio"],
+        contentBase64: Buffer.from("Bio summary").toString("base64"),
+      },
+    })
+  ).data;
+
+  // Bulk delete folder "Talks/2025" removes folderDoc1 and preserves folderSubmitted
+  const delFolder = await f.request(
+    `/api/documents?scope=library&folder=${encodeURIComponent("Talks/2025")}`,
+    { method: "DELETE" },
+  );
+  assert.equal(delFolder.status, 200);
+  assert.equal(delFolder.data.deletedCount, 1);
+  assert.equal(delFolder.data.preservedSubmittedCount, 1);
+
+  // Bulk delete tag "python" removes taggedDoc
+  const delTag = await f.request("/api/documents?scope=library&tag=PYTHON", {
+    method: "DELETE",
+  });
+  assert.equal(delTag.status, 200);
+  assert.equal(delTag.data.deletedCount, 1);
+
+  const remainingIds = (await f.request("/api/documents")).data.documents
+    .map((d) => d.id)
+    .sort();
+  assert.deepEqual(remainingIds, [folderSubmitted.id, rootDoc.id].sort());
+
+  // Bulk delete top-level (__root__) removes rootDoc
+  const delRoot = await f.request(
+    "/api/documents?scope=library&folder=__root__",
+    { method: "DELETE" },
+  );
+  assert.equal(delRoot.status, 200);
+  assert.equal(delRoot.status, 200);
+  assert.equal(delRoot.data.deletedCount, 1);
+  assert.equal(folderDoc1.name, "Talks/2025/Keynote.md");
+  assert.equal(taggedDoc.name, "Notes/Python-Case-Study.md");
+});
+
+test("Obsidian integration can create a new vault, import existing sources into the vault, and connect and sync an existing vault", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  // Upload two library sources: one Markdown note and one HTML document
+  await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Projects/Distributed-Cache.md",
+      kind: "reference",
+      status: "approved",
+      tags: ["architecture", "redis"],
+      contentBase64: Buffer.from(
+        "# Distributed Cache\nReduced p99 latency by 65% across 4 regions.",
+      ).toString("base64"),
+    },
+  });
+  await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Talks/Platform-Talk.html",
+      kind: "reference",
+      status: "approved",
+      notes: "Conference talk deck handout",
+      tags: ["speaking"],
+      contentBase64: Buffer.from(
+        "<html><body><h1>Platform Engineering</h1><p>Self-service deployment pipelines.</p></body></html>",
+      ).toString("base64"),
+    },
+  });
+
+  // 1. Create a new Obsidian vault in a workspace subfolder and import existing library sources
+  const created = await f.request("/api/obsidian/configure", {
+    method: "POST",
+    body: {
+      action: "create",
+      locationType: "subpath",
+      subpath: "career-vault",
+      vaultName: "My Career Vault",
+      importExisting: true,
+      importOnlyPrepared: false,
+    },
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.data.ok, true);
+  assert.equal(created.data.obsidian.enabled, true);
+  assert.equal(created.data.obsidian.vaultStats.exists, true);
+  assert.equal(created.data.obsidian.vaultStats.hasObsidianConfig, true);
+  assert.equal(created.data.importedToVault.importedNotesCount, 2);
+  assert.equal(created.data.importedToVault.copiedAttachmentsCount, 1);
+
+  const vaultDir = join(f.options.filesDir, "career-vault");
+  assert.ok(existsSync(join(vaultDir, ".obsidian", "app.json")));
+  assert.ok(existsSync(join(vaultDir, "00 - Opportunity Knox Hub.md")));
+  const exportedMd = readFileSync(
+    join(vaultDir, "Career Library", "Projects", "Distributed-Cache.md"),
+    "utf8",
+  );
+  assert.match(exportedMd, /title: "Distributed-Cache"/);
+  assert.match(exportedMd, /Reduced p99 latency by 65%/);
+
+  const companionMd = readFileSync(
+    join(vaultDir, "Career Library", "Talks", "Platform-Talk.md"),
+    "utf8",
+  );
+  assert.match(companionMd, /!\[\[Attachments\/Talks\/Platform-Talk\.html\]\]/);
+  assert.match(companionMd, /## Extracted Content/);
+  assert.match(companionMd, /Self-service deployment pipelines/);
+
+  // 2. Point to an existing external Obsidian vault on disk and sync its notes into the library
+  const existingVaultPath = join(f.options.dataDir, "external-obsidian-vault");
+  mkdirSync(join(existingVaultPath, ".obsidian"), { recursive: true });
+  mkdirSync(join(existingVaultPath, "Wins"), { recursive: true });
+  writeFileSync(
+    join(existingVaultPath, "Wins", "Staff-Promotion-Case.md"),
+    "---\ntags: [leadership, promotion]\n---\n# Staff Promotion\nMentored 8 engineers and led org-wide RFC process #mentoring.\n",
+  );
+
+  const connected = await f.request("/api/obsidian/configure", {
+    method: "POST",
+    body: {
+      action: "connect",
+      locationType: "hostPath",
+      hostPath: existingVaultPath,
+      vaultName: "External Vault",
+      importExisting: false,
+      syncFromVault: true,
+    },
+  });
+  assert.equal(connected.status, 200);
+  assert.equal(connected.data.obsidian.enabled, true);
+  assert.equal(connected.data.syncedFromVault.importedCount, 1);
+  assert.equal(connected.data.syncedFromVault.preparedCount, 1);
+
+  const allDocs = (await f.request("/api/documents")).data.documents;
+  const syncedDoc = allDocs.find(
+    (d) => d.name === "Wins/Staff-Promotion-Case.md",
+  );
+  assert.ok(syncedDoc);
+  assert.ok(syncedDoc.tags.includes("Obsidian"));
+  assert.ok(syncedDoc.tags.includes("leadership"));
+  assert.ok(syncedDoc.tags.includes("mentoring"));
+
+  // Prepared text for the synced vault note is immediately ready for Career Buddy
+  const buddyDocs = (await f.request("/api/buddy/documents")).data.documents;
+  assert.equal(
+    buddyDocs.find((d) => d.id === syncedDoc.id).extraction.status,
+    "ready",
+  );
+});
+
+test("library moves preserve bytes, IDs, metadata and prepared text for one or many files", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const first = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Old/CV.txt",
+        kind: "cv",
+        contentBase64: Buffer.from("Fictional career evidence one").toString(
+          "base64",
+        ),
+        notes: "Fictional note",
+      },
+    })
+  ).data;
+  const second = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Old/Notes.txt",
+        kind: "reference",
+        contentBase64: Buffer.from("Fictional career evidence two").toString(
+          "base64",
+        ),
+      },
+    })
+  ).data;
+  await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [first.id] },
+  });
+  const readDb = () => {
+    const db = new DatabaseSync(join(f.options.dataDir, "board.sqlite"), {
+      readOnly: true,
+    });
+    const rows = Object.fromEntries(
+      db
+        .prepare("SELECT id,data FROM documents")
+        .all()
+        .map((r) => [r.id, JSON.parse(r.data)]),
+    );
+    db.close();
+    return rows;
+  };
+  const before = readDb();
+  const moved = await f.request("/api/documents/move", {
+    method: "POST",
+    body: {
+      folder: "Projects/Current",
+      documents: [first, second].map((d) => ({
+        id: d.id,
+        revision: d.revision,
+      })),
+    },
+  });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.data.retainedOriginals, 0);
+  const after = readDb();
+  for (const doc of [first, second]) {
+    assert.equal(
+      after[doc.id].name,
+      "Projects/Current/" + doc.name.split("/").pop(),
+    );
+    assert.equal(after[doc.id].revision, doc.revision + 1);
+    assert.equal(after[doc.id].sha256, before[doc.id].sha256);
+    assert.equal(after[doc.id].notes, before[doc.id].notes);
+    assert.deepEqual(after[doc.id].tags, before[doc.id].tags);
+    assert.match(
+      after[doc.id].relativePath,
+      /^references\/Projects\/Current\//,
+    );
+    assert.ok(
+      !existsSync(
+        join(before[doc.id].storageRoot, before[doc.id].relativePath),
+      ),
+    );
+    assert.ok(
+      existsSync(join(after[doc.id].storageRoot, after[doc.id].relativePath)),
+    );
+    assert.match(
+      (await f.request("/api/documents/" + doc.id + "/content")).data,
+      /Fictional career evidence/,
+    );
+  }
+  const prepared = (
+    await f.request("/api/buddy/documents")
+  ).data.documents.find((d) => d.id === first.id);
+  assert.equal(prepared.extraction.status, "ready");
+  await f.restart();
+  await f.login();
+  assert.match(
+    (await f.request("/api/documents/" + first.id + "/content")).data,
+    /evidence one/,
+  );
+  const back = await f.request("/api/documents/move", {
+    method: "POST",
+    body: {
+      folder: "",
+      documents: [{ id: first.id, revision: after[first.id].revision }],
+    },
+  });
+  assert.equal(back.status, 200);
+  assert.equal(back.data.documents[0].name, "CV.txt");
+});
+
+test("library moves reject stale, invalid or conflicting targets without changing any source", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  async function upload(name, status = "draft") {
+    return (
+      await f.request("/api/documents", {
+        method: "POST",
+        body: {
+          name,
+          kind: "reference",
+          status,
+          contentBase64: Buffer.from("Fictional original " + name).toString(
+            "base64",
+          ),
+        },
+      })
+    ).data;
+  }
+  const a = await upload("a.txt"),
+    b = await upload("b.txt"),
+    submitted = await upload("submitted.txt", "submitted");
+  const refs = [a, b].map((d) => ({ id: d.id, revision: d.revision }));
+  for (const folder of [
+    "../outside",
+    "/absolute",
+    ".hidden",
+    "A/../B",
+    "A//B",
+  ]) {
+    const bad = await f.request("/api/documents/move", {
+      method: "POST",
+      body: { folder, documents: refs },
+    });
+    assert.equal(bad.status, 400, folder);
+  }
+  assert.equal(
+    (
+      await f.request("/api/documents/move", {
+        method: "POST",
+        body: { folder: "New", documents: [{ id: a.id, revision: 0 }] },
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await f.request("/api/documents/move", {
+        method: "POST",
+        body: {
+          folder: "New",
+          documents: [{ id: submitted.id, revision: submitted.revision }],
+        },
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await f.request("/api/documents/move", {
+        method: "POST",
+        body: { folder: "New", documents: [refs[0], refs[0]] },
+      })
+    ).status,
+    400,
+  );
+  const target = join(f.options.filesDir, "references", "Collision");
+  mkdirSync(target, { recursive: true });
+  writeFileSync(join(target, b.id + ".txt"), "Existing unrelated file");
+  const conflict = await f.request("/api/documents/move", {
+    method: "POST",
+    body: { folder: "Collision", documents: refs },
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal(
+    readFileSync(join(target, b.id + ".txt"), "utf8"),
+    "Existing unrelated file",
+  );
+  assert.equal(existsSync(join(target, a.id + ".txt")), false);
+  for (const doc of [a, b])
+    assert.match(
+      (await f.request("/api/documents/" + doc.id + "/content")).data,
+      /Fictional original/,
+    );
+  assert.equal(
+    (await f.request("/api/documents")).data.documents.find(
+      (d) => d.id === a.id,
+    ).revision,
+    a.revision,
+  );
+});
+
+test("moving a library file from a previous storage root retains its original copy", async (t) => {
+  const f = await fixture(t, {
+    beforeOpen(options) {
+      const old = join(options.dataDir, "..", "previous-root");
+      mkdirSync(old, { recursive: true });
+      options.documentRoots = [old];
+    },
+  });
+  await f.setup();
+  const doc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        name: "Original.txt",
+        kind: "reference",
+        contentBase64: Buffer.from("Previous-root fictional content").toString(
+          "base64",
+        ),
+      },
+    })
+  ).data;
+  const db = new DatabaseSync(join(f.options.dataDir, "board.sqlite"));
+  const stored = JSON.parse(
+    db.prepare("SELECT data FROM documents WHERE id=?").get(doc.id).data,
+  );
+  const oldRoot = realpathSync(f.options.documentRoots[0]),
+    oldPath = join(oldRoot, "Original.txt");
+  writeFileSync(
+    oldPath,
+    readFileSync(join(stored.storageRoot, stored.relativePath)),
+  );
+  rmSync(join(stored.storageRoot, stored.relativePath));
+  stored.storageRoot = oldRoot;
+  stored.relativePath = "Original.txt";
+  db.prepare("UPDATE documents SET data=? WHERE id=?").run(
+    JSON.stringify(stored),
+    doc.id,
+  );
+  db.close();
+  const moved = await f.request("/api/documents/move", {
+    method: "POST",
+    body: {
+      folder: "Moved",
+      documents: [{ id: doc.id, revision: doc.revision }],
+    },
+  });
+  assert.equal(moved.status, 200, JSON.stringify(moved.data));
+  assert.equal(moved.data.retainedOriginals, 1);
+  assert.equal(
+    readFileSync(oldPath, "utf8"),
+    "Previous-root fictional content",
+  );
+  assert.equal(
+    (await f.request("/api/documents/" + doc.id + "/content")).data,
+    "Previous-root fictional content",
+  );
+});
+
+test("connecting an existing read-only vault never writes or imports files", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const vault = join(f.options.dataDir, "fictional-readonly-vault");
+  mkdirSync(vault);
+  writeFileSync(join(vault, "example.md"), "fictional original note\n");
+  const before = readdirSync(vault);
+  const result = await f.request("/api/obsidian/configure", {
+    method: "POST", body: { action: "connect", locationType: "hostPath", hostPath: vault,
+      vaultName: "Example", readOnly: true, importExisting: true, syncFromVault: false },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.data.obsidian.readOnly, true);
+  assert.equal(result.data.importedToVault, undefined);
+  assert.deepEqual(readdirSync(vault), before);
+  const writeAttempt = await f.request("/api/obsidian/import-to-vault", {method: "POST", body: {}});
+  assert.equal(writeAttempt.status, 403);
+  assert.deepEqual(readdirSync(vault), before);
+  assert.equal(readFileSync(join(vault, "example.md"), "utf8"), "fictional original note\n");
+  assert.equal((await f.request("/api/documents")).data.documents.length, 0);
 });

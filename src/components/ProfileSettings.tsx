@@ -16,6 +16,7 @@ export const THEMES: {
   description: string;
   swatches: string[];
   dark?: boolean;
+  navDark?: boolean;
 }[] = [
   {
     id: "forest",
@@ -68,6 +69,35 @@ export const THEMES: {
     swatches: ["#211a26", "#d3aecf", "#291f2e"],
     dark: true,
   },
+  {
+    id: "espresso-cream",
+    name: "Espresso & Cream",
+    description: "Dark coffee and a warm, light workspace.",
+    swatches: ["#f4ede3", "#76503c", "#271b16"],
+    navDark: true,
+  },
+  {
+    id: "harbour",
+    name: "Harbour",
+    description: "Deep navy beside a bright coastal workspace.",
+    swatches: ["#edf4f7", "#1c6571", "#132837"],
+    navDark: true,
+  },
+  {
+    id: "ink-paper",
+    name: "Ink & Paper",
+    description: "Dark ink and a clean paper canvas.",
+    swatches: ["#f6f5f1", "#4f4d85", "#202331"],
+    navDark: true,
+  },
+  {
+    id: "moonlight",
+    name: "Moonlight",
+    description: "A dark workspace with light, warm navigation.",
+    swatches: ["#141d24", "#8cbba8", "#f6f2e9"],
+    dark: true,
+    navDark: false,
+  },
 ];
 const isHex = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
 const themeVars = [
@@ -86,6 +116,18 @@ const themeVars = [
   "--ink",
   "--ink-secondary",
   "--muted",
+  "--nav-bg",
+  "--nav-ink",
+  "--nav-ink-secondary",
+  "--nav-muted",
+  "--nav-line",
+  "--nav-panel-soft",
+  "--nav-panel-hover",
+  "--nav-accent",
+  "--nav-accent-soft",
+  "--nav-on-accent",
+  "--nav-focus",
+  "--nav-selection",
 ];
 const rgb = (hex: string) =>
   [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -200,6 +242,71 @@ export function applyTheme(appearance: Appearance, cache = true) {
       root.style.setProperty("--selection", mix(softBase, accent, 0.24));
     }
     root.style.setProperty("--focus", accent);
+  }
+  // Mixed themes use separately toned navigation so one accent can remain
+  // readable on a dark sidebar and a light workspace (or vice versa).
+  const navDark = THEMES.find((t) => t.id === theme)?.navDark;
+  if (navDark !== undefined && isHex(bases["--nav-bg"])) {
+    const navSurfaces = ["--nav-bg", "--nav-panel-soft", "--nav-panel-hover"];
+    if (background) {
+      for (const name of [
+        ...navSurfaces,
+        "--nav-accent-soft",
+        "--nav-selection",
+      ])
+        if (isHex(bases[name])) root.style.setProperty(name, tint(bases[name]));
+      for (const name of ["--nav-ink", "--nav-ink-secondary", "--nav-muted"]) {
+        const original = bases[name];
+        if (!isHex(original)) continue;
+        let adjusted = original;
+        for (let i = 0; i <= 100; i++) {
+          adjusted = mix(original, navDark ? "#ffffff" : "#000000", i / 100);
+          if (
+            navSurfaces.every(
+              (surface) =>
+                !isHex(bases[surface]) ||
+                contrast(adjusted, tint(bases[surface])) + 0.000001 >=
+                  Math.min(4.5, contrast(original, bases[surface])),
+            )
+          )
+            break;
+        }
+        root.style.setProperty(name, adjusted);
+      }
+    }
+    const navSelected =
+      customAccent || (background ? bases["--nav-accent"] : "");
+    if (isHex(navSelected)) {
+      const navPanel = tint(bases["--nav-panel-soft"]);
+      let accent = navSelected;
+      for (let i = 0; i <= 100; i++) {
+        accent = mix(navSelected, navDark ? "#ffffff" : "#000000", i / 100);
+        if (
+          navSurfaces.every(
+            (name) =>
+              !isHex(bases[name]) || contrast(accent, tint(bases[name])) >= 4.5,
+          ) &&
+          (!isHex(navPanel) ||
+            contrast(accent, mix(navPanel, accent, 0.05)) >= 4.5)
+        )
+          break;
+      }
+      root.style.setProperty("--nav-accent", accent);
+      root.style.setProperty(
+        "--nav-on-accent",
+        contrast(accent, "#ffffff") >= contrast(accent, "#151515")
+          ? "#ffffff"
+          : "#151515",
+      );
+      root.style.setProperty("--nav-focus", accent);
+      if (isHex(navPanel)) {
+        root.style.setProperty(
+          "--nav-accent-soft",
+          mix(navPanel, accent, 0.05),
+        );
+        root.style.setProperty("--nav-selection", mix(navPanel, accent, 0.24));
+      }
+    }
   }
   if (cache)
     try {
@@ -438,6 +545,7 @@ export function ThemeSettings({
   onSave,
   onReset,
   saving,
+  failed,
   dirty,
 }: {
   appearance: Appearance;
@@ -445,6 +553,7 @@ export function ThemeSettings({
   onSave: () => void;
   onReset: () => void;
   saving: boolean;
+  failed: boolean;
   dirty: boolean;
 }) {
   const preset = THEMES.find((t) => t.id === appearance.theme) || THEMES[0];
@@ -458,7 +567,8 @@ export function ThemeSettings({
         <div>
           <h2>Make yourself at home</h2>
           <p>
-            Choose a theme and make it yours. Save to use it across devices.
+            Choose a theme and make it yours. Changes save automatically across
+            devices.
           </p>
         </div>
         {saving && (
@@ -477,7 +587,6 @@ export function ThemeSettings({
             aria-pressed={appearance.theme === t.id}
             className={`theme-choice ${appearance.theme === t.id ? "selected" : ""}`}
             onClick={() => onChange({ theme: t.id })}
-            disabled={saving}
           >
             <span
               className="theme-preview"
@@ -508,8 +617,8 @@ export function ThemeSettings({
         <div>
           <h3>Customise colours</h3>
           <p>
-            Colours preview here before you save. Accent shades are adjusted for
-            readability; background colour adds a subtle tint.
+            Accent shades are adjusted for readability; background colour adds a
+            subtle tint.
           </p>
         </div>
         <div className="theme-colour-grid">
@@ -521,7 +630,6 @@ export function ThemeSettings({
                 type="color"
                 value={appearance.themeAccent || preset.swatches[1]}
                 onChange={(e) => onChange({ themeAccent: e.target.value })}
-                disabled={saving}
               />{" "}
               <span>{appearance.themeAccent || "Theme default"}</span>
             </div>
@@ -530,7 +638,6 @@ export function ThemeSettings({
                 className="text-button"
                 type="button"
                 onClick={() => onChange({ themeAccent: "" })}
-                disabled={saving}
               >
                 Use theme accent
               </button>
@@ -544,7 +651,6 @@ export function ThemeSettings({
                 type="color"
                 value={appearance.themeBackground || preset.swatches[0]}
                 onChange={(e) => onChange({ themeBackground: e.target.value })}
-                disabled={saving}
               />{" "}
               <span>{appearance.themeBackground || "Theme default"}</span>
             </div>
@@ -553,7 +659,6 @@ export function ThemeSettings({
                 className="text-button"
                 type="button"
                 onClick={() => onChange({ themeBackground: "" })}
-                disabled={saving}
               >
                 Use theme background
               </button>
@@ -562,29 +667,24 @@ export function ThemeSettings({
         </div>
         <div className="theme-save-row">
           <button
-            className="button primary"
-            type="button"
-            onClick={onSave}
-            disabled={saving || !dirty}
-          >
-            Save appearance
-          </button>
-          <button
             className="button secondary"
             type="button"
             onClick={onReset}
-            disabled={
-              saving || (!appearance.themeAccent && !appearance.themeBackground)
-            }
+            disabled={!appearance.themeAccent && !appearance.themeBackground}
           >
             Reset colours
           </button>
-          <small>
-            {dirty
-              ? "Preview only — save to use across devices."
-              : "Appearance saved across devices."}{" "}
-            Reset clears the custom colours in this preview; Save applies the
-            reset across devices.
+          {failed && (
+            <button className="button primary" type="button" onClick={onSave}>
+              Retry saving
+            </button>
+          )}
+          <small role="status">
+            {failed
+              ? "Could not save appearance. Retry saving."
+              : saving || dirty
+                ? "Saving appearance…"
+                : "Appearance saved across devices."}
           </small>
         </div>
       </div>
