@@ -335,6 +335,8 @@ export function createApp(options = {}) {
   const settingDefaults = {
     timezone: "Europe/London",
     theme: "forest",
+    themeAccent: "",
+    themeBackground: "",
     documentsSubdir: "opportunities",
     referenceSubdir: "references",
     backupSubdir: "backups",
@@ -1105,9 +1107,32 @@ export function createApp(options = {}) {
           if (body.theme !== undefined)
             updated.theme = choice(
               body.theme,
-              ["forest", "cappuccino", "ocean", "midnight"],
+              [
+                "forest",
+                "cappuccino",
+                "ocean",
+                "midnight",
+                "lavender",
+                "terracotta",
+                "graphite",
+                "plum",
+              ],
               "theme",
             );
+          for (const key of ["themeAccent", "themeBackground"]) {
+            if (body[key] !== undefined) {
+              const color = body[key];
+              if (
+                typeof color !== "string" ||
+                (color !== "" && !/^#[0-9a-f]{6}$/i.test(color))
+              )
+                fail(
+                  400,
+                  "Choose a six-digit hex colour or use the theme default.",
+                );
+              updated[key] = color.toLowerCase();
+            }
+          }
           if (body.timezone !== undefined) {
             const zone = cleanText(body.timezone, "Timezone", 100);
             try {

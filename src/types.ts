@@ -69,7 +69,20 @@ export type Opportunity = {
   activities?: Activity[];
   documents?: BoardDocument[];
 };
-export type Theme = "forest" | "cappuccino" | "ocean" | "midnight";
+export type Theme =
+  | "forest"
+  | "cappuccino"
+  | "ocean"
+  | "midnight"
+  | "lavender"
+  | "terracotta"
+  | "graphite"
+  | "plum";
+export type Appearance = {
+  theme: Theme;
+  themeAccent: string;
+  themeBackground: string;
+};
 export type Profile = { name: string; avatarUrl: string; revision: number };
 export type Task = {
   id: string;
@@ -85,6 +98,8 @@ export type Task = {
 };
 export type Settings = {
   theme: Theme;
+  themeAccent: string;
+  themeBackground: string;
   timezone: string;
   documentsSubdir: string;
   referenceSubdir: string;

@@ -2896,6 +2896,76 @@ textarea {
   line-height: 1.6;
   margin-top: 4px;
 }
+.theme-customise {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.theme-customise h3 {
+  color: var(--ink);
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+.theme-customise p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.theme-colour-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.theme-colour-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-secondary);
+  font-size: 11px;
+}
+.theme-colour-control > label {
+  font-weight: 600;
+}
+.theme-colour-control > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+.theme-colour-control input[type="color"] {
+  width: 42px;
+  height: 35px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.theme-colour-control .text-button {
+  padding-left: 0;
+}
+.theme-save-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.theme-save-row > small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+@media (max-width: 480px) {
+  .theme-colour-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .profile-editor {
   display: flex;
   gap: 20px;

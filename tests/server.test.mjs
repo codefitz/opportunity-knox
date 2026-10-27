@@ -732,6 +732,83 @@ test("theme selection persists without resetting other settings or opportunity d
   assert.deepEqual(board.data.tasks, []);
 });
 
+test("additional themes and custom colours validate, reset and persist without changing other data", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const created = await f.request("/api/opportunities", {
+    method: "POST",
+    body: opportunity,
+  });
+  const defaults = (await f.request("/api/settings")).data;
+  assert.equal(defaults.themeAccent, "");
+  assert.equal(defaults.themeBackground, "");
+  for (const theme of ["lavender", "terracotta", "graphite", "plum"]) {
+    const result = await f.request("/api/settings", {
+      method: "PATCH",
+      body: { theme },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.theme, theme);
+  }
+  const customized = await f.request("/api/settings", {
+    method: "PATCH",
+    body: {
+      themeAccent: "#1A2B3C",
+      themeBackground: "#F6F5F4",
+      timezone: "Europe/Paris",
+    },
+  });
+  assert.equal(customized.status, 200);
+  assert.equal(customized.data.themeAccent, "#1a2b3c");
+  assert.equal(customized.data.themeBackground, "#f6f5f4");
+  const changed = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { theme: "cappuccino", themeAccent: "#ABCDEF" },
+  });
+  assert.equal(changed.data.themeAccent, "#abcdef");
+  assert.equal(changed.data.themeBackground, "#f6f5f4");
+  assert.equal(changed.data.timezone, "Europe/Paris");
+  for (const value of [
+    "#fff",
+    "red",
+    " #abcdef",
+    "#12345678",
+    "#zzzzzz",
+    "#123456; color:red",
+    null,
+    123,
+    ["#123456"],
+  ]) {
+    for (const key of ["themeAccent", "themeBackground"]) {
+      const rejected = await f.request("/api/settings", {
+        method: "PATCH",
+        body: { theme: "forest", [key]: value },
+      });
+      assert.equal(rejected.status, 400);
+      assert.equal((await f.request("/api/settings")).data.theme, "cappuccino");
+    }
+  }
+  const resetAccent = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { themeAccent: "" },
+  });
+  assert.equal(resetAccent.data.themeAccent, "");
+  assert.equal(resetAccent.data.themeBackground, "#f6f5f4");
+  await f.restart();
+  await f.login();
+  const board = (await f.request("/api/board")).data;
+  assert.equal(board.settings.theme, "cappuccino");
+  assert.equal(board.settings.themeAccent, "");
+  assert.equal(board.settings.themeBackground, "#f6f5f4");
+  assert.equal(board.settings.timezone, "Europe/Paris");
+  assert.equal(board.opportunities[0].id, created.data.id);
+  const resetBackground = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { themeBackground: "" },
+  });
+  assert.equal(resetBackground.data.themeBackground, "");
+});
+
 test("profile name and photo validate, preserve revision conflicts, survive restart and allow removal", async (t) => {
   const f = await fixture(t);
   await f.setup();
@@ -1081,6 +1158,8 @@ test("opening a pre-task database adds the new table without resetting legacy re
   assert.equal(board.data.settings.timezone, "Europe/Paris");
   assert.equal(board.data.settings.documentsSubdir, "legacy-documents");
   assert.equal(board.data.settings.theme, "forest");
+  assert.equal(board.data.settings.themeAccent, "");
+  assert.equal(board.data.settings.themeBackground, "");
   assert.deepEqual(board.data.tasks, []);
   const task = await f.request("/api/tasks", {
     method: "POST",

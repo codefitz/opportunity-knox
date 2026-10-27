@@ -61,7 +61,7 @@ import {
   type StageEvent,
   type Profile,
   type Task,
-  type Theme,
+  type Appearance,
 } from "./types";
 
 import JobLookup, {
@@ -77,6 +77,7 @@ import Todos from "./components/Todos";
 import ProfileSettings, {
   ThemeSettings,
   applyTheme,
+  appearanceFrom,
 } from "./components/ProfileSettings";
 import "./themes.css";
 
@@ -233,6 +234,14 @@ export default function App() {
     [bootError, setBootError] = useState("");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]),
     [settings, setSettings] = useState<Settings | null>(null);
+  const [appearanceDraft, setAppearanceDraft] = useState<Appearance | null>(
+      null,
+    ),
+    [appearanceSaving, setAppearanceSaving] = useState(false);
+  const appearanceDraftRef = useRef<Appearance | null>(null),
+    appearanceBaseRef = useRef<Appearance | null>(null),
+    appearanceSavingRef = useRef(false),
+    appearanceRevision = useRef(0);
   const [page, setPage] = useState<Page>(routePage),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("active");
@@ -287,7 +296,19 @@ export default function App() {
       );
     return () => window.removeEventListener("hashchange", changed);
   }, []);
+  useEffect(() => {
+    if (!settings) return;
+    const preview = page === "settings" && appearanceDraft;
+    applyTheme(preview || appearanceFrom(settings), !preview);
+  }, [
+    page,
+    settings?.theme,
+    settings?.themeAccent,
+    settings?.themeBackground,
+    appearanceDraft,
+  ]);
   async function load(background = false) {
+    const revision = appearanceRevision.current;
     if (!background) setLoading(true);
     setRefreshing(true);
     try {
@@ -299,13 +320,18 @@ export default function App() {
         referenceCount: number;
       }>("/board");
       setOpportunities(data.opportunities);
-      setSettings(data.settings);
+      if (revision === appearanceRevision.current) setSettings(data.settings);
+      else
+        setSettings((current) =>
+          current
+            ? { ...data.settings, ...appearanceFrom(current) }
+            : data.settings,
+        );
       setProfile(
         data.profile || { name: "Your workspace", avatarUrl: "", revision: 0 },
       );
       setTasks(data.tasks || []);
       setReferenceCount(data.referenceCount || 0);
-      applyTheme(data.settings.theme || "forest");
     } catch (e) {
       report(e);
     } finally {
@@ -342,6 +368,48 @@ export default function App() {
       window.removeEventListener("focus", refresh);
     };
   }, [session?.authenticated, page, newOpen, selected]);
+  function previewAppearance(patch: Partial<Appearance>) {
+    if (!settings || appearanceSavingRef.current) return;
+    const base = appearanceBaseRef.current || appearanceFrom(settings);
+    const next = { ...(appearanceDraftRef.current || base), ...patch };
+    const dirty =
+      next.theme !== base.theme ||
+      next.themeAccent !== base.themeAccent ||
+      next.themeBackground !== base.themeBackground;
+    appearanceBaseRef.current = dirty ? base : null;
+    appearanceDraftRef.current = dirty ? next : null;
+    setAppearanceDraft(appearanceDraftRef.current);
+  }
+  async function saveAppearance() {
+    const draft = appearanceDraftRef.current;
+    const base = appearanceBaseRef.current;
+    if (!draft || !base || appearanceSavingRef.current) return;
+    // Send only edited fields so a newer, unrelated change from another device is preserved.
+    const patch: Partial<Appearance> = {};
+    if (draft.theme !== base.theme) patch.theme = draft.theme;
+    if (draft.themeAccent !== base.themeAccent)
+      patch.themeAccent = draft.themeAccent;
+    if (draft.themeBackground !== base.themeBackground)
+      patch.themeBackground = draft.themeBackground;
+    appearanceSavingRef.current = true;
+    appearanceRevision.current++;
+    setAppearanceSaving(true);
+    try {
+      const saved = await api<Settings>("/settings", json(patch, "PATCH"));
+      appearanceRevision.current++;
+      appearanceBaseRef.current = null;
+      appearanceDraftRef.current = null;
+      setAppearanceDraft(null);
+      setSettings(saved);
+      setNotice("Appearance saved across devices.");
+    } catch (e) {
+      appearanceRevision.current++;
+      report(e);
+    } finally {
+      appearanceSavingRef.current = false;
+      setAppearanceSaving(false);
+    }
+  }
   function report(e: unknown) {
     setError(displayError(e));
     if (e instanceof ApiError && e.status === 401)
@@ -984,6 +1052,11 @@ export default function App() {
         {page === "settings" && settings && (
           <SettingsPage
             settings={settings}
+            appearance={appearanceDraft || appearanceFrom(settings)}
+            appearanceDirty={Boolean(appearanceDraft)}
+            appearanceSaving={appearanceSaving}
+            onAppearanceChange={previewAppearance}
+            onAppearanceSave={() => void saveAppearance()}
             profile={profile}
             onProfileSaved={setProfile}
             onSaved={setSettings}
@@ -2686,9 +2759,11 @@ function Library({
           </span>
           <span className="badge muted">Local text preparation</span>
           <p>
-            PDF, DOCX and text files can be extracted into searchable chunks on
-            your host. Selected excerpts are sent only when you message Career
-            Buddy. Scanned PDFs need OCR first; originals stay unchanged.
+            PDF, DOCX and text files can be prepared locally as text chunks.
+            Career Buddy selects excerpts by matching words; it does not use
+            vector or semantic search. Selected excerpts are sent only when you
+            message Career Buddy. Scanned PDFs need OCR first; originals stay
+            unchanged.
           </p>
         </div>
       </div>
@@ -2750,6 +2825,11 @@ function Library({
 }
 function SettingsPage({
   settings,
+  appearance,
+  appearanceDirty,
+  appearanceSaving,
+  onAppearanceChange,
+  onAppearanceSave,
   profile,
   onProfileSaved,
   onSaved,
@@ -2757,6 +2837,11 @@ function SettingsPage({
   onNotice,
 }: {
   settings: Settings;
+  appearance: Appearance;
+  appearanceDirty: boolean;
+  appearanceSaving: boolean;
+  onAppearanceChange: (patch: Partial<Appearance>) => void;
+  onAppearanceSave: () => void;
   profile: Profile;
   onProfileSaved: (profile: Profile) => void;
   onSaved: (s: Settings) => void;
@@ -2765,28 +2850,7 @@ function SettingsPage({
 }) {
   const [form, setForm] = useState(settings),
     [busy, setBusy] = useState(false),
-    [backingUp, setBackingUp] = useState(false),
-    [themeSaving, setThemeSaving] = useState(false);
-  useEffect(
-    () => setForm((current) => ({ ...current, theme: settings.theme })),
-    [settings.theme],
-  );
-  async function chooseTheme(theme: Theme) {
-    const previous = form.theme;
-    applyTheme(theme);
-    setForm((current) => ({ ...current, theme }));
-    setThemeSaving(true);
-    try {
-      const next = await api<Settings>("/settings", json({ theme }, "PATCH"));
-      onSaved(next);
-    } catch (e) {
-      applyTheme(previous);
-      setForm((current) => ({ ...current, theme: previous }));
-      onError(e);
-    } finally {
-      setThemeSaving(false);
-    }
-  }
+    [backingUp, setBackingUp] = useState(false);
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -2835,9 +2899,14 @@ function SettingsPage({
         onNotice={onNotice}
       />
       <ThemeSettings
-        theme={form.theme || "forest"}
-        onChange={(theme) => void chooseTheme(theme)}
-        saving={themeSaving}
+        appearance={appearance}
+        onChange={onAppearanceChange}
+        onSave={onAppearanceSave}
+        onReset={() =>
+          onAppearanceChange({ themeAccent: "", themeBackground: "" })
+        }
+        saving={appearanceSaving || busy}
+        dirty={appearanceDirty}
       />
       <form onSubmit={save}>
         <section className="settings-section">
@@ -2926,7 +2995,10 @@ function SettingsPage({
             </div>
           )}
           <div className="form-actions">
-            <button className="button primary" disabled={busy}>
+            <button
+              className="button primary"
+              disabled={busy || appearanceSaving}
+            >
               {busy ? (
                 <Busy text="Saving…" />
               ) : (
