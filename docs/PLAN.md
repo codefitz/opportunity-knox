@@ -6,7 +6,8 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 
 - [ ] Add a vectorised DB as a source - default preinstalled or choose a custom one. Current retrieval uses locally extracted text chunks and keyword matching, not embeddings.
 - [x] Connect an existing Obsidian vault, including a read-only host mount; explicitly sync eligible files into the Career Library when desired. Connecting alone does not automatically import files or make the vault searchable by Career Buddy.
-- [ ] Use existing vault notes directly in place as a live source without copying them into the library, if required.
+- [x] Select files from a read-only vault for in-place Career Buddy use; selected file text is cached in the board and refreshed when changed. Removing a selection clears its text cache.
+- [ ] Extend in-place read-only sources to independently mounted general directories and multiple roots.
 - [ ] Attach a host directory as a persistent in-place source. Folder uploads copy selected files into managed library storage instead.
 - [x] Drag and drop files and directories to the Career Library, with a warning above 500 files and optional manually continued batches of 500.
 - [ ] Career Buddy side bar option - open a chat which will allow you to describe projects and experience, which career buddy will turn into a CV bullet or Cover letter highlight.

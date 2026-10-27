@@ -256,6 +256,7 @@ export function createObsidianIntegration({
   documentPath,
   safePath,
   buddy,
+  deleteSourceCache,
   fail,
 }) {
   const defaults = {
@@ -759,6 +760,8 @@ export function createObsidianIntegration({
         ...current,
         enabled: false,
       };
+      for (const id of current.sourceIds || []) deleteSourceCache(id);
+      next.sourceIds = [];
       putConfig("obsidian", next);
       rmSync(join(dataDir, "pending-vault.json"), { force: true });
       return { ok: true, obsidian: status() };
@@ -909,8 +912,11 @@ export function createObsidianIntegration({
     }
 
     const prev = getSettings();
+    const changingSource = prev.enabled && (prev.locationType !== locationType || (locationType === "hostPath" ? prev.hostPath !== hostPath : prev.subpath !== subpath) || !readOnly);
+    if (changingSource) for (const id of prev.sourceIds || []) deleteSourceCache(id);
     const nextCfg = {
       ...prev,
+      ...(changingSource ? {sourceIds: []} : {}),
       enabled: true,
       locationType,
       subpath,
@@ -943,9 +949,51 @@ export function createObsidianIntegration({
     };
   }
 
+  function availableSources() {
+    const cfg = getSettings();
+    const resolved = resolveActiveVault(cfg);
+    if (!cfg.enabled || !cfg.readOnly || resolved.mountPending || !resolved.localDir || !existsSync(resolved.localDir)) return [];
+    const root = realpathSync(resolved.localDir);
+    const identity = resolved.resolvedHostPath;
+    return walkVaultFiles(root).files.map((item) => ({
+      id: "vault-" + createHash("sha256").update(identity + "\0" + item.relPath).digest("hex"),
+      path: item.relPath,
+      fullPath: item.fullPath,
+    }));
+  }
+  function sourceDocuments() {
+    const cfg = getSettings();
+    const selected = new Set(cfg.sourceIds || []);
+    if (!selected.size) return [];
+    return availableSources().filter((item) => selected.has(item.id)).map((item) => ({
+      id: item.id, name: "Obsidian: " + item.path, kind: "reference", status: "approved",
+      opportunityId: "", readOnlyVaultSource: true, sourcePath: item.path,
+    }));
+  }
+  function sourcePath(doc) {
+    const item = availableSources().find((entry) => entry.id === doc.id && entry.path === doc.sourcePath);
+    if (!item) throw Error("Read-only source unavailable");
+    return item.fullPath;
+  }
   async function handle(path, method, req, res, { json, readBody }) {
     if (path === "/api/obsidian" && method === "GET") {
       json(res, status());
+      return true;
+    }
+    if (path === "/api/obsidian/sources" && method === "GET") {
+      const selected = new Set(getSettings().sourceIds || []);
+      json(res, { sources: availableSources().map(({ id, path }) => ({ id, path, selected: selected.has(id) })) });
+      return true;
+    }
+    if (path === "/api/obsidian/sources" && method === "POST") {
+      const body = await readBody(req);
+      if (!Array.isArray(body.ids) || body.ids.length > 1000 || body.ids.some((id) => typeof id !== "string")) fail(400, "Choose up to 1,000 vault sources.");
+      const allowed = new Set(availableSources().map((item) => item.id));
+      if (body.ids.some((id) => !allowed.has(id))) fail(400, "One or more vault sources are unavailable.");
+      const previous = getSettings();
+      for (const id of previous.sourceIds || []) if (!body.ids.includes(id)) deleteSourceCache(id);
+      putConfig("obsidian", { ...previous, sourceIds: [...new Set(body.ids)] });
+      json(res, { ok: true });
       return true;
     }
     if (path === "/api/obsidian/configure" && method === "POST") {
@@ -979,6 +1027,8 @@ export function createObsidianIntegration({
 
   return {
     status,
+    sourceDocuments,
+    sourcePath,
     configure,
     importSourcesToVault,
     syncFromVault,

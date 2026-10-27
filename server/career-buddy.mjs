@@ -306,8 +306,8 @@ export function createCareerBuddy(ctx) {
   const inFlight = new Set();
   let modelRequests = 0;
   let indexing = false;
-  const summaries = () =>
-    getDocuments().map((doc) => {
+  const summaries = (includeVault = false) =>
+    getDocuments().filter((doc) => includeVault || !doc.readOnlyVaultSource).map((doc) => {
       const cached = getRow("document_text", doc.id);
       return {
         id: doc.id,
@@ -530,7 +530,7 @@ export function createCareerBuddy(ctx) {
         json(res, {
           settings: publicBuddy(config()),
           messages: messages(opportunity.id).slice(-100),
-          documents: summaries().filter(
+          documents: summaries(true).filter(
             (d) => !d.opportunityId || d.opportunityId === opportunity.id,
           ),
         });

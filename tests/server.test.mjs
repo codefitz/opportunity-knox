@@ -2597,3 +2597,35 @@ test("connecting an existing read-only vault never writes or imports files", asy
   assert.equal(readFileSync(join(vault, "example.md"), "utf8"), "fictional original note\n");
   assert.equal((await f.request("/api/documents")).data.documents.length, 0);
 });
+
+test("selected vault sources remain in place and refresh cached text when changed", async (t) => {
+  let sent;
+  const f = await fixture(t, { buddyFetch: async (_, opts) => { sent = opts.body; return buddyResponse(buddyReply()); } }); await f.setup();
+  await enableBuddy(f);
+  const vault = join(f.options.dataDir, "fictional-vault-sources"); mkdirSync(vault);
+  writeFileSync(join(vault, "experience.md"), "Fictional original experience");
+  const connect = await f.request("/api/obsidian/configure", {method:"POST", body:{ action:"connect", locationType:"hostPath", hostPath:vault, readOnly:true }});
+  assert.equal(connect.status, 200);
+  const listing = await f.request("/api/obsidian/sources");
+  assert.equal(listing.data.sources.length, 1);
+  const id = listing.data.sources[0].id;
+  assert.equal((await f.request("/api/obsidian/sources", {method:"POST",body:{ids:[id]}})).status, 200);
+  const created = await f.request("/api/opportunities", {method:"POST",body:opportunity});
+  const buddy = await f.request(`/api/opportunities/${created.data.id}/buddy`);
+  assert.ok(buddy.data.documents.some((doc) => doc.id === id));
+  assert.equal((await f.request("/api/documents")).data.documents.length, 0);
+  assert.deepEqual(readdirSync(vault), ["experience.md"]);
+  assert.equal((await f.request("/api/buddy/index", {method:"POST",body:{documentIds:[id]}})).status, 200);
+  writeFileSync(join(vault,"experience.md"), "Fictional changed experience");
+  assert.equal((await f.request("/api/buddy/index", {method:"POST",body:{documentIds:[id]}})).status, 200);
+  const db = new DatabaseSync(join(f.options.dataDir, "board.sqlite"), {readOnly:true});
+  const row = db.prepare("SELECT data FROM document_text WHERE id=?").get(id);
+  assert.match(JSON.parse(row.data).text, /changed experience/); db.close();
+  const chat = await buddyChat(f, created.data.id, { documentIds: [id] });
+  assert.equal(chat.status, 200);
+  assert.match(sent, /Fictional changed experience/);
+  await f.request("/api/obsidian/sources", {method:"POST",body:{ids:[]}});
+  const verifyDb = new DatabaseSync(join(f.options.dataDir, "board.sqlite"), {readOnly:true});
+  assert.equal(verifyDb.prepare("SELECT data FROM document_text WHERE id=?").get(id), undefined); verifyDb.close();
+  assert.equal((await f.request(`/api/opportunities/${created.data.id}/buddy`)).data.documents.some((doc) => doc.id === id), false);
+});

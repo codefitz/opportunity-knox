@@ -666,6 +666,7 @@ export function createApp(options = {}) {
     }
     return publicDocument(document);
   };
+  let obsidian;
   const buddy = createCareerBuddy({
     db,
     getConfig,
@@ -673,13 +674,13 @@ export function createApp(options = {}) {
     getRecord,
     putRecord,
     fullRecord,
-    getDocuments,
-    documentPath,
+    getDocuments: () => [...getDocuments(), ...(obsidian?.sourceDocuments() || [])],
+    documentPath: (doc) => doc.readOnlyVaultSource ? obsidian.sourcePath(doc) : documentPath(doc),
     settings,
     saveDocument,
     buddyFetch: options.buddyFetch,
   });
-  const obsidian = createObsidianIntegration({
+  obsidian = createObsidianIntegration({
     dataDir,
     filesDir,
     hostFilesDir,
@@ -694,6 +695,7 @@ export function createApp(options = {}) {
     documentPath,
     safePath,
     buddy,
+    deleteSourceCache: (id) => db.prepare("DELETE FROM document_text WHERE id=?").run(id),
     fail,
   });
   async function readBody(req) {

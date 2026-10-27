@@ -3782,7 +3782,22 @@ function ObsidianVaultPanel({
     [readOnly, setReadOnly] = useState(true),
     [onlyPreparedExport, setOnlyPreparedExport] = useState(false),
     [includeExtractedText, setIncludeExtractedText] = useState(true),
-    [busy, setBusy] = useState("");
+    [busy, setBusy] = useState(""),
+    [vaultSources, setVaultSources] = useState<{id: string; path: string; selected: boolean}[] | null>(null),
+    [vaultQuery, setVaultQuery] = useState("");
+
+  async function loadVaultSources() {
+    setBusy("sources");
+    try { const result = await api<{sources: {id: string; path: string; selected: boolean}[]}>("/obsidian/sources"); setVaultSources(result.sources); }
+    catch (error) { onError(error); }
+    finally { setBusy(""); }
+  }
+  async function saveVaultSources() {
+    setBusy("sources");
+    try { await api("/obsidian/sources", json({ ids: vaultSources?.filter((source) => source.selected).map((source) => source.id) || [] })); onNotice("Read-only sources saved. Select them in Career Buddy when chatting."); }
+    catch (error) { onError(error); }
+    finally { setBusy(""); }
+  }
 
   useEffect(() => {
     if (obsidian) {
@@ -4042,6 +4057,17 @@ function ObsidianVaultPanel({
                   Disconnect vault
                 </button>
               </div>
+              {isReady && obsidian.readOnly && <div className="obsidian-sync-box">
+                <h4>Read-only sources for Career Buddy</h4>
+                <p>Choose up to 1,000 files to make available in Career Buddy. Originals stay in the vault; extracted text is cached in this board when used and removed from the cache when deselected. Selected excerpts are sent to your configured AI provider.</p>
+                <button type="button" className="button secondary small" disabled={Boolean(busy)} onClick={() => void loadVaultSources()}>Choose vault sources</button>
+                {vaultSources && <>
+                  <input aria-label="Filter vault sources" value={vaultQuery} onChange={(e) => setVaultQuery(e.target.value)} placeholder="Filter by file or folder" />
+                  <p>{vaultSources.filter((source) => source.selected).length} selected</p>
+                  <div className="buddy-source-picker">{vaultSources.filter((source) => source.path.toLowerCase().includes(vaultQuery.toLowerCase())).map((source) => <label key={source.id}><input type="checkbox" checked={source.selected} onChange={(e) => setVaultSources((current) => current?.map((item) => item.id === source.id ? {...item, selected: e.target.checked} : item) || null)} /><span>{source.path}</span></label>)}</div>
+                  <button type="button" className="button primary small" disabled={Boolean(busy)} onClick={() => void saveVaultSources()}>Save selected sources</button>
+                </>}
+              </div>}
               {isReady && (
                 <div className="obsidian-sync-cards">
                   <div className="obsidian-sync-box">
