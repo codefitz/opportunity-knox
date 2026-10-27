@@ -61,6 +61,14 @@
   color: var(--muted);
   background: var(--panel-soft);
 }
+.buddy-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 15px;
+}
+.buddy-model-actions .text-button {
+  padding-left: 0;
+}
 .buddy-advanced {
   border: 1px solid var(--line);
   border-radius: 9px;

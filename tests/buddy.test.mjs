@@ -9,6 +9,7 @@ import {
   providerRequest,
   providerText,
   callProvider,
+  listProviderModels,
 } from "../server/buddy-provider.mjs";
 import {
   parseBuddyOutput,
@@ -497,4 +498,125 @@ test("real PDF text can be extracted locally without a provider or OCR", async (
   assert.equal(result.status, "ready");
   assert.match(result.text, /governance workshops/);
   assert.ok(result.chunks.length);
+});
+
+test("model discovery uses each provider's listing protocol without generation or key disclosure", async () => {
+  const fixtures = {
+    openai: {
+      response: { data: [{ id: "chat-example" }, { id: "models/example" }] },
+      suffix: "/models",
+      key: "Authorization",
+    },
+    custom: {
+      response: { data: [{ id: "chat-example" }] },
+      suffix: "/models",
+      key: "Authorization",
+    },
+    anthropic: {
+      response: {
+        data: [{ id: "claude-example", display_name: "Example Claude" }],
+        has_more: true,
+      },
+      suffix: "/models?limit=1000",
+      key: "x-api-key",
+    },
+    gemini: {
+      response: {
+        models: [
+          {
+            name: "models/gemini-example",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/embedding-example",
+            supportedGenerationMethods: ["embedContent"],
+          },
+        ],
+        nextPageToken: "next",
+      },
+      suffix: "/models?pageSize=1000",
+      key: "x-goog-api-key",
+    },
+    ollama: {
+      response: {
+        models: [
+          { name: "embedding-example:latest", details: { format: "gguf" } },
+          { name: "chat-example:latest", details: { format: "gguf" } },
+          { name: "image-example", details: { format: "safetensors" } },
+        ],
+      },
+      suffix: "/api/tags",
+      key: "Authorization",
+    },
+  };
+  for (const [provider, fixture] of Object.entries(fixtures)) {
+    const c = config(provider);
+    const found = await listProviderModels(c, async (url, options) => {
+      assert.equal(url, c.baseUrl + fixture.suffix);
+      assert.equal(options.method, "GET");
+      assert.equal(options.body, undefined);
+      assert.equal(options.redirect, "error");
+      assert.ok(options.headers[fixture.key].includes("private-fixture-key"));
+      return new Response(JSON.stringify(fixture.response));
+    });
+    assert.ok(found.models.length > 0);
+    assert.ok(!JSON.stringify(found).includes("private-fixture-key"));
+    if (provider === "gemini")
+      assert.deepEqual(
+        found.models.map((x) => x.id),
+        ["gemini-example"],
+      );
+    if (provider === "openai")
+      assert.equal(found.models[1].id, "models/example");
+    if (provider === "ollama")
+      assert.equal(found.suggested, "chat-example:latest");
+    if (["gemini", "anthropic"].includes(provider))
+      assert.equal(found.truncated, true);
+  }
+});
+
+test("model discovery keeps endpoint restrictions and reports unsupported or malformed model APIs safely", async () => {
+  const c = config("custom");
+  await assert.rejects(
+    () =>
+      listProviderModels(
+        c,
+        async () => new Response("private-fixture-key", { status: 404 }),
+      ),
+    (error) =>
+      /enter a model id manually/i.test(error.message) &&
+      !error.message.includes("private-fixture-key"),
+  );
+  await assert.rejects(
+    () =>
+      listProviderModels(
+        c,
+        async () => new Response(JSON.stringify({ unexpected: true })),
+      ),
+    /invalid model list/i,
+  );
+  await assert.rejects(
+    () =>
+      listProviderModels({ ...c, baseUrl: "http://8.8.8.8" }, async () => {
+        throw Error("must not reach network");
+      }),
+    /https/i,
+  );
+});
+
+test("model listing never returns a stored key echoed in an ID or label", async () => {
+  const c = config("anthropic");
+  const result = await listProviderModels(
+    c,
+    async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "private-fixture-key" },
+            { id: "safe-model", display_name: "private-fixture-key" },
+          ],
+        }),
+      ),
+  );
+  assert.deepEqual(result.models, [{ id: "safe-model", name: "safe-model" }]);
 });

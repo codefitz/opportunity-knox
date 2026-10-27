@@ -5,6 +5,7 @@ import {
   publicBuddy,
   updateBuddy,
   callProvider,
+  listProviderModels,
   assertConfigured,
   buddyError,
   BUDDY_SCHEMA,
@@ -303,6 +304,7 @@ export function createCareerBuddy(ctx) {
       .all(id)
       .map((row) => JSON.parse(row.data));
   const inFlight = new Set();
+  let modelRequests = 0;
   let indexing = false;
   const summaries = () =>
     getDocuments().map((doc) => {
@@ -414,28 +416,77 @@ export function createCareerBuddy(ctx) {
           return true;
         }
       }
-      if (path === "/api/buddy/test" && method === "POST") {
-        const c = config();
-        assertConfigured(c);
-        if (inFlight.has("test"))
-          throw buddyError(429, "A connection test is already running.");
-        inFlight.add("test");
-        try {
-          await callProvider(
-            c,
-            "Reply with the single word Ready. No career records are supplied.",
-            [
-              {
-                role: "user",
-                content:
-                  "Connection test. Return a short JSON reply saying Ready.",
-              },
-            ],
-            ctx.buddyFetch,
+      if (
+        (path === "/api/buddy/test" || path === "/api/buddy/models") &&
+        method === "POST"
+      ) {
+        const body = await readBody(req);
+        const c = Object.keys(body).length
+          ? updateBuddy(config(), { ...body, enabled: false })
+          : config();
+        const key = path === "/api/buddy/test" ? "test" : "models";
+        if (
+          (key === "test" && inFlight.has(key)) ||
+          (key === "models" && modelRequests >= 4)
+        )
+          throw buddyError(
+            429,
+            key === "test"
+              ? "A connection test is already running."
+              : "Too many model searches are running. Try again shortly.",
           );
-          json(res, { ok: true, provider: c.provider, model: c.model });
+        if (key === "test") inFlight.add(key);
+        else modelRequests++;
+        try {
+          if (key === "models" || c.provider === "ollama" || !c.model) {
+            const found = await listProviderModels(c, ctx.buddyFetch);
+            if (key === "models") {
+              json(res, found);
+              return true;
+            }
+            if (
+              c.model &&
+              c.provider === "ollama" &&
+              !found.models.some(
+                (m) => m.id === c.model || m.id === c.model + ":latest",
+              )
+            )
+              throw buddyError(
+                400,
+                "Connected to Ollama, but the selected model is not installed on that server. Choose an available model.",
+              );
+            json(res, {
+              ok: true,
+              provider: c.provider,
+              model: c.model,
+              check: "listing",
+              count: found.models.length,
+              truncated: found.truncated,
+            });
+          } else {
+            assertConfigured(c);
+            await callProvider(
+              c,
+              "Reply with the single word Ready. No career records are supplied.",
+              [
+                {
+                  role: "user",
+                  content:
+                    "Connection test. Return a short JSON reply saying Ready.",
+                },
+              ],
+              ctx.buddyFetch,
+            );
+            json(res, {
+              ok: true,
+              provider: c.provider,
+              model: c.model,
+              check: "inference",
+            });
+          }
         } finally {
-          inFlight.delete("test");
+          if (key === "test") inFlight.delete(key);
+          else modelRequests--;
         }
         return true;
       }

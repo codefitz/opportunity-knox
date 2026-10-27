@@ -405,14 +405,13 @@ export function providerText(provider, response) {
     throw buddyError(502, "The custom API returned an incomplete response.");
   return choice?.message?.content || "";
 }
-export async function callProvider(
+async function providerJSON(
   config,
-  system,
-  messages,
+  request,
   fetcher = fetch,
   resolve = systemLookup,
+  timeout = 120000,
 ) {
-  const request = providerRequest(config, system, messages);
   const url = new URL(request.url);
   const dispatcher =
     url.protocol === "http:" && !isIP(url.hostname.replace(/^\[|\]$/g, ""))
@@ -421,11 +420,13 @@ export async function callProvider(
   let response;
   try {
     response = await fetcher(request.url, {
-      method: "POST",
+      method: request.method || "POST",
       headers: request.headers,
-      body: JSON.stringify(request.body),
+      ...(request.body === undefined
+        ? {}
+        : { body: JSON.stringify(request.body) }),
       redirect: "error",
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(timeout),
       ...(dispatcher ? { dispatcher } : {}),
     });
     if (!response.ok) {
@@ -438,7 +439,7 @@ export async function callProvider(
               ? "Check the model ID and output mode in settings."
               : "Try again later or check the API server.";
       await response.body?.cancel();
-      throw buddyError(
+      const error = buddyError(
         502,
         PROVIDERS[config.provider].name +
           " returned HTTP " +
@@ -446,6 +447,8 @@ export async function callProvider(
           ". " +
           guidance,
       );
+      error.providerStatus = response.status;
+      throw error;
     }
     const reader = response.body.getReader();
     const chunks = [];
@@ -469,13 +472,7 @@ export async function callProvider(
         "The API server did not return JSON. Check its base URL.",
       );
     }
-    const output = providerText(config.provider, result);
-    if (!output)
-      throw buddyError(
-        502,
-        "The provider returned no usable text (it may have refused the request).",
-      );
-    return output;
+    return result;
   } catch (error) {
     if (error.status) throw error;
     if (error.cause?.code === "ERR_BUDDY_NONPRIVATE_DNS")
@@ -500,4 +497,142 @@ export async function callProvider(
   } finally {
     if (dispatcher) await dispatcher.destroy();
   }
+}
+
+export async function callProvider(
+  config,
+  system,
+  messages,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  const result = await providerJSON(
+    config,
+    providerRequest(config, system, messages),
+    fetcher,
+    resolve,
+  );
+  const output = providerText(config.provider, result);
+  if (!output)
+    throw buddyError(
+      502,
+      "The provider returned no usable text (it may have refused the request).",
+    );
+  return output;
+}
+
+/** List available models without saving settings or starting a model. */
+export async function listProviderModels(
+  config,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  if (!config.baseUrl) throw buddyError(400, "Enter the API base URL first.");
+  validateBaseUrl(config.baseUrl);
+  if (
+    ["openai", "anthropic", "gemini"].includes(config.provider) &&
+    !config.apiKey
+  )
+    throw buddyError(400, "Add an API key to find models for this provider.");
+  const headers = {};
+  let path = "/models";
+  if (config.provider === "ollama") path = "/api/tags";
+  if (config.provider === "anthropic") {
+    headers["x-api-key"] = config.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    path += "?limit=1000";
+  } else if (config.provider === "gemini") {
+    headers["x-goog-api-key"] = config.apiKey;
+    path += "?pageSize=1000";
+  } else if (config.apiKey) headers.Authorization = "Bearer " + config.apiKey;
+  let data;
+  try {
+    data = await providerJSON(
+      config,
+      { method: "GET", url: config.baseUrl + path, headers },
+      fetcher,
+      resolve,
+      15000,
+    );
+  } catch (error) {
+    if (error.providerStatus === 404)
+      throw buddyError(
+        502,
+        "This API does not provide a model list. Enter a model ID manually.",
+      );
+    if (error.status === 504)
+      throw buddyError(
+        504,
+        "Finding models timed out. Check the server or enter a model ID manually.",
+      );
+    throw error;
+  }
+  const rows =
+    config.provider === "ollama" || config.provider === "gemini"
+      ? data.models
+      : data.data;
+  if (!Array.isArray(rows))
+    throw buddyError(
+      502,
+      "The API returned an invalid model list. Enter a model ID manually.",
+    );
+  const models = [],
+    seen = new Set();
+  let suggested = "";
+  for (const item of rows.slice(0, 1000)) {
+    if (!item || typeof item !== "object") continue;
+    if (
+      config.provider === "gemini" &&
+      Array.isArray(item.supportedGenerationMethods) &&
+      !item.supportedGenerationMethods.includes("generateContent")
+    )
+      continue;
+    const raw =
+      config.provider === "ollama"
+        ? item.name || item.model
+        : config.provider === "gemini"
+          ? item.name
+          : item.id;
+    if (typeof raw !== "string") continue;
+    const id = (
+      config.provider === "gemini" ? raw.replace(/^models\//, "") : raw
+    ).trim();
+    if (
+      !id ||
+      id.length > 200 ||
+      /[\x00-\x1f\x7f]/.test(id) ||
+      seen.has(id) ||
+      (config.apiKey && id.includes(config.apiKey))
+    )
+      continue;
+    seen.add(id);
+    const display =
+      typeof item.display_name === "string"
+        ? item.display_name
+        : typeof item.displayName === "string"
+          ? item.displayName
+          : "";
+    const name =
+      display &&
+      display !== id &&
+      display.length <= 200 &&
+      !(config.apiKey && display.includes(config.apiKey)) &&
+      !/[\x00-\x1f\x7f]/.test(display)
+        ? display + " (" + id + ")"
+        : id;
+    models.push({ id, name });
+    if (
+      !suggested &&
+      config.provider === "ollama" &&
+      item.details?.format === "gguf" &&
+      !/embed|rerank|flux|diffusion|whisper|\btts\b/i.test(id)
+    )
+      suggested = id;
+  }
+  return {
+    models,
+    suggested,
+    truncated:
+      rows.length > 1000 || Boolean(data.has_more || data.nextPageToken),
+  };
 }

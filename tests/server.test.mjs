@@ -1593,3 +1593,115 @@ test("concurrent saves of the same generated draft cannot create duplicate docum
     1,
   );
 });
+
+test("model search and connection test use unsaved settings without running a model or persisting credentials", async (t) => {
+  const calls = [];
+  const f = await fixture(t, {
+    buddyFetch: async (url, options) => {
+      calls.push({ url, options });
+      return new Response(
+        JSON.stringify({
+          models: [
+            { name: "local-chat:latest", details: { format: "gguf" } },
+            { name: "other-model:latest", details: { format: "gguf" } },
+          ],
+        }),
+      );
+    },
+  });
+  assert.equal(
+    (
+      await f.request("/api/buddy/models", {
+        method: "POST",
+        body: {},
+        auth: false,
+      })
+    ).status,
+    401,
+  );
+  await f.setup();
+  const before = (await f.request("/api/buddy/settings")).data;
+  const draft = {
+    revision: before.revision,
+    provider: "ollama",
+    baseUrl: "http://career-server.private:11434",
+    model: "",
+    apiKey: "temporary-key",
+    clearKey: false,
+    outputMode: "schema",
+  };
+  const models = await f.request("/api/buddy/models", {
+    method: "POST",
+    body: draft,
+  });
+  assert.equal(models.status, 200);
+  assert.equal(models.data.suggested, "local-chat:latest");
+  assert.deepEqual(
+    models.data.models.map((x) => x.id),
+    ["local-chat:latest", "other-model:latest"],
+  );
+  const tested = await f.request("/api/buddy/test", {
+    method: "POST",
+    body: draft,
+  });
+  assert.equal(tested.status, 200);
+  assert.equal(tested.data.check, "listing");
+  assert.equal(tested.data.count, 2);
+  assert.equal(
+    (
+      await f.request("/api/buddy/test", {
+        method: "POST",
+        body: { ...draft, model: "not-installed" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.request("/api/buddy/models", {
+        method: "POST",
+        body: { ...draft, revision: 0 },
+      })
+    ).status,
+    409,
+  );
+  assert.deepEqual((await f.request("/api/buddy/settings")).data, before);
+  assert.ok(
+    calls.every(
+      (c) =>
+        c.url.endsWith("/api/tags") &&
+        c.options.method === "GET" &&
+        !c.options.body,
+    ),
+  );
+  assert.ok(!JSON.stringify(models.data).includes("temporary-key"));
+});
+
+test("temporary model searches do not forward a stored key to a different provider or server", async (t) => {
+  const calls = [];
+  const f = await fixture(t, {
+    buddyFetch: async (url, options) => {
+      calls.push({ url, options });
+      return new Response(JSON.stringify({ models: [] }));
+    },
+  });
+  await f.setup();
+  const saved = await enableBuddy(f);
+  const draft = {
+    revision: saved.revision,
+    provider: "ollama",
+    baseUrl: "http://career-server.private:11434",
+    model: "",
+    apiKey: "",
+    clearKey: false,
+  };
+  assert.equal(
+    (await f.request("/api/buddy/models", { method: "POST", body: draft }))
+      .status,
+    200,
+  );
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  const current = (await f.request("/api/buddy/settings")).data;
+  assert.equal(current.provider, "custom");
+  assert.equal(current.hasKey, true);
+});

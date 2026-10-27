@@ -6,10 +6,10 @@ Career Buddy is optional. It reads the current opportunity and the career docume
 
 1. Open **Settings → Career Buddy**.
 2. Choose **OpenAI**, **Claude**, **Gemini**, **Ollama** or **Custom (OpenAI compatible)**.
-3. Enter an exact model ID available to your account or Ollama server. Models are not installed or selected automatically.
-4. Add an API key for cloud providers. Ollama and custom servers can use a key if their gateway requires one.
-5. For Ollama/custom, enter the API base URL. Custom means an OpenAI-compatible `/chat/completions` API, usually with a `/v1` base path. Other arbitrary HTTP protocols are not supported.
-6. Enable and save Career Buddy. **Test connection** sends a tiny request without career records. It uses the saved model and its normal API allowance.
+3. Add an API key for cloud providers. Ollama and custom servers can use a key if their gateway requires one.
+4. For Ollama/custom, enter the API base URL. Custom means an OpenAI-compatible `/chat/completions` API, usually with a `/v1` base path. Other arbitrary HTTP protocols are not supported.
+5. Available models are discovered from the provider and offered in a list. For Ollama, the first likely local chat model is suggested automatically; check the choice and change it if you prefer. Models are never installed by the app. Use **Refresh models** to retry, or enter an exact model ID manually if the provider does not expose a list.
+6. **Test connection** works with the settings currently shown, before or after saving. For Ollama it checks the installed model list without loading a model or sending career records. With a selected model, other providers receive a short test generation that may use the provider's normal allowance. Without a model, the test checks the provider's model-list API. Enable and save Career Buddy once you are happy with the settings.
 
 OpenAI, Claude and Gemini use their official endpoints. The key stays on the host and is not returned to the browser. Leave the key blank to keep an existing key for the same provider/server; changing provider/server clears it unless you enter a replacement. Use Remove stored key to clear it explicitly. Switching Career Buddy off preserves its settings and previous chats.
 
@@ -53,10 +53,10 @@ Word export uses a simple A4 layout with a title, headings and bullets. It does 
 
 Salary answers use saved information and model knowledge. There is no live market search; estimates should state assumptions, currency and base/total/contract terms rather than claim a verified benchmark.
 
-Selected context is sent from the hosting machine to the configured API when you press Send. Provider retention, account permissions and usage charges follow that provider/account's terms. No API key is sent as model context. Network calls have a two-minute deadline, bounded responses, verified TLS, and no redirect following. Custom/local URLs are deliberate host configuration, not addresses selected by model output. Public APIs require HTTPS; local/private IPs and hostnames that resolve exclusively to private network addresses can use HTTP. Hostname addresses are checked when connecting, so settings can also be saved while the server is offline.
+Selected context is sent from the hosting machine to the configured API when you press Send. Provider retention, account permissions and usage charges follow that provider/account's terms. No API key is sent as model context. Model generation calls have a two-minute deadline; model listing has a 15-second deadline. Responses are bounded, TLS is verified, and redirects are not followed. Listing returns at most 1,000 models from one provider page and indicates when more are available. Custom/local URLs are deliberate host configuration, not addresses selected by model output. Public APIs require HTTPS; local/private IPs and hostnames that resolve exclusively to private network addresses can use HTTP. Hostname addresses are checked when connecting, so settings can also be saved while the server is offline.
 
 Private SQLite state contains the provider key, chat history and extracted text. Record exports include chats and public provider settings, but exclude API keys, private image bytes and extracted text caches. Full private backups include keys, conversations, extracted text and managed documents; keep them private like credentials.
 
 ## API references
 
-Adapters follow [OpenAI Responses structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Claude Messages structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [Gemini generation configuration](https://ai.google.dev/api/generate-content#v1beta.GenerationConfig), and [Ollama Chat](https://docs.ollama.com/api/chat). Model availability and structured-output support depend on the chosen provider/model.
+Adapters follow [OpenAI Responses structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Claude Messages structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [Gemini generation configuration](https://ai.google.dev/api/generate-content#v1beta.GenerationConfig), and [Ollama Chat](https://docs.ollama.com/api/chat). Model discovery uses the providers' model-list endpoints. Model availability and structured-output support depend on the chosen provider/model.

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Bot, Check, LoaderCircle, PlugZap } from "lucide-react";
 import { api, json } from "../api";
 import "../career-buddy.css";
@@ -12,6 +12,16 @@ export type BuddySettings = {
   outputMode: string;
   hasKey: boolean;
   providers: Record<string, { name: string; baseUrl: string }>;
+};
+type ModelList = {
+  models: { id: string; name: string }[];
+  suggested: string;
+  truncated: boolean;
+};
+type ConnectionResult = {
+  check: "listing" | "inference";
+  count?: number;
+  truncated?: boolean;
 };
 const errorText = (error: unknown) =>
   error instanceof Error
@@ -30,7 +40,15 @@ export default function CareerBuddySettings({
     [testing, setTesting] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(false),
+    [models, setModels] = useState<ModelList["models"]>([]),
+    [modelHint, setModelHint] = useState(""),
+    [findingModels, setFindingModels] = useState(false),
+    [manualModel, setManualModel] = useState(false),
+    [keyReady, setKeyReady] = useState(false),
+    [refreshModels, setRefreshModels] = useState(0);
+  const latest = useRef({ form, key, clearKey, manualModel });
+  latest.current = { form, key, clearKey, manualModel };
   async function load() {
     try {
       const result = await api<BuddySettings>("/buddy/settings");
@@ -38,6 +56,7 @@ export default function CareerBuddySettings({
       setForm(result);
       setKey("");
       setClearKey(false);
+      setKeyReady(false);
       setDirty(false);
       setError("");
     } catch (error) {
@@ -48,6 +67,93 @@ export default function CareerBuddySettings({
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    setModels([]);
+    setModelHint("");
+    setFindingModels(false);
+    if (!form) return;
+    try {
+      const url = new URL(form.baseUrl);
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return;
+    } catch {
+      return;
+    }
+    const canKeepKey =
+      saved?.hasKey &&
+      saved.provider === form.provider &&
+      saved.baseUrl === form.baseUrl &&
+      !clearKey;
+    if (
+      (key && !keyReady) ||
+      (["openai", "anthropic", "gemini"].includes(form.provider) &&
+        !key &&
+        !canKeepKey)
+    )
+      return;
+    const controller = new AbortController();
+    const draft = {
+      revision: form.revision,
+      provider: form.provider,
+      baseUrl: form.baseUrl,
+      model: form.model,
+      apiKey: key,
+      clearKey,
+      outputMode: form.outputMode,
+    };
+    const timer = window.setTimeout(async () => {
+      setFindingModels(true);
+      try {
+        const found = await api<ModelList>("/buddy/models", {
+          ...json(draft),
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        setModels(found.models);
+        setModelHint(
+          found.models.length
+            ? `${found.models.length} models found${found.truncated ? " (list is incomplete)" : ""}. Choose one or enter an ID manually.`
+            : "No models found. Enter an ID manually or install a model.",
+        );
+        if (
+          found.suggested &&
+          !latest.current.form?.model &&
+          !latest.current.manualModel
+        ) {
+          setForm((current) =>
+            current && !current.model
+              ? { ...current, model: found.suggested }
+              : current,
+          );
+          setDirty(true);
+          setModelHint(
+            `Suggested ${found.suggested}. ${found.models.length} models found${found.truncated ? " (list is incomplete)" : ""}; you can choose another.`,
+          );
+        }
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setModelHint(
+            errorText(error) + " You can enter a model ID manually.",
+          );
+      } finally {
+        if (!controller.signal.aborted) setFindingModels(false);
+      }
+    }, 700);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    form?.provider,
+    form?.baseUrl,
+    form?.revision,
+    saved?.hasKey,
+    saved?.provider,
+    saved?.baseUrl,
+    key,
+    clearKey,
+    keyReady,
+    refreshModels,
+  ]);
   const update = (patch: Partial<BuddySettings>) => {
     setForm((current) => (current ? { ...current, ...patch } : current));
     setDirty(true);
@@ -79,6 +185,7 @@ export default function CareerBuddySettings({
       setForm(result);
       setSaved(result);
       setKey("");
+      setKeyReady(false);
       setClearKey(false);
       setDirty(false);
       setNotice("Career Buddy settings saved.");
@@ -90,17 +197,63 @@ export default function CareerBuddySettings({
     }
   }
   async function test() {
+    if (!form) return;
     setTesting(true);
     setError("");
     setNotice("");
     try {
-      await api("/buddy/test", json({}));
+      const result = await api<ConnectionResult>(
+        "/buddy/test",
+        json({
+          revision: form.revision,
+          provider: form.provider,
+          baseUrl: form.baseUrl,
+          model: form.model,
+          outputMode: form.outputMode,
+          apiKey: key,
+          clearKey,
+        }),
+      );
+      const current = latest.current;
+      if (
+        !current.form ||
+        current.form.provider !== form.provider ||
+        current.form.baseUrl !== form.baseUrl ||
+        current.form.model !== form.model ||
+        current.form.revision !== form.revision ||
+        current.form.outputMode !== form.outputMode ||
+        current.key !== key ||
+        current.clearKey !== clearKey
+      ) {
+        setNotice(
+          "Settings changed during the test. Test again to check the current settings.",
+        );
+        return;
+      }
       setNotice(
-        "Connected successfully. No career records were sent for this test.",
+        result.check === "listing"
+          ? `Connected successfully. ${result.count} models available${result.truncated ? " in this list" : ""}; no model was run and no career records were sent.`
+          : "Connected successfully. A short model test ran; no career records were sent.",
       );
     } catch (error) {
-      setError(errorText(error));
-      onError(error);
+      const current = latest.current;
+      if (
+        !current.form ||
+        current.form.provider !== form.provider ||
+        current.form.baseUrl !== form.baseUrl ||
+        current.form.model !== form.model ||
+        current.form.revision !== form.revision ||
+        current.form.outputMode !== form.outputMode ||
+        current.key !== key ||
+        current.clearKey !== clearKey
+      ) {
+        setNotice(
+          "Settings changed during the test. Test again to check the current settings.",
+        );
+      } else {
+        setError(errorText(error));
+        onError(error);
+      }
     } finally {
       setTesting(false);
     }
@@ -146,9 +299,15 @@ export default function CareerBuddySettings({
                     provider,
                     model: "",
                     baseUrl: form.providers[provider].baseUrl,
-                    hasKey: false,
+                    hasKey: Boolean(
+                      saved?.hasKey &&
+                      saved.provider === provider &&
+                      saved.baseUrl === form.providers[provider].baseUrl,
+                    ),
                   });
                   setKey("");
+                  setKeyReady(false);
+                  setManualModel(false);
                   setClearKey(false);
                 }}
               >
@@ -159,24 +318,80 @@ export default function CareerBuddySettings({
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Model ID</span>
-              <input
-                value={form.model}
-                maxLength={200}
-                placeholder="Enter a model available to your account"
-                onChange={(event) => update({ model: event.target.value })}
-              />
-              <small>
-                Use the exact API model ID or an installed Ollama model name.
+            <div className="field">
+              <label htmlFor="buddy-model">Model ID</label>
+              {models.length > 0 && !manualModel ? (
+                <select
+                  id="buddy-model"
+                  value={form.model}
+                  onChange={(event) => update({ model: event.target.value })}
+                >
+                  <option value="">Choose a model</option>
+                  {form.model && !models.some((m) => m.id === form.model) && (
+                    <option value={form.model}>
+                      {form.model} (entered manually)
+                    </option>
+                  )}
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="buddy-model"
+                  value={form.model}
+                  maxLength={200}
+                  placeholder="Enter a model available to your account"
+                  onChange={(event) => update({ model: event.target.value })}
+                />
+              )}
+              <small aria-live="polite">
+                {findingModels
+                  ? "Finding available models…"
+                  : modelHint ||
+                    "Models are discovered from the configured API; you can also enter an ID manually. Not every model supports chat."}
               </small>
-            </label>
+              <div className="buddy-model-actions">
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setKeyReady(true);
+                    setRefreshModels((n) => n + 1);
+                  }}
+                >
+                  Refresh models
+                </button>
+                {models.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setManualModel(!manualModel)}
+                  >
+                    {manualModel
+                      ? "Choose from list"
+                      : "Enter model ID manually"}
+                  </button>
+                )}
+              </div>
+            </div>
             <label className="field wide">
               <span>API base URL</span>
               <input
                 value={form.baseUrl}
                 readOnly={!["custom", "ollama"].includes(form.provider)}
-                onChange={(event) => update({ baseUrl: event.target.value })}
+                onChange={(event) =>
+                  update({
+                    baseUrl: event.target.value,
+                    hasKey: Boolean(
+                      saved?.hasKey &&
+                      saved.provider === form.provider &&
+                      saved.baseUrl === event.target.value,
+                    ),
+                  })
+                }
                 placeholder="https://your-api.example/v1"
               />
               <small>
@@ -204,8 +419,10 @@ export default function CareerBuddySettings({
                     ? "A key is stored. Leave blank to keep it."
                     : "Paste your API key"
                 }
+                onBlur={() => setKeyReady(true)}
                 onChange={(event) => {
                   setKey(event.target.value);
+                  setKeyReady(false);
                   setDirty(true);
                   setNotice("");
                 }}
@@ -290,7 +507,7 @@ export default function CareerBuddySettings({
               type="button"
               className="button secondary"
               onClick={() => void test()}
-              disabled={busy || testing || dirty || !saved?.model}
+              disabled={busy || testing}
             >
               {testing ? (
                 <LoaderCircle size={16} className="spin" />
@@ -299,7 +516,11 @@ export default function CareerBuddySettings({
               )}
               Test connection
             </button>
-            {dirty && <small>Save before testing.</small>}
+            {dirty && (
+              <small>
+                Test uses the settings shown above, even before saving.
+              </small>
+            )}
           </div>
         </form>
       )}
