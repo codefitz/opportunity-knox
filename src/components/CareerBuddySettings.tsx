@@ -181,7 +181,7 @@ export default function CareerBuddySettings({
               />
               <small>
                 {form.provider === "ollama"
-                  ? "For Ollama on the Docker host use http://host.docker.internal:11434. The model must already be installed."
+                  ? "Use a private network URL such as http://your-server:11434, or http://host.docker.internal:11434 for Ollama on this host. The model must already be installed."
                   : form.provider === "custom"
                     ? "An OpenAI-compatible Chat Completions API. Include the base path (for example /v1), without /chat/completions."
                     : "Requests go to the provider’s official API endpoint."}

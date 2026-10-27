@@ -1,4 +1,6 @@
 import { isIP } from "node:net";
+import { lookup as systemLookup } from "node:dns";
+import { Agent } from "undici";
 import ipaddr from "ipaddr.js";
 
 export const PROVIDERS = {
@@ -36,6 +38,39 @@ export function publicBuddy(config) {
   const { apiKey, ...safe } = config;
   return { ...safe, hasKey: Boolean(apiKey), providers: PROVIDERS };
 }
+const PRIVATE_RANGES = [
+  "private",
+  "loopback",
+  "uniqueLocal",
+  "carrierGradeNat",
+];
+const isPrivateAddress = (address) =>
+  Boolean(isIP(address)) &&
+  PRIVATE_RANGES.includes(ipaddr.process(address).range());
+
+// Resolve at connection time and pass the validated results straight to the socket.
+// A configured name must not resolve to a mixture of private and public addresses.
+export function privateNetworkLookup(resolve = systemLookup) {
+  return (hostname, options, callback) => {
+    resolve(hostname, { all: true, verbatim: true }, (error, addresses) => {
+      if (error) return callback(error);
+      if (
+        !Array.isArray(addresses) ||
+        !addresses.length ||
+        addresses.some(({ address }) => !isPrivateAddress(address))
+      ) {
+        const blocked = new Error(
+          "HTTP hostnames must resolve only to private network addresses.",
+        );
+        blocked.code = "ERR_BUDDY_NONPRIVATE_DNS";
+        return callback(blocked);
+      }
+      if (options?.all) return callback(null, addresses);
+      return callback(null, addresses[0].address, addresses[0].family);
+    });
+  };
+}
+
 export function validateBaseUrl(value) {
   let url;
   try {
@@ -62,24 +97,17 @@ export function validateBaseUrl(value) {
     throw buddyError(400, "Metadata endpoints are not API servers.");
   if (isIP(hostname)) {
     const range = ipaddr.process(hostname).range();
-    if (!["unicast", "private", "loopback", "uniqueLocal"].includes(range))
+    if (!["unicast", ...PRIVATE_RANGES].includes(range))
       throw buddyError(
         400,
         "This special-purpose address cannot be used as an API server.",
       );
   }
-  // Private servers are intentional for Ollama/custom. Remote cleartext servers are not.
-  const local =
-    hostname === "localhost" ||
-    hostname === "host.docker.internal" ||
-    (isIP(hostname) &&
-      ["private", "loopback", "uniqueLocal"].includes(
-        ipaddr.process(hostname).range(),
-      ));
-  if (url.protocol === "http:" && !local)
+  // Hostnames can be saved while offline; their DNS addresses are checked when connecting.
+  if (url.protocol === "http:" && isIP(hostname) && !isPrivateAddress(hostname))
     throw buddyError(
       400,
-      "Use HTTPS for a remote API, or a local/private address for Ollama.",
+      "Use HTTPS for a public API, or a private network address for Ollama.",
     );
   return url.href.replace(/\/+$/, "");
 }
@@ -377,8 +405,19 @@ export function providerText(provider, response) {
     throw buddyError(502, "The custom API returned an incomplete response.");
   return choice?.message?.content || "";
 }
-export async function callProvider(config, system, messages, fetcher = fetch) {
+export async function callProvider(
+  config,
+  system,
+  messages,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
   const request = providerRequest(config, system, messages);
+  const url = new URL(request.url);
+  const dispatcher =
+    url.protocol === "http:" && !isIP(url.hostname.replace(/^\[|\]$/g, ""))
+      ? new Agent({ connect: { lookup: privateNetworkLookup(resolve) } })
+      : null;
   let response;
   try {
     response = await fetcher(request.url, {
@@ -387,6 +426,7 @@ export async function callProvider(config, system, messages, fetcher = fetch) {
       body: JSON.stringify(request.body),
       redirect: "error",
       signal: AbortSignal.timeout(120000),
+      ...(dispatcher ? { dispatcher } : {}),
     });
     if (!response.ok) {
       const guidance =
@@ -438,6 +478,16 @@ export async function callProvider(config, system, messages, fetcher = fetch) {
     return output;
   } catch (error) {
     if (error.status) throw error;
+    if (error.cause?.code === "ERR_BUDDY_NONPRIVATE_DNS")
+      throw buddyError(
+        400,
+        "This HTTP hostname does not resolve exclusively to private network addresses. Use HTTPS for a public API.",
+      );
+    if (error.cause?.code === "ENOTFOUND")
+      throw buddyError(
+        502,
+        "The API hostname could not be resolved from the app host. Check the name and network connection.",
+      );
     if (error.name === "TimeoutError" || error.name === "AbortError")
       throw buddyError(
         504,
@@ -447,5 +497,7 @@ export async function callProvider(config, system, messages, fetcher = fetch) {
       502,
       "Could not reach the API server. Check the base URL and that the host can access it. For host Ollama in Docker, use host.docker.internal instead of localhost.",
     );
+  } finally {
+    if (dispatcher) await dispatcher.destroy();
   }
 }

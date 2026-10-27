@@ -62,3 +62,12 @@ The app was recreated from its production Docker image, then settings, twelve pr
 No real career files, API keys, personal chat or paid-provider calls were used. Native provider API contracts are covered by deterministic transport fixtures; actual account/model access, Ollama server reachability and live model quality still require the user's configured connection. Salary answers have no live market lookup. OCR, automated PDF export and template-fidelity rendering remain future work.
 
 The main installation was upgraded with the existing `./board restart --no-open` command. Docker reports a healthy service running 0.4.0 at port 4318. A pre-update SQLite snapshot was saved; every existing row in opportunities, documents, configuration and tasks matched it afterward. The new chat/text tables were empty, and Career Buddy remained unconfigured/off. No mock configuration or test data was copied into the user's board.
+
+
+## Version 0.4.1 — private network hostnames
+
+`npm run check` passes: the production build, 77 Node tests and 14 launcher tests. Tests exercise saving an HTTP hostname offline, an actual loopback request with a private DNS result, and rejection before connection when results are public, mixed, or link-local. Hostnames are resolved and checked at connection time, and the validated addresses are used directly by the socket.
+
+The user's supplied hostname resolved to a private address on both the Mac and in the Docker container. The remote Ollama `/api/tags` endpoint returned HTTP 200. An isolated Node 24 application container saved the hostname through the settings UI and sent a connection request with a deliberately nonexistent model; Ollama returned the expected HTTP 404 for that model, confirming the request reached the server. No career records were sent. Installed model names were read, but no live model generation was run or automatically loaded.
+
+The main service was rebuilt and restarted with `./board restart --no-open`. Docker reports version 0.4.1 healthy. Existing records, documents, tasks, settings, chats and extracted-text caches matched a pre-update SQLite snapshot. A second request through the running application's adapter reached Ollama and returned the expected 404 for the nonexistent test model. No live model was loaded and no user settings were changed.

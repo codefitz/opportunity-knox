@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import {
   defaultBuddy,
   publicBuddy,
@@ -85,6 +86,9 @@ test("API endpoint validation allows deliberate local providers but rejects cred
     "http://host.docker.internal:11434",
     "http://127.0.0.1:11434",
     "http://192.168.1.3:11434",
+    "http://100.100.10.20:11434",
+    "http://career-server.private:11434",
+    "http://example.com",
     "https://api.example.com/v1",
   ])
     assert.equal(validateBaseUrl(value), value);
@@ -93,7 +97,6 @@ test("API endpoint validation allows deliberate local providers but rejects cred
     "https://user:secret@example.com",
     "https://example.com?key=secret",
     "https://example.com/#x",
-    "http://example.com",
     "http://169.254.169.254",
     "http://metadata.google.internal",
     "http://0.0.0.0",
@@ -101,6 +104,86 @@ test("API endpoint validation allows deliberate local providers but rejects cred
   ])
     assert.throws(() => validateBaseUrl(value));
 });
+test("private hostname settings can be saved while the network server is offline", () => {
+  const saved = updateBuddy(defaultBuddy(), {
+    revision: 1,
+    provider: "ollama",
+    model: "test-model",
+    enabled: true,
+    baseUrl: "http://career-server.private:11434",
+  });
+  assert.equal(saved.baseUrl, "http://career-server.private:11434");
+  assert.equal(
+    providerRequest(saved, "system", []).url,
+    "http://career-server.private:11434/api/chat",
+  );
+});
+
+test("the actual HTTP connection uses only validated private DNS results", async (t) => {
+  const requests = [];
+  const server = createServer(async (req, res) => {
+    requests.push({ host: req.headers.host, path: req.url });
+    for await (const _ of req) {
+      /* consume body */
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ done: true, message: { content: "Ready" } }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = server.address().port;
+  const network = {
+    ...config("ollama"),
+    baseUrl: "http://private-ollama.test:" + port,
+  };
+  let lookups = 0;
+  const privateDns = (host, options, cb) => {
+    lookups++;
+    assert.equal(host, "private-ollama.test");
+    assert.equal(options.all, true);
+    cb(null, [{ address: "127.0.0.1", family: 4 }]);
+  };
+  assert.equal(
+    await callProvider(
+      network,
+      "system",
+      [{ role: "user", content: "test" }],
+      undefined,
+      privateDns,
+    ),
+    "Ready",
+  );
+  assert.equal(lookups, 1);
+  assert.deepEqual(requests, [
+    { host: "private-ollama.test:" + port, path: "/api/chat" },
+  ]);
+
+  // Even if one answer is private, mixed DNS results must not reach the socket.
+  const mixedDns = (_host, _options, cb) =>
+    cb(null, [
+      { address: "127.0.0.1", family: 4 },
+      { address: "8.8.8.8", family: 4 },
+    ]);
+  await assert.rejects(
+    callProvider(network, "system", [], undefined, mixedDns),
+    (error) => error.status === 400 && /private network/.test(error.message),
+  );
+  assert.equal(requests.length, 1);
+  const publicDns = (_host, _options, cb) =>
+    cb(null, [{ address: "8.8.8.8", family: 4 }]);
+  await assert.rejects(
+    callProvider(network, "system", [], undefined, publicDns),
+    (error) => error.status === 400,
+  );
+  const linkLocalDns = (_host, _options, cb) =>
+    cb(null, [{ address: "169.254.169.254", family: 4 }]);
+  await assert.rejects(
+    callProvider(network, "system", [], undefined, linkLocalDns),
+    (error) => error.status === 400,
+  );
+  assert.equal(requests.length, 1);
+});
+
 for (const provider of ["openai", "anthropic", "gemini", "ollama", "custom"]) {
   test(
     provider +
