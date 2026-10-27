@@ -51,3 +51,25 @@ Version 0.4.4 adds multi-file and directory drag-and-drop (plus a folder picker)
 - Folder/file selection no longer has a 500-file count cap. Above 500 files the UI warns and offers manually continued batches of 500; files are uploaded one at a time and the remaining queue lives in the browser. The existing 15 MB per-file browser upload limit and hidden/system exclusions remain. This concerns upload batches, not AI text chunking.
 
 Still open: vector or semantic search; in-place directory and vault sources; previewed imports with duplicate handling; persistent resumable uploads; guided backup restore; and production remote HTTPS/VPN deployment. The Obsidian sync, any optional export to a writable vault, and library uploads are distinct user actions.
+
+
+## Embedding configuration and decision-model planning
+
+Embedding settings now have their own provider, endpoint, model ID and private API key, separate from Career Buddy chat settings. OpenAI, Ollama and custom compatible endpoints are configurable. Saving performs no network request and does not activate semantic indexing. Embedding capability testing, model discovery, vector storage and hybrid retrieval remain open. The plan also contains a separate decision-model placeholder for user-defined fit criteria and evidence-based, reviewable recommendations.
+
+
+The Docker image now bundles a pinned local MiniLM embedding model with CPU inference, remote model loading disabled and a built-in fictional-text test. New embedding configurations use it by default. Existing external embedding choices remain saved. Library indexing and semantic retrieval still require implementation.
+
+
+## Persistent local vector indexing — semantic search step 2
+
+The Career Library now offers explicit selection of managed library files and selected read-only vault sources for local MiniLM indexing. Vectors, chunk hashes, model revision and source fingerprints persist in SQLite. Background jobs report document/chunk progress, allow cooperative cancellation between batches, retain completed documents, and offer explicit retry. Jobs interrupted by a restart stay stopped. Changed files are invalidated on status refresh and verified by hash before reuse/publication; deleted/reset/deselected sources lose their vectors. Unchanged completed sources reuse their vectors. Backups include the vector table. Restored or moved files may require reindexing when their file metadata changes. Originals remain unchanged.
+
+This release requires the built-in local embedding provider for indexing; saved external settings are preserved but external indexing is still pending. Career Buddy continues to use keyword retrieval. Step 3 is hybrid semantic/keyword retrieval with source references and quality tests.
+
+
+## Career Buddy hybrid retrieval — semantic search step 3
+
+Career Buddy now combines semantic and keyword rankings for selected sources with saved compatible MiniLM vectors. Query embeddings run locally, passage rankings are fused within the existing context budget, and unindexed sources remain available through keyword matching. Replies persist search mode/fallback reasons and per-source passage references. Source hashes are rechecked after query inference; changed, deleted/deselected or reset sources cannot supply stale semantic evidence. No automatic document indexing or external embedding call is introduced.
+
+Keyword fallback covers absent/incompatible indexes, busy indexing, model failure and unusable semantic matches. Library list filtering remains metadata-only. External embedding providers/custom vector stores, retrieval tuning against a user-approved corpus, and the separate criteria-based decision model remain open.

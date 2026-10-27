@@ -2,6 +2,8 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+COPY scripts/bundle-embedding.mjs scripts/embedding-model.json ./scripts/
+RUN node scripts/bundle-embedding.mjs
 COPY index.html vite.config.ts tsconfig*.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
@@ -12,6 +14,7 @@ WORKDIR /app
 COPY package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY server ./server
+COPY --from=build /app/models ./models
 COPY --from=build /app/dist ./dist
 EXPOSE 4318
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=12 CMD node -e "fetch('http://127.0.0.1:4318/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

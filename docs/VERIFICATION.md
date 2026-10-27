@@ -109,3 +109,36 @@ The combined production build and test suite passed: 97 Node tests and 18 launch
 A separate Docker board with a fictional vault completed the host restart handoff, and its vault mount was confirmed read-only with its test contents unchanged. The user's already selected vault was subsequently connected in read-only mode; the running container's mount was verified read-only, and no vault import or export was performed. This is a mount/connection check, not a test of syncing the user's vault contents.
 
 A second isolated Docker board and browser test selected 501 fictional files, displayed the large-upload warning, uploaded 500 with batching selected, retained the final file in the queue, and uploaded it on the next action. Automated collection tests cover more than 1,000 selections; they do not establish a performance guarantee for arbitrarily large folders. The queue is in browser memory, and existing per-file size and hidden-folder rules still apply. The isolated test board was removed; no fictional documents were added to the user's board.
+
+
+## Isolated restore foundation — 27 October 2026
+
+The offline restore command validates a backup, refuses an existing destination or a destination inside the backup folder, copies its database and documents into a new workspace, and remaps document storage paths. It writes a restore report without starting a server. The isolated fictional test verifies submitted bytes, remapped document access, unchanged source database, damaged-backup rejection and existing-destination protection. The full project check passed. No user backup was restored in this test. Restored databases retain private credentials and conversations; the command does not launch them. A browser restore workflow and deployment validation remain unfinished.
+
+
+## Embedding settings
+
+The production build and full test suite passed after adding embedding configuration. A fictional integration test verifies authentication, independent chat settings, revision conflicts, secret-safe responses and exports, persistence after restart, and clearing keys when changing provider. No embedding request or real document indexing was performed.
+
+
+## Bundled embedding model
+
+The production image includes Transformers.js 3.8.1 and quantized Xenova/all-MiniLM-L6-v2 at revision 751bff37182d3f1213fa05d7196b954e230abad9. Build downloads verify recorded SHA-256 hashes; the model card, Apache-2.0 licence text and revision/hash manifest ship with the model. A read-only production container with networking disabled produced deterministic, finite, normalized 384-dimensional vectors from repeated fictional text. The full project check passed (104 Node tests and 18 launcher tests). No user documents were embedded. Existing saved external provider choices are preserved; new configurations default to the bundled model. Vector indexing and semantic retrieval are still pending.
+
+
+## Persistent vector indexing
+
+The production build and all 108 Node tests plus 18 launcher tests pass. New fictional-data tests verify authenticated explicit indexing, finite normalized 384-dimensional output validation, SQLite restart persistence and unchanged-vector reuse, changed-source invalidation, text reset/removal cleanup, cancellation without publishing partial documents, concurrent-job refusal, retry, safe failure on source edits during inference, stopped interrupted jobs, backup inclusion and unchanged original file content.
+
+An isolated read-only production container with networking disabled indexed a fictional text document into three real MiniLM vectors, verified their dimensions/normalization, verified the original file hash, and retained the index across an application restart. No personal documents were indexed. Live browser inspection was unavailable (`browser.user is unavailable`); visual confirmation remains pending. Semantic/keyword retrieval integration remains separate and pending.
+
+The tested image was deployed to the existing board after an online SQLite backup. Docker reported the service healthy, the `/vault` mount remained read-only, and the live vector table contained zero sources immediately after deployment. No indexing job was started for user documents.
+
+
+## Hybrid semantic/keyword retrieval
+
+The production build and all 112 Node tests plus 18 launcher tests pass. Fictional tests verify synonym passage recovery under a tight context budget, source identity and unchanged inputs, selected-source isolation (including an indexed but unselected file), suppression of unsupported source IDs, mixed indexed/unindexed sources, model failure fallback, incompatible models/chunk hashes, and exclusion of evidence changed, cleared or deselected during query inference. Chat retrieval mode, passage references and source coverage persist after restart.
+
+In a read-only production container with networking disabled, the real bundled MiniLM model ranked the expected passage first for three fictional synonym queries: people management, infrastructure modernisation and information stewardship. Hybrid retrieval included each expected passage within a 140-character budget, retaining source/passage references; clearing the index produced an honest no-index fallback. This is a small regression corpus, not an accuracy benchmark for personal career documents. No personal documents were indexed or sent to a model during these tests. Browser inspection remained unavailable (`browser.user is unavailable`), so visual confirmation is pending.
+
+The tested image was deployed after an online SQLite backup. The service is healthy; checksums of records, document metadata, tasks, chats, prepared text, all 1,617 saved vector sources and configuration matched the pre-update snapshot. The vault remained mounted read-only. Deployment did not start an indexing job. The existing completed indexing job had 142 sources with no readable text; these need extraction/OCR before semantic indexing.

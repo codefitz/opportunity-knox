@@ -4,7 +4,13 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 
 ## Feature Requests
 
-- [ ] Add a vectorised DB as a source - default preinstalled or choose a custom one. Current retrieval uses locally extracted text chunks and keyword matching, not embeddings.
+- [x] Separate embedding provider, endpoint, model and server-side API key configuration from Career Buddy chat settings (OpenAI, Ollama and custom compatible endpoints). No embedding requests or indexing are triggered by saving.
+- [x] Bundle a pinned, checksum-verified local MiniLM embedding model in Docker with offline CPU inference and a fictional-text self-test. Use it by default for new embedding configurations; preserve saved external providers.
+- [ ] External embedding endpoint capability tests and embedding-specific model discovery.
+- [ ] Decision model placeholder: independently configurable provider/model for criteria-based opportunity assessments (for example, “does this opportunity fit my criteria?”). Define saved user criteria, evidence, uncertainty and reviewable recommendations; keep this separate from chat and embedding models. Detailed contract and implementation remain open.
+- [x] Semantic search step 2: persistent SQLite vectors from the bundled MiniLM model, explicit library/read-only source selection, background progress, cancellation, retry, restart persistence, source-change invalidation and removal/reset cleanup. No automatic indexing or original-file changes.
+- [x] Semantic search step 3: combine local semantic and keyword retrieval in Career Buddy, scoped to selected sources, with passage references, visible fallback reasons, source freshness checks and fictional retrieval quality tests. Library list filtering remains metadata-only.
+- [ ] External embedding endpoint indexing and optional custom vector database integration. The initial built-in vector store needs no additional service.
 - [x] Connect an existing Obsidian vault, including a read-only host mount; explicitly sync eligible files into the Career Library when desired. Connecting alone does not automatically import files or make the vault searchable by Career Buddy.
 - [x] Select files from a read-only vault for in-place Career Buddy use; selected file text is cached in the board and refreshed when changed. Removing a selection clears its text cache.
 - [ ] Extend in-place read-only sources to independently mounted general directories and multiple roots.

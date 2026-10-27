@@ -3879,3 +3879,13 @@ textarea {
   line-height: 1.6;
   margin: 0 0 16px;
 }
+
+/* Career Library indexing uses the shared settings panel and theme tokens. */
+.vector-index { margin: 24px 0; }
+.vector-index > p, .vector-index [role="status"] p { color: var(--ink-secondary); font-size: 12px; line-height: 1.7; }
+.vector-index details { margin: 16px 0; }
+.vector-index summary { cursor: pointer; color: var(--ink-secondary); font-size: 12px; }
+.vector-index .library-tool-actions { margin: 16px 0; }
+.vector-index .field { margin-top: 16px; }
+.vector-index .buddy-source-picker { margin: 16px 0; }
+.vector-index li { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }

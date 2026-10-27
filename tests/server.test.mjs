@@ -2629,3 +2629,106 @@ test("selected vault sources remain in place and refresh cached text when change
   assert.equal(verifyDb.prepare("SELECT data FROM document_text WHERE id=?").get(id), undefined); verifyDb.close();
   assert.equal((await f.request(`/api/opportunities/${created.data.id}/buddy`)).data.documents.some((doc) => doc.id === id), false);
 });
+
+test("retrying an import request returns the original document without another version", async (t) => {
+  const f = await fixture(t); await f.setup();
+  const body = {name:"fictional.txt", kind:"reference", status:"draft", contentBase64:Buffer.from("fictional source").toString("base64"), importRequestId:"fictional-request-123456789"};
+  const first = await f.request("/api/documents", {method:"POST",body});
+  const retry = await f.request("/api/documents", {method:"POST",body});
+  assert.equal(first.status,201); assert.equal(retry.status,200); assert.equal(first.data.id,retry.data.id);
+  assert.equal((await f.request("/api/documents")).data.documents.length,1);
+  const conflict = await f.request("/api/documents", {method:"POST",body:{...body,contentBase64:Buffer.from("different").toString("base64")}});
+  assert.equal(conflict.status,409);
+});
+
+test("backup inspection checks real snapshot hashes without changing the board", async (t) => {
+  const f = await fixture(t); await f.setup();
+  const doc = await f.request("/api/documents", {method:"POST",body:{name:"fictional.txt",kind:"reference",contentBase64:Buffer.from("fictional original").toString("base64")}});
+  const backup = await f.request("/api/backup", {method:"POST",body:{}});
+  const before = await f.request("/api/backups"); assert.ok(before.data.backups.some((x) => x.name === backup.data.name));
+  const inspect = () => f.request("/api/backups/inspect", {method:"POST",body:{name:backup.data.name}});
+  const good = await inspect(); assert.equal(good.status,200); assert.equal(good.data.valid,true); assert.equal(good.data.checked,1);
+  const saved = join(backup.data.location,"documents",doc.data.id); writeFileSync(saved,"fictional tampering");
+  const changed = await inspect(); assert.equal(changed.data.valid,false); assert.equal(changed.data.issues.length,1);
+  rmSync(saved); const missing = await inspect(); assert.equal(missing.data.valid,false);
+  assert.equal((await f.request("/api/documents")).data.documents.length,1);
+  const bad = await f.request("/api/backups/inspect",{method:"POST",body:{name:"../escape"}}); assert.equal(bad.status,400);
+});
+
+test("browser isolated restore requires confirmation and preserves the current board", async (t) => {
+ const f = await fixture(t); await f.setup();
+ const doc=await f.request('/api/documents',{method:'POST',body:{name:'fictional.txt',contentBase64:Buffer.from('fictional restore contents').toString('base64')}});
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});
+ assert.equal((await f.request('/api/backups/restore-isolated',{method:'POST',body:{name:backup.data.name}})).status,400);
+ const result=await f.request('/api/backups/restore-isolated',{method:'POST',body:{name:backup.data.name,confirm:true}});
+ assert.equal(result.status,201);assert.equal(result.data.started,false);assert.equal(result.data.documentsRestored,1);
+ assert.ok(result.data.destination.startsWith(join(realpathSync(f.options.dataDir),'restores')));
+ assert.equal((await f.request('/api/documents')).data.documents[0].id,doc.data.id);
+ assert.equal((await f.request('/api/backups/restore-isolated',{method:'POST',auth:false,body:{name:backup.data.name,confirm:true}})).status,401);
+});
+
+test('embedding settings are independent, secret-safe and persistent', async(t)=>{
+ const f=await fixture(t);await f.setup();
+ const chat=(await f.request('/api/buddy/settings')).data;
+ const initial=(await f.request('/api/buddy/embedding-settings')).data;
+ assert.equal((await f.request('/api/buddy/embedding-settings',{auth:false})).status,401);
+ const body={revision:initial.revision,provider:'ollama',baseUrl:'http://localhost:11434',model:'fictional-embedding-model',apiKey:'fictional-embedding-secret'};
+ const saved=await f.request('/api/buddy/embedding-settings',{method:'PATCH',body});
+ assert.equal(saved.status,200);assert.equal(saved.data.hasKey,true);assert.equal(saved.data.apiKey,undefined);
+ assert.deepEqual((await f.request('/api/buddy/settings')).data,chat);
+ assert.equal((await f.request('/api/buddy/embedding-settings',{method:'PATCH',body})).status,409);
+ assert.equal(JSON.stringify((await f.request('/api/export')).data).includes('fictional-embedding-secret'),false);
+ await f.restart();await f.login();
+ const restored=(await f.request('/api/buddy/embedding-settings')).data;
+ assert.equal(restored.model,body.model);assert.equal(restored.hasKey,true);
+ const changed=await f.request('/api/buddy/embedding-settings',{method:'PATCH',body:{revision:restored.revision,provider:'custom',baseUrl:'https://new.example/v1',model:'different',apiKey:''}});
+ assert.equal(changed.status,200);assert.equal(changed.data.hasKey,false);
+});
+
+test('built-in embedding default needs no key and clears external credentials when selected',async(t)=>{
+ const f=await fixture(t);await f.setup();
+ const initial=(await f.request('/api/buddy/embedding-settings')).data;
+ assert.equal(initial.provider,'builtin');assert.equal(initial.hasKey,false);assert.equal(initial.model,'Xenova/all-MiniLM-L6-v2');
+ const ext=await f.request('/api/buddy/embedding-settings',{method:'PATCH',body:{revision:initial.revision,provider:'custom',baseUrl:'https://fictional.example/v1',model:'fixture',apiKey:'fictional-key'}});
+ assert.equal(ext.status,200);
+ const local=await f.request('/api/buddy/embedding-settings',{method:'PATCH',body:{revision:ext.data.revision,provider:'builtin',apiKey:'should-not-be-saved'}});
+ assert.equal(local.status,200);assert.equal(local.data.hasKey,false);assert.equal(local.data.baseUrl,'');
+});
+
+test('explicit vector indexing is authenticated, persistent and removable without changing original documents',async t=>{
+ const f=await fixture(t,{embeddingFn:async texts=>texts.map(()=>[1,...Array(383).fill(0)])});await f.setup();
+ const route='/api/buddy/vector-index';assert.equal((await f.request(route,{auth:false})).status,401);
+ const doc=await f.request('/api/documents',{method:'POST',body:{name:'fictional-vector.txt',contentBase64:Buffer.from('Fictional achievement: delivered a fictional data project.').toString('base64')}});assert.equal(doc.status,201);
+ assert.equal((await f.request(route)).data.sources[0].status,'pending');
+ assert.equal((await f.request(route,{method:'POST',body:{documentIds:['missing']}})).status,400);
+ assert.equal((await f.request(route,{method:'POST',body:{documentIds:[doc.data.id]}})).status,200);
+ let state;for(let i=0;i<100;i++){state=(await f.request(route)).data;if(state.job.status==='completed')break;await new Promise(r=>setTimeout(r,5));}
+ assert.equal(state.job.status,'completed');assert.equal(state.sources[0].chunks,1);assert.equal(state.dimensions,384);
+ await f.restart();await f.login();assert.equal((await f.request(route)).data.sources[0].status,'indexed');
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(backup.status,200);
+ const snapshot=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.equal(snapshot.prepare('SELECT COUNT(*) n FROM document_vectors').get().n,1);snapshot.close();
+ assert.equal((await f.request(route,{method:'DELETE'})).status,200);assert.equal((await f.request(route)).data.sources[0].chunks,0);
+ assert.equal((await f.request('/api/documents/'+doc.data.id+'/content',{binary:true})).data.toString(),'Fictional achievement: delivered a fictional data project.');
+});
+
+test('Career Buddy uses hybrid excerpts only from selected sources, persists coverage and falls back on model failure',async t=>{
+ let context,fail=false,selectedId,hiddenId;
+ const f=await fixture(t,{
+  embeddingFn:async texts=>{if(fail)throw Error('fictional unavailable model');return texts.map(text=>text.includes('leadership')||text.includes('coached')?[1,...Array(383).fill(0)]:[0,1,...Array(382).fill(0)]);},
+  buddyFetch:async(_,opts)=>{context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:'Fictional coaching evidence.',sourceIds:[selectedId,hiddenId]}));}
+ });await f.setup();await enableBuddy(f);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ async function upload(name,text){return (await f.request('/api/documents',{method:'POST',body:{name,kind:'cv',contentBase64:Buffer.from(text).toString('base64')}})).data;}
+ const source=await upload('Fictional selected CV.txt','Pottery and gardening. '.repeat(2100)+'I coached colleagues and mentored engineers.');selectedId=source.id;
+ const hidden=await upload('Fictional unselected confidential.txt','Unselected secret career evidence.');hiddenId=hidden.id;
+ const plain=await upload('Fictional unindexed notes.txt','Fictional leadership notes.');
+ await f.request('/api/buddy/vector-index',{method:'POST',body:{documentIds:[source.id,hidden.id]}});
+ for(let i=0;i<200;i++){const state=(await f.request('/api/buddy/vector-index')).data;if(state.job.status==='completed')break;await new Promise(r=>setTimeout(r,5));}
+ const result=await buddyChat(f,op.id,{message:'What leadership evidence can I highlight?',documentIds:[source.id,plain.id]});assert.equal(result.status,200);
+ const answer=result.data.messages.at(-1);assert.equal(answer.context.retrieval.mode,'hybrid');assert.equal(answer.context.retrieval.indexedSources,1);
+ assert.ok(context.context.excerpts.some(c=>c.text.includes('coached')));assert.ok(answer.sources.find(s=>s.id===source.id).excerpts.some(e=>e.matchedBy.includes('semantic')));
+ assert.equal(context.context.excerpts.some(c=>c.sourceId===hidden.id),false);assert.equal(JSON.stringify(context).includes('Unselected secret'),false);assert.equal(answer.sourceIds.includes(hidden.id),false);assert.ok(answer.sourceIds.includes(source.id));
+ assert.ok(answer.context.characters<=36000);
+ fail=true;const fallback=await buddyChat(f,op.id,{message:'What leadership evidence can I highlight?',documentIds:[source.id]});assert.equal(fallback.status,200);assert.equal(fallback.data.messages.at(-1).context.retrieval.reason,'model-unavailable');
+ await f.restart();await f.login();const saved=(await f.request('/api/opportunities/'+op.id+'/buddy')).data.messages.find(m=>m.id===answer.id);assert.equal(saved.context.retrieval.mode,'hybrid');assert.ok(saved.sources[0].excerpts.length);
+});

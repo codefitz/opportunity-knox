@@ -1,4 +1,6 @@
+import { createVectorIndex } from "./vector-index.mjs";
 import { randomUUID } from "node:crypto";
+import { embedLocal, LOCAL_MODEL } from "./local-embedding.mjs";
 import { readFileSync, statSync } from "node:fs";
 import {
   defaultBuddy,
@@ -12,7 +14,7 @@ import {
 } from "./buddy-provider.mjs";
 import {
   extractDocument,
-  retrieveChunks,
+  retrieveHybridChunks,
   fingerprint,
   wordDraft,
 } from "./buddy-documents.mjs";
@@ -400,12 +402,51 @@ export function createCareerBuddy(ctx) {
       );
     return [...new Set(value)];
   };
+  const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
   return {
+    close: () => vectors.close(),
     exportMessages: () => getRows("buddy_messages"),
     publicSettings: () => publicBuddy(config()),
     indexDocuments,
     getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
+      if (path === "/api/buddy/vector-index") {
+        try {
+        if (method === "GET") json(res,vectors.status());
+        else if (method === "POST") { const body=await readBody(req); json(res,body.cancel ? vectors.cancel() : vectors.start(body.documentIds)); }
+        else if (method === "DELETE") json(res,vectors.clear());
+        else throw buddyError(405,"Method not supported.");
+        } catch(error) { throw buddyError(error.status || 500,error.status ? error.message : "Indexing could not be started."); }
+        return true;
+      }
+      if (path === "/api/buddy/embedding-settings") {
+        const current = getConfig("embeddingSettings") || {...defaultBuddy(),provider:"builtin",model:LOCAL_MODEL,baseUrl:""};
+        const expose = (value) => {
+          const safe = publicBuddy(value);
+          safe.providers = Object.fromEntries(Object.entries(safe.providers).filter(([id]) => ["openai", "ollama", "custom"].includes(id)));
+          safe.providers = {builtin:{name:"Built-in local · MiniLM",baseUrl:""},...safe.providers};
+          return safe;
+        };
+        if (method === "GET") { json(res, expose(current)); return true; }
+        if (method === "PATCH") {
+          const body = await readBody(req);
+          if (body.revision !== current.revision) throw buddyError(409,"Embedding settings changed. Reload before saving.");
+          if (body.provider === "builtin") { const next={...defaultBuddy(),revision:current.revision+1,provider:"builtin",model:LOCAL_MODEL,baseUrl:""};putConfig("embeddingSettings",next);json(res,expose(next));return true;}
+          if (body.provider !== undefined && !["openai", "ollama", "custom"].includes(body.provider)) throw buddyError(400, "Choose a supported embedding provider.");
+          const next = updateBuddy(current.provider === "builtin" ? {...current,provider:"openai"} : current, { ...body, enabled: false });
+          putConfig("embeddingSettings", next);
+          json(res, expose(next)); return true;
+        }
+      }
+      if (path === "/api/buddy/embedding-test" && method === "POST") {
+        await readBody(req);
+        if ((getConfig("embeddingSettings")?.provider || "builtin") !== "builtin") throw buddyError(400,"Save the built-in local provider first.");
+        if(inFlight.has("embedding-test")) throw buddyError(429,"Embedding test is already running.");
+        inFlight.add("embedding-test");
+        try {const vectors=await embedLocal(["Fictional local embedding test."]);json(res,{ok:true,dimensions:vectors[0].length,model:LOCAL_MODEL});}
+        catch {throw buddyError(503,"The bundled model could not be loaded. Check the installed image and logs.");}
+        finally {inFlight.delete("embedding-test");}return true;
+      }
       if (path === "/api/buddy/settings") {
         if (method === "GET") {
           json(res, publicBuddy(config()));
@@ -579,7 +620,9 @@ export function createCareerBuddy(ctx) {
           );
         inFlight.add(opportunity.id);
         try {
-          const indexed = await indexDocuments(ids);
+          let indexed = await indexDocuments(ids);
+          const semantic = await vectors.search(indexed, message.slice(0,1200)+"\n"+opportunity.role.slice(0,300));
+          indexed = semantic.documents;
           const evidence = indexed.filter(
             (d) => d.status === "ready" && !d.generation,
           );
@@ -591,13 +634,14 @@ export function createCareerBuddy(ctx) {
               422,
               "Select a readable source CV or career evidence first. A job description alone cannot establish your experience.",
             );
-          const retrieval = retrieveChunks(
+          const retrieval = retrieveHybridChunks(
             indexed,
             message +
               "\n" +
               opportunity.role +
               "\n" +
               opportunity.description.slice(0, 12000),
+            semantic.scores,
           );
           const history = messages(opportunity.id)
             .slice(-12)
@@ -640,6 +684,7 @@ export function createCareerBuddy(ctx) {
             excerpts: retrieval.chunks,
             coverage: {
               omittedChunks: retrieval.omittedChunks,
+              retrievalMode: semantic.mode,
               files: indexed.map((d) => ({
                 id: d.id,
                 name: d.name,
@@ -712,6 +757,7 @@ export function createCareerBuddy(ctx) {
             status: d.status,
             included: used.has(d.id),
             warnings: d.warnings,
+            excerpts: retrieval.chunks.filter(chunk=>chunk.sourceId===d.id).map(chunk=>({index:chunk.index,matchedBy:chunk.matchedBy || ["keyword"]})),
           }));
           const user = {
             id: randomUUID(),
@@ -732,6 +778,7 @@ export function createCareerBuddy(ctx) {
             sourceIds: parsed.sourceIds,
             sources,
             context: {
+              retrieval: {mode:semantic.mode,reason:semantic.reason,indexedSources:semantic.indexedSources},
               characters: retrieval.characters,
               omittedChunks: retrieval.omittedChunks,
               otherOpportunities: context.otherOpportunities.length,

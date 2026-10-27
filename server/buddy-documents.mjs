@@ -258,13 +258,87 @@ export function retrieveChunks(documents, query, limit = 36000) {
     .sort((a, b) => b.score - a.score || a.index - b.index);
   for (const chunk of [...first, ...remaining]) {
     if (used + chunk.text.length > limit) continue;
-    selected.push(chunk);
+    selected.push({
+      ...chunk,
+      matchedBy:
+        chunk.score > 0
+          ? ["keyword"]
+          : chunk.index === 1
+            ? ["source-opening"]
+            : ["context"],
+    });
     used += chunk.text.length;
   }
   return {
     chunks: selected,
     characters: used,
     omittedChunks: candidates.length - selected.length,
+  };
+}
+// Equal-weight reciprocal-rank fusion avoids treating cosine similarity as confidence.
+export function retrieveHybridChunks(
+  documents,
+  query,
+  semanticScores,
+  limit = 36000,
+) {
+  if (!semanticScores?.size) return retrieveChunks(documents, query, limit);
+  const all = retrieveChunks(documents, query, Number.MAX_SAFE_INTEGER).chunks;
+  const key = (c) => `${c.sourceId}:${c.index}`;
+  const keyword = all
+    .filter((c) => c.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.sourceId.localeCompare(b.sourceId) ||
+        a.index - b.index,
+    );
+  const semantic = all
+    .filter((c) => semanticScores.has(key(c)))
+    .sort(
+      (a, b) =>
+        semanticScores.get(key(b)) - semanticScores.get(key(a)) ||
+        a.sourceId.localeCompare(b.sourceId) ||
+        a.index - b.index,
+    );
+  const rank = new Map();
+  for (const list of [keyword, semantic])
+    list.forEach((c, i) =>
+      rank.set(key(c), (rank.get(key(c)) || 0) + 1 / (60 + i + 1)),
+    );
+  const sorted = [...all].sort(
+    (a, b) =>
+      (rank.get(key(b)) || 0) - (rank.get(key(a)) || 0) ||
+      a.sourceId.localeCompare(b.sourceId) ||
+      a.index - b.index,
+  );
+  const selected = [],
+    seen = new Set();
+  let used = 0;
+  function add(c, opening = false) {
+    if (seen.has(key(c)) || used + c.text.length > limit) return;
+    selected.push({
+      ...c,
+      matchedBy: [
+        ...(c.score > 0 ? ["keyword"] : []),
+        ...(semanticScores.has(key(c)) ? ["semantic"] : []),
+        ...(opening ? ["source-opening"] : []),
+        ...(!opening && c.score === 0 && !semanticScores.has(key(c))
+          ? ["context"]
+          : []),
+      ],
+    });
+    seen.add(key(c));
+    used += c.text.length;
+  }
+  // Reserve at least half the budget for ranked passages so source openings cannot crowd them out.
+  for (const c of all.filter((c) => c.index === 1))
+    if (used + c.text.length <= limit / 2) add(c, true);
+  for (const c of sorted) add(c);
+  return {
+    chunks: selected,
+    characters: used,
+    omittedChunks: all.length - selected.length,
   };
 }
 export async function wordDraft(title, content) {

@@ -9,3 +9,5 @@ docs
 README.md
 .local/
 .npm-cache/
+
+models/

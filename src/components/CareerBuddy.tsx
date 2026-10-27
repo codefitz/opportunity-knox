@@ -51,8 +51,10 @@ export type BuddyMessage = {
     status: string;
     included: boolean;
     warnings: string[];
+    excerpts?: { index: number; matchedBy: string[] }[];
   }[];
   context?: {
+    retrieval?: { mode: string; reason: string; indexedSources: number };
     characters: number;
     omittedChunks: number;
     otherOpportunities: number;
@@ -716,11 +718,44 @@ function Reply({
             {m.sources.filter((source) => source.included).length} documents
             sent as excerpts
           </summary>
+          {m.context?.retrieval && (
+            <p>
+              {m.context.retrieval.mode === "hybrid"
+                ? `Meaning + keyword search · ${m.context.retrieval.indexedSources} indexed sources checked`
+                : "Keyword search"}
+              {m.context.retrieval.reason &&
+                " · " +
+                  ({
+                    "not-indexed":
+                      "Selected sources have no saved vectors. Index them in the Career Library to enable meaning-based matches.",
+                    "external-provider":
+                      "Local semantic search requires the built-in embedding provider in Settings.",
+                    "model-unavailable":
+                      "The local embedding model was unavailable; keyword search was used.",
+                    "indexing-in-progress":
+                      "An indexing job is running; keyword search was used.",
+                    "no-semantic-matches":
+                      "No usable meaning-based matches; keyword search was used.",
+                  }[m.context.retrieval.reason] ||
+                    "Keyword fallback was used.")}
+            </p>
+          )}
           <ul>
             {m.sources.map((source) => (
               <li key={source.id}>
                 <strong>{source.name}</strong> ·{" "}
                 {source.included ? "Excerpts sent" : "Not included"}
+                {!!source.excerpts?.length && (
+                  <small>
+                    Passages:{" "}
+                    {source.excerpts
+                      .map(
+                        (excerpt) =>
+                          `${excerpt.index} (${excerpt.matchedBy.map((method) => (method === "semantic" ? "meaning" : method === "source-opening" ? "opening" : method)).join(" + ")})`,
+                      )
+                      .join(", ")}
+                  </small>
+                )}
                 {source.warnings.length > 0
                   ? " · " + source.warnings.join(" ")
                   : ""}

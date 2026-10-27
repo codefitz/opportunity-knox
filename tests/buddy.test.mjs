@@ -19,6 +19,7 @@ import {
 import {
   chunkText,
   retrieveChunks,
+  retrieveHybridChunks,
   extractDocument,
   wordDraft,
 } from "../server/buddy-documents.mjs";
@@ -686,4 +687,19 @@ test("model listing never returns a stored key echoed in an ID or label", async 
       ),
   );
   assert.deepEqual(result.models, [{ id: "safe-model", name: "safe-model" }]);
+});
+
+
+test("hybrid retrieval recovers synonym evidence under a tight budget and retains source identities",()=>{
+ const documents=[{id:"a",name:"Fictional CV",kind:"cv",chunks:[{index:1,text:"Profile overview.".repeat(3)},{index:2,text:"Birthday baking and garden plants.".repeat(3)},{index:3,text:"Led a team of engineers and coached new colleagues.".repeat(2)},{index:4,text:"Management management management.".repeat(3)}]}];
+ const query="Management",before=JSON.stringify(documents);
+ const keyword=retrieveChunks(documents,query,190);
+ assert.equal(keyword.chunks.some(c=>c.index===3),false);
+ const hybrid=retrieveHybridChunks(documents,query,new Map([["a:3",0.85]]),190);
+ assert.equal(hybrid.chunks.some(c=>c.index===3),true);
+ assert.ok(hybrid.characters<=190);assert.ok(hybrid.omittedChunks>0);
+ assert.ok(hybrid.chunks.find(c=>c.index===3).matchedBy.includes("semantic"));
+ assert.ok(hybrid.chunks.every(c=>c.sourceId==="a"));assert.equal(JSON.stringify(documents),before);
+ assert.deepEqual(retrieveHybridChunks(documents,query,new Map(),190),keyword);
+ assert.deepEqual(retrieveHybridChunks(documents,query,new Map([["unselected:1",0.99]]),190).chunks.map(c=>c.sourceId),keyword.chunks.map(c=>c.sourceId));
 });

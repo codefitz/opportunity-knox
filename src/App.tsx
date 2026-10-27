@@ -1,3 +1,4 @@
+import VectorIndex from "./components/VectorIndex";
 import {
   useState,
   useEffect,
@@ -81,6 +82,7 @@ import JobLookup, {
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
 import CareerBuddySettings from "./components/CareerBuddySettings";
+import EmbeddingSettings from "./components/EmbeddingSettings";
 import Todos from "./components/Todos";
 import ProfileSettings, {
   ThemeSettings,
@@ -4496,12 +4498,13 @@ function Library({
           <p>
             PDF, DOCX, PPTX, HTML, RTF, captions (.vtt/.srt), and text files can
             be prepared locally as text chunks. Career Buddy selects excerpts by
-            matching words; it does not use vector or semantic search. Selected
+            matching words and, for indexed sources, meaning. Select sources for semantic indexing below. Selected
             excerpts are sent only when you message Career Buddy. Scanned PDFs
             need OCR first; originals stay unchanged.
           </p>
         </div>
       </div>
+      <VectorIndex onError={onError} />
       <div className="buddy-library-tools">
         <p>
           {docs.filter((doc) => extraction[doc.id]?.status === "ready").length}{" "}
@@ -4929,7 +4932,11 @@ function SettingsPage({
 }) {
   const [form, setForm] = useState(settings),
     [busy, setBusy] = useState(false),
-    [backingUp, setBackingUp] = useState(false);
+    [backingUp, setBackingUp] = useState(false),
+    [restoreConfirmed, setRestoreConfirmed] = useState(false),
+    [restoreResult, setRestoreResult] = useState<{destination:string;documentsRestored:number} | null>(null),
+    [backupList, setBackupList] = useState<{name:string}[] | null>(null),
+    [backupInspection, setBackupInspection] = useState<{name:string;createdAt:string;counts:Record<string,number>;checked:number;issues:string[];valid:boolean} | null>(null);
   useEffect(() => {
     setForm(settings);
   }, [
@@ -5161,6 +5168,21 @@ function SettingsPage({
           </button>
         </div>
         <div className="settings-action">
+          <div><strong>Inspect a backup</strong><p>Check a backup in the configured backup folder without restoring it. Backups contain private account information and may include API keys.</p>
+            {backupList && <><select aria-label="Choose backup to inspect" disabled={backingUp} defaultValue="" onChange={async (e) => { setBackupInspection(null); setRestoreConfirmed(false); setRestoreResult(null); if (!e.target.value) return; setBackingUp(true); try { setBackupInspection(await api("/backups/inspect", json({name:e.target.value}))); } catch (error) { setBackupInspection(null); onError(error); } finally { setBackingUp(false); } }}><option value="">Choose a backup</option>{backupList.map((item) => <option value={item.name} key={item.name}>{item.name}</option>)}</select>{backupList.length === 0 && <p>No completed backups found.</p>}</>}
+            {backupInspection && <div role="status"><p>{backupInspection.valid ? "Integrity checks passed" : "Issues found"} · {backupInspection.checked} documents verified · {backupInspection.counts.records} opportunities · {backupInspection.counts.tasks} tasks</p><p>Created: {backupInspection.createdAt || "unknown"}</p>{backupInspection.issues.map((issue) => <p key={issue}>{issue}</p>)}</div>}
+          </div>
+          <button type="button" className="button secondary" disabled={backingUp} onClick={async () => {setRestoreConfirmed(false); setRestoreResult(null); setBackingUp(true); try {const result = await api<{backups:{name:string}[]}>("/backups"); setBackupList(result.backups); setBackupInspection(null);} catch (error) {onError(error);} finally {setBackingUp(false);}}}>Find backups</button>
+        </div>
+        {backupInspection?.valid && <div className="settings-action">
+          <div><strong>Restore into a separate workspace</strong>
+            <p>Create a private offline copy of {backupInspection.name}. The current board stays active. The copy retains account data, conversations and any saved API keys, and is stored in the board's private application data folder.</p>
+            <label className="checkbox-row"><input type="checkbox" checked={restoreConfirmed} disabled={backingUp} onChange={(e) => setRestoreConfirmed(e.target.checked)} /><span>I want to create this private isolated copy.</span></label>
+            {restoreResult && <div role="status"><p>Isolated restore completed: {restoreResult.documentsRestored} documents copied and verified.</p><p>Workspace: <code>{restoreResult.destination}</code></p><p>The restored service has not been started. Its restore report is saved in the workspace.</p></div>}
+          </div>
+          <button type="button" className="button secondary" disabled={backingUp || !restoreConfirmed} onClick={async () => {setBackingUp(true);setRestoreResult(null);try {setRestoreResult(await api("/backups/restore-isolated",json({name:backupInspection.name,confirm:true})));setRestoreConfirmed(false);}catch(error){onError(error);}finally{setBackingUp(false);}}}>{backingUp ? "Restoring…" : "Create isolated restore"}</button>
+        </div>}
+        <div className="settings-action">
           <div>
             <strong>Export board records</strong>
             <p>
@@ -5210,6 +5232,7 @@ function SettingsPage({
         </div>
       </section>
       <CareerBuddySettings onError={onError} />
+      <EmbeddingSettings onError={onError} />
     </main>
   );
 }

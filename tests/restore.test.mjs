@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { restoreIsolatedBackup } from '../server/backup-restore.mjs';
+test('validate and restore a fictional backup offline with remapped files', (t) => {
+ const base=mkdtempSync(join(tmpdir(),'knox-restore-')); t.after(()=>rmSync(base,{recursive:true,force:true}));
+ const name='board-fictional', source=join(base,name); mkdirSync(source);mkdirSync(join(source,'documents'));
+ const id='00000000-0000-4000-8000-000000000001',bytes=Buffer.from('fictional submitted document');
+ writeFileSync(join(source,'documents',id),bytes);
+ const db=new DatabaseSync(join(source,'board.sqlite'));
+ for(const table of ['records','documents','tasks','buddy_messages','document_text'])db.exec(`CREATE TABLE ${table}(id TEXT PRIMARY KEY,data TEXT NOT NULL)`);
+ db.exec('CREATE TABLE config(key TEXT PRIMARY KEY,data TEXT NOT NULL)');
+ db.prepare('INSERT INTO documents VALUES (?,?)').run(id,JSON.stringify({id,name:'CV.txt',status:'submitted',sha256:createHash('sha256').update(bytes).digest('hex'),storageRoot:'/fictional-old-root',relativePath:'old-file'})); db.close();
+ writeFileSync(join(source,'manifest.json'),JSON.stringify({format:'opportunity-board-backup',version:1,documents:[{id}]}));
+ const original=readFileSync(join(source,'board.sqlite'));
+ const target=join(tmpdir(),'knox-restored-'+base.split('/').pop());t.after(()=>rmSync(target,{recursive:true,force:true})); const result=restoreIsolatedBackup(base,name,target);assert.equal(result.documentsRestored,1);assert.equal(result.started,false);
+ const restored=new DatabaseSync(join(target,'state','board.sqlite'),{readOnly:true});const doc=JSON.parse(restored.prepare('SELECT data FROM documents').get().data);restored.close();
+ assert.equal(doc.status,'submitted');assert.deepEqual(readFileSync(join(doc.storageRoot,doc.relativePath)),bytes);assert.deepEqual(readFileSync(join(source,'board.sqlite')),original);
+ assert.throws(()=>restoreIsolatedBackup(base,name,target));assert.ok(existsSync(join(target,'restore-report.json')));
+ writeFileSync(join(source,'documents',id),'damaged');assert.throws(()=>restoreIsolatedBackup(base,name,join(base,'bad')));assert.equal(existsSync(join(base,'bad')),false);
+});

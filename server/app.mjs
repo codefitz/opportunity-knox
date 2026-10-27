@@ -38,6 +38,8 @@ import { parseJobPage } from "./job-parser.mjs";
 import { validateAvatar } from "./profile.mjs";
 import { createCareerBuddy } from "./career-buddy.mjs";
 import { createObsidianIntegration } from "./obsidian-vault.mjs";
+import { listBackups, inspectBackup } from "./backup-inspect.mjs";
+import { restoreIsolatedBackup } from "./backup-restore.mjs";
 
 export const stages = [
   ["identification", "Identification"],
@@ -618,6 +620,7 @@ export function createApp(options = {}) {
     notes = "",
     tags,
     generation,
+    importRequestId,
   }) => {
     const version =
       1 +
@@ -657,6 +660,7 @@ export function createApp(options = {}) {
       sha256: createHash("sha256").update(content).digest("hex"),
       revision: 1,
       ...(generation ? { generation } : {}),
+      ...(importRequestId ? { importRequestId } : {}),
     };
     try {
       putDocument(document);
@@ -679,6 +683,7 @@ export function createApp(options = {}) {
     settings,
     saveDocument,
     buddyFetch: options.buddyFetch,
+    embeddingFn: options.embeddingFn,
   });
   obsidian = createObsidianIntegration({
     dataDir,
@@ -1265,11 +1270,22 @@ export function createApp(options = {}) {
           const content = Buffer.from(body.contentBase64, "base64");
           if (content.length > 20 * 1024 * 1024)
             fail(413, "Maximum file size is 20 MB.");
+          const importRequestId = body.importRequestId == null ? "" : cleanText(body.importRequestId, "Import request ID", 100);
+          if (importRequestId) {
+            if (!/^[a-zA-Z0-9-]{16,100}$/.test(importRequestId)) fail(400, "Invalid import request ID.");
+            const existing = getDocuments().find((d) => d.importRequestId === importRequestId);
+            if (existing) {
+              const hash = createHash("sha256").update(content).digest("hex");
+              if (existing.sha256 !== hash || existing.name !== name || existing.opportunityId !== opportunityId || existing.kind !== kind || existing.status !== status) fail(409, "Import request ID was already used for a different document.");
+              return json(res, publicDocument(existing), 200);
+            }
+          }
           const document = saveDocument({
             name,
             kind,
             status,
             opportunityId,
+            importRequestId,
             content,
             notes: cleanText(body.notes ?? "", "Notes", 50000),
             tags: body.tags,
@@ -1618,6 +1634,23 @@ export function createApp(options = {}) {
             documents: getDocuments().map(publicDocument),
           });
         }
+        if (path === "/api/backups" && method === "GET") {
+          const root = safePath(filesDir, settings().backupSubdir);
+          try { return json(res, {backups: listBackups(root)}); } catch { fail(400, "Cannot read the configured backup folder."); }
+        }
+        if (path === "/api/backups/restore-isolated" && method === "POST") {
+          const body = await readBody(req);
+          if (body.confirm !== true) fail(400, "Confirm creation of a private isolated restore.");
+          const root = safePath(filesDir, settings().backupSubdir);
+          const destination = join(safePath(dataDir, "restores", {create:true}), "restore-" + randomUUID());
+          try { return json(res, restoreIsolatedBackup(root, body.name, destination), 201); }
+          catch { fail(400, "Restore could not be completed. Validate the backup and check available disk space."); }
+        }
+        if (path === "/api/backups/inspect" && method === "POST") {
+          const body = await readBody(req);
+          const root = safePath(filesDir, settings().backupSubdir);
+          try { return json(res, inspectBackup(root, body.name)); } catch { fail(400, "Backup is incomplete, invalid, unreadable, or unsupported."); }
+        }
         if (path === "/api/backup" && method === "POST") {
           const createdAt = now();
           const name = `board-${createdAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
@@ -1659,7 +1692,7 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
               for (const table of [
                 "records",
@@ -1668,6 +1701,7 @@ export function createApp(options = {}) {
                 "tasks",
                 "buddy_messages",
                 "document_text",
+                "document_vectors",
               ]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";
@@ -1845,6 +1879,7 @@ export function createApp(options = {}) {
           ? server.close((err) => (err ? reject(err) : done()))
           : done(),
       );
+      await buddy.close();
       db.close();
     },
   };
