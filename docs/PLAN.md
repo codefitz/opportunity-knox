@@ -18,6 +18,13 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 - [x] Drag and drop files and directories to the Career Library, with a warning above 500 files and optional manually continued batches of 500.
 - [x] Standalone Career Buddy sidebar workspace: realistic encouragement coaching, multi-turn STAR stories and CV/cover highlights, reviewed recruiter intake with linked tasks, and explicit-target opportunity updates. Conversations/proposals persist; changes need confirmation.
 
+## Career Buddy follow-ups (28 October 2026)
+
+- [x] Optional Codex CLI provider using the host’s ChatGPT sign-in, with a launcher-managed private queue, read-only ephemeral execution, bounded requests and existing review controls. Messages/selected excerpts go to OpenAI under Codex account limits; credentials remain outside Docker. User explicitly authorized this destination. Host CLI catalogue discovery is implemented; richer progress/cancellation remain future work. See `CODEX_BUDDY_DESIGN.md`.
+
+- [x] Standalone chat attachments with extraction preview, original download/reuse/deletion and documented limits. Stored separately from the career library; no silent indexing. Optional attachment-to-library copying remains future work.
+- [ ] Improve local AI timeout handling: configurable bounded request timeouts, clear progress/cancel controls, smaller bounded context and response budgets, and secret-safe duration/error diagnostics distinguishing board deadline, connectivity and provider errors. Current inference transport has a fixed 120-second server deadline and waits for a complete non-streaming response; browser fetch has no application timeout. Verify with the configured local provider, including cold model loading; do not silently retry record-changing work.
+
 ## Confirmed direction
 
 - [x] A custom browser-based Kanban board for tracking job opportunities from identification through hire or rejection.
@@ -217,3 +224,24 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [Compose variable interpolation](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/): the launcher can supply saved host-folder settings without requiring manual Compose edits.
 - [SQLite network filesystem considerations](https://www.sqlite.org/useovernet.html): supports the proposal to keep database access local to the server and let browser clients use the API.
 - [Browser directory picker compatibility](https://developer.mozilla.org/en-US/docs/Web/API/Window/showDirectoryPicker): direct browser folder access has compatibility and permission constraints; it does not replace hosted document storage.
+
+
+## Career Buddy workflow revision — 28 October 2026
+
+- [x] Automatic opportunity tags when a configured chat model is available; retain existing tags, model provenance and visible failure state.
+- [x] Automatically assess new/changed opportunities against the saved criteria profile; serialize/coalesce jobs, report skipped/interrupted/failed states, and leave stages/outcomes unchanged. Use the independent decision model when enabled, otherwise the enabled chat model. Library evidence is selected automatically when opted in; missing criteria/model is reported.
+- [x] Expanded recruiter intake fields include contact names/email/phone, reference, work arrangement, employment type, deadline and action dates. Preserve submitted notes/extracted text in the description within documented limits; uploaded originals remain retrievable in chat storage.
+- [x] Master CV creation from scratch or uploaded/library template structure, with follow-up questions, reviewed editable Word draft saves/downloads and explicit layout limitations. Exact template fonts/tables/page layout remain pending.
+- [x] Template lookup by filename/configured folder among tracked library and selected vault sources; uploaded templates supported.
+- [ ] General directory browsing/multiple roots and authenticated Google Docs search/import. Google OAuth client/consent configuration and app-side authorization are prerequisites; connected Codex tools must not be treated as the board’s Google login.
+- [x] Chat file upload with extraction preview, retained original downloads, reuse/exclusion/deletion and limits (five files per message, 5 MB each, 100 stored). Conversation files live in separate SQLite tables/full backups; no automatic library import/indexing.
+- [x] Replace Buddy’s supporting-document picker with Use career library and automatic relevance selection across available cached vectors/text/metadata, bounded to 20 sources plus an explicit template. Show source coverage; uploads work independently of the checkbox.
+- [x] Infer coach/STAR/recruiter/update/master-CV intent conversationally. Keep explicit target confirmation for opportunity updates and reviewed action saves.
+- [x] Unified history across prior modes, paginated earlier messages, prior proposals in model context, and persisted pending/failed user messages so timeouts do not erase submissions.
+
+
+## Buddy conversation navigation
+
+- [x] Accessible chat-history sidebar with title search, active-conversation indication, dates/message counts and New conversation. Active messages stay in a bounded scroll panel; source/upload controls fold away.
+- [x] Separate persisted conversation IDs and model contexts. Existing ungrouped messages remain available as Earlier chat history without rewriting original rows. Scoped older-message pagination and restart persistence.
+- [x] Preserve unsent text while switching chats in the current page; clear source/template/target selections to avoid accidental carry-over. Responsive sidebar stacks on narrow screens and can be collapsed.

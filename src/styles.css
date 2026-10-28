@@ -3889,3 +3889,25 @@ textarea {
 .vector-index .field { margin-top: 16px; }
 .vector-index .buddy-source-picker { margin: 16px 0; }
 .vector-index li { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+
+/* Saved conversations remain separate from the active Buddy workspace. */
+.buddy-workspace-layout { display:grid; grid-template-columns:240px minmax(0,1fr); gap:20px; align-items:start; }
+.buddy-history-sidebar { position:sticky; top:16px; min-width:0; padding:18px; border:1px solid var(--line); border-radius:11px; background:var(--panel); max-height:80vh; overflow:auto; }
+.buddy-history-sidebar summary { font-weight:650; color:var(--ink-secondary); cursor:pointer; margin-bottom:16px; }
+.buddy-history-sidebar .field { margin:16px 0; }
+.buddy-history-sidebar nav { display:flex; flex-direction:column; gap:8px; }
+.buddy-history-item { display:block; text-align:left; border:1px solid var(--line); border-radius:8px; padding:12px; background:var(--panel); color:var(--ink-secondary); cursor:pointer; width:100%; overflow-wrap:anywhere; }
+.buddy-history-item[aria-pressed="true"] { background:var(--panel-soft); border-color:var(--green); }
+.buddy-history-item strong { display:block; font-size:12px; line-height:1.5; }
+.buddy-history-item small { display:block; margin-top:7px; font-size:10px; color:var(--muted); }
+.buddy-active-conversation { min-width:0; }
+.buddy-active-conversation > h2 { font-size:17px; color:var(--ink-secondary); overflow-wrap:anywhere; margin-bottom:16px; }
+.buddy-conversation-options { padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--line); }
+.buddy-conversation-options > summary { cursor:pointer; color:var(--ink-secondary); font-size:12px; margin-bottom:12px; }
+.buddy-chat-messages { max-height:55vh; min-height:120px; overflow:auto; padding-right:10px; overflow-wrap:anywhere; }
+.buddy-chat-message { padding:16px; margin-bottom:12px; border-radius:9px; color:var(--ink-secondary); }
+.buddy-chat-message[data-role="user"] { background:var(--panel-soft); }
+.buddy-chat-message p { line-height:1.7; margin-top:8px; }
+.buddy-chat-message > strong { font-size:12px; }
+@media(max-width:1000px) { .buddy-workspace-layout { grid-template-columns:200px minmax(0,1fr); gap:12px; } }
+@media(max-width:760px) { .buddy-workspace-layout { grid-template-columns:minmax(0,1fr); } .buddy-history-sidebar { position:static; max-height:240px; } .buddy-chat-messages { max-height:50vh; } }

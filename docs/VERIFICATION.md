@@ -160,3 +160,41 @@ The production build and all 116 Node tests plus 18 launcher tests pass. New fic
 An isolated read-only production container with networking disabled and a simulated provider exercised recruiter intake, verified no opportunity existed before confirmation, saved one opportunity and linked task, repeated confirmation without duplicates, restarted and verified applied conversation history and export. No real career documents or live AI calls were used. Live-provider coaching/STAR quality and browser visual verification remain pending.
 
 The tested workspace image was deployed after an online SQLite backup. Docker reported healthy. Checksums for existing records, documents, tasks, opportunity chats, text/vector caches, decision assessments and configuration matched the pre-update snapshot; the vault remained read-only. The standalone history table was empty: no user-data conversation, document generation or opportunity update was run during deployment.
+
+
+## Authorized Codex provider
+
+The production build and all 118 Node tests plus 20 launcher/helper tests pass. Fictional tests cover provider key clearing, fixed internal bridge location, helper readiness/staleness, invalid model IDs, private queue cleanup, fake CLI lifecycle, and read-only/ephemeral/tool-disabled command construction. Existing Career Buddy/decision tests still pass.
+
+With explicit user authorization, the installed codex-cli 0.164.0 completed a fictional structured-output request using ChatGPT sign-in. JSONL events contained only an agent message, with no command/tool items. A second fictional request through the real host queue returned the actual Career Buddy JSON schema. No personal records or career files were supplied. These checks verify connectivity/schema transport, not coaching quality. Browser visual checks remain pending.
+
+The tested Codex image was deployed after an online SQLite backup. The host launcher watcher was restarted with the Codex worker, and Career Buddy alone was switched to enabled Codex/default with no API key. The deployed Docker board completed a fictional real Codex inference through the private host queue and returned valid Career Buddy JSON. All tracked records, documents, tasks, chats, text/vector caches, assessments and standalone history matched backup checksums; careerBuddy was the only changed configuration key. The helper was ready, request/response test files were cleaned, and the vault remained read-only. No personal career content was used for these checks.
+
+
+## Codex catalogue model selection
+
+The full check passes: 119 Node tests and 21 launcher/helper tests. Added tests cover metadata request routing, bounded expiry, transient-file cleanup, catalogue visibility filtering, deduplication, invalid IDs and exclusion of model instruction fields. The final UI-copy change also passed the production build. A real host-worker metadata request returned eight visible models plus the default option; no inference prompt or career data was sent. Browser visual verification remains pending.
+
+The catalogue-capable helper and tested board image were deployed after an online SQLite backup while Codex/indexing were idle. Docker reported healthy. A metadata-only query from the deployed container returned eight visible CLI models plus default. Existing records/caches/assessments/histories/configuration checksum comparison: unchanged. No saved model was intentionally changed.
+
+
+## Buddy conversational workflow revision
+
+The production build and 121 Node tests plus 21 launcher/helper tests pass. New fictional integration tests verify inferred recruiter/CV intent, attachment extraction/original downloads/removal and backup inclusion, contact/reference/work-mode/tag retention, original intake text, automatic library/template evidence, concurrent idempotent master-CV saves, unified cursor-paginated history, persisted failed submissions, and automatic tag/profile assessment using the chat-model fallback without changing outcomes.
+
+A real Codex call in an isolated container read only a fictional recruiter attachment, inferred recruiter intent, retained contact/reference/tags, and saved a reviewed opportunity with source notes and visible unified history. No personal career material was supplied. A disposable UI with a simulated provider was inspected in the browser: prior coaching and STAR turns appeared together, the mode selector/supporting-source picker were absent, and library checkbox/upload/template controls were visible. Screenshot and accessibility inspection confirmed the layout.
+
+Google Docs authentication/search, arbitrary host-directory browsing and exact template formatting remain unimplemented. Existing historical records will not be auto-processed merely by deployment.
+
+A second isolated real-Codex run enabled automation: it generated role tags and assessed a saved London-location criterion as met, using the chat-model fallback. No user records or career-library files were mounted into the test container; only the authorized helper queue was shared. The final extraction-warning context change passed the complete test suite.
+
+The tested workflow image was deployed after an online SQLite backup while Codex/indexing were idle. Docker reported healthy. Existing records, documents, tasks, chats, text/vector caches, fit assessments, standalone history and configuration matched backup checksums; the vault remained read-only. New attachment/original/automation tables were empty, confirming that deployment did not bulk-process existing user opportunities or upload personal files. The disposable fictional UI container and tab were removed after verification.
+
+
+## Buddy sidebar conversations
+
+The production build and all 122 Node tests plus 21 launcher/helper tests pass. New fictional tests verify legacy-history grouping, independent conversation IDs and model context, identical request IDs scoped to different chats, cursor pagination within one conversation, empty new conversations, invalid IDs and restart persistence. Existing record/history compatibility tests continue to pass.
+
+A disposable browser installation with fictional records and a simulated provider was inspected: the sidebar showed earlier history, New conversation opened an empty chat, sending a message created a separate titled history entry, and selecting earlier history restored the original coaching/STAR turns without the newer conversation. Screenshot/accessibility inspection confirmed the two-column layout, active selection and bounded chat panel. Responsive CSS is implemented; a phone-size browser check was not performed. No personal data or real AI calls were needed for this change.
+
+The verified sidebar image was deployed after an online SQLite backup with AI/indexing jobs idle. Docker reported healthy. All tracked records, documents, tasks, chats, caches, assessments, attachment originals/metadata, automation state and settings matched pre-update checksums. Legacy messages were not rewritten. The disposable browser preview was removed.

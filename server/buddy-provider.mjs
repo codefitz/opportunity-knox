@@ -1,9 +1,11 @@
+import {runLocalCodex,listLocalCodexModels} from "./codex-local.mjs";
 import { isIP } from "node:net";
 import { lookup as systemLookup } from "node:dns";
 import { Agent } from "undici";
 import ipaddr from "ipaddr.js";
 
 export const PROVIDERS = {
+  codex:{name:"Codex · local CLI",baseUrl:"http://host.docker.internal/codex-local"},
   openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1" },
   anthropic: { name: "Claude", baseUrl: "https://api.anthropic.com/v1" },
   gemini: {
@@ -170,11 +172,13 @@ export function updateBuddy(previous, body) {
       throw buddyError(400, "Choose a supported output mode.");
     next.outputMode = body.outputMode;
   }
+  if(next.provider==="codex"){next.apiKey="";next.baseUrl=PROVIDERS.codex.baseUrl;}
   if (next.enabled) assertConfigured(next);
   next.revision++;
   return next;
 }
 export function assertConfigured(config) {
+  if(config.provider==="codex"){if(!config.model)throw buddyError(400,"Choose a Codex model.");return;}
   if (!config.model || !config.baseUrl)
     throw buddyError(
       400,
@@ -506,6 +510,7 @@ export async function callProvider(
   fetcher = fetch,
   resolve = systemLookup,
 ) {
+  if(config.provider==="codex")return runLocalCodex(config,system,messages,BUDDY_SCHEMA);
   const result = await providerJSON(
     config,
     providerRequest(config, system, messages),
@@ -527,6 +532,7 @@ export async function listProviderModels(
   fetcher = fetch,
   resolve = systemLookup,
 ) {
+  if(config.provider==="codex")return listLocalCodexModels();
   if (!config.baseUrl) throw buddyError(400, "Enter the API base URL first.");
   validateBaseUrl(config.baseUrl);
   if (

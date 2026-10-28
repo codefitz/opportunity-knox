@@ -145,14 +145,23 @@ export function createDecisionReview(ctx) {
   const stale = (a, opportunity) =>
     a.opportunityRevision !== opportunity.revision ||
     a.criteria.revision !== criteria().revision ||
-    a.modelRevision !== config().revision ||
+    a.modelRevision !==
+      (a.modelSource === "careerBuddy"
+        ? (getConfig("careerBuddy") || defaultBuddy()).revision
+        : config().revision) ||
     JSON.stringify(a.sourceSignatures) !==
       JSON.stringify(sourceSignatures(Object.keys(a.sourceSignatures || {})));
 
   return {
     exportAssessments: all,
     publicSettings: () => publicBuddy(config()),
-    async handle(path, method, req, res, { json, readBody }) {
+    async handle(
+      path,
+      method,
+      req,
+      res,
+      { json, readBody, automatic = false },
+    ) {
       if (path === "/api/buddy/decision-settings") {
         if (method === "GET") json(res, publicBuddy(config()));
         else if (method === "PATCH") {
@@ -231,7 +240,10 @@ export function createDecisionReview(ctx) {
       }
       if (method !== "POST") throw buddyError(405, "Method not supported.");
       const body = await readBody(req),
-        c = config(),
+        c =
+          automatic && !config().enabled
+            ? getConfig("careerBuddy") || defaultBuddy()
+            : config(),
         profile = criteria();
       if (!c.enabled)
         throw buddyError(400, "Enable the decision model in Settings first.");
@@ -264,6 +276,13 @@ export function createDecisionReview(ctx) {
         throw buddyError(429, "A decision assessment is already running.");
       active.add(opportunity.id);
       try {
+        if (body.useLibrary === true)
+          body.documentIds = await vectors.selectSources(
+            profile.items.map((i) => i.description).join(" ") +
+              " " +
+              opportunity.role,
+            getDocuments().filter((d) => !d.opportunityId && !d.generation),
+          );
         const docs = await indexDocuments([...new Set(body.documentIds)]),
           query = profile.items.map((i) => i.description).join("\n");
         const semantic = await vectors.search(docs, query.slice(0, 12000)),
@@ -324,6 +343,8 @@ export function createDecisionReview(ctx) {
           criteria: profile,
           results: report.criteria,
           modelRevision: c.revision,
+          modelSource:
+            automatic && !config().enabled ? "careerBuddy" : "decisionModel",
           provider: c.provider,
           model: c.model,
           createdAt: new Date().toISOString(),

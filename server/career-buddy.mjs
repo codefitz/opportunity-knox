@@ -1,3 +1,4 @@
+import {createOpportunityAutomation} from "./opportunity-automation.mjs";
 import {createStandaloneBuddy} from "./standalone-buddy.mjs";
 import { createDecisionReview } from "./decision-review.mjs";
 import { createVectorIndex } from "./vector-index.mjs";
@@ -405,18 +406,22 @@ export function createCareerBuddy(ctx) {
     return [...new Set(value)];
   };
   const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
-  const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges});
+  const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
+  const automation=createOpportunityAutomation(ctx,decisions,parseBuddyOutput);
   return {
+    automate:automation.schedule,
     exportAssessments: decisions.exportAssessments,
     exportWorkspace:workspace.exportMessages,
+    exportAttachments:workspace.exportAttachments,
     publicDecisionSettings: decisions.publicSettings,
-    close: () => vectors.close(),
+    close: async () => {await automation.close();await vectors.close();},
     exportMessages: () => getRows("buddy_messages"),
     publicSettings: () => publicBuddy(config()),
     indexDocuments,
     getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
+      if(await automation.handle(path,method,req,res,{json,readBody}))return true;
       if(await workspace.handle(path,method,req,res,{json,readBody}))return true;
       if(await decisions.handle(path,method,req,res,{json,readBody}))return true;
       if (path === "/api/buddy/vector-index") {

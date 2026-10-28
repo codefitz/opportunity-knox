@@ -307,6 +307,11 @@ def start_watcher(state_dir: Path) -> None:
 
 
 def watch_loop(state_dir: Path, *, once: bool = False) -> int:
+    if not once:
+        from codex_buddy import CodexWorker
+    worker = CodexWorker(state_dir) if not once else None
+    previous_term = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     pid_path = state_dir / ".watcher.pid"
     state_dir.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
@@ -332,6 +337,8 @@ def watch_loop(state_dir: Path, *, once: bool = False) -> int:
                 return 0
             time.sleep(1.0)
     finally:
+        if worker: worker.close()
+        signal.signal(signal.SIGTERM, previous_term)
         heartbeat_path.unlink(missing_ok=True)
         try:
             if pid_path.exists() and pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):

@@ -22,6 +22,7 @@ async function fixture(t, extras = {}) {
     dataDir: join(root, "state"),
     filesDir: join(root, "files"),
     setupToken: "test-setup-token",
+    automationEnabled:false,
     ...extras,
   };
   let app;
@@ -2786,4 +2787,55 @@ test('standalone Buddy coaches, builds reviewed STAR evidence, imports recruiter
  assert.equal((await f.request(route+'/'+staleId+'/apply',{method:'POST',body:{confirm:true}})).status,409);
  await f.restart();await f.login();assert.ok((await f.request(route)).data.messages.some(m=>m.id===starMessage.id&&m.appliedAt));assert.ok((await f.request('/api/export')).data.buddyWorkspace.length);
  const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.ok(db.prepare('SELECT COUNT(*) n FROM standalone_messages').get().n);db.close();
+});
+
+test('automatic Buddy intent, uploaded sources, contact retention, master CV and history pagination',async t=>{
+ let output,context;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply(output));}});await f.setup();await enableBuddy(f);
+ const upload=await f.request('/api/buddy/attachments',{method:'POST',body:{name:'Fictional recruiter.txt',contentBase64:Buffer.from('Fictional recruiter Pat Example, pat@example.test, role Analyst at Fictional Co.').toString('base64')}});assert.equal(upload.status,200);assert.match(upload.data.preview,/Pat Example/);const id=upload.data.id;
+ assert.equal((await f.request('/api/documents')).data.documents.length,0);
+ const original=await f.request('/api/buddy/attachments/'+id+'/content',{binary:true});assert.match(original.data.toString(),/Pat Example/);
+ const send=(requestId,message,extra={})=>f.request('/api/buddy/workspace',{method:'POST',body:{mode:'auto',requestId,message,documentIds:[],attachmentIds:[id],...extra}});
+ output={reply:JSON.stringify({intent:'recruiter',message:'Review recruiter details.',opportunity:{company:'Fictional Co',role:'Analyst',contact:'Pat Example · pat@example.test',workMode:'Hybrid',jobReference:'FICTION-1',description:'Fictional intake',tags:['Data']},tasks:[],star:null})};
+ const result=await send('auto-intake','Please read my recruiter note.');assert.equal(result.status,200);assert.ok(context.excerpts.some(c=>c.sourceId===id));const proposal=result.data.messages.at(-1);assert.equal(proposal.mode,'recruiter');
+ const applied=await f.request('/api/buddy/workspace/'+proposal.id+'/apply',{method:'POST',body:{confirm:true}});assert.equal(applied.status,200);const op=(await f.request('/api/opportunities/'+applied.data.result.opportunityId)).data;assert.match(op.contact,/Pat Example/);assert.equal(op.workMode,'Hybrid');assert.equal(op.jobReference,'FICTION-1');assert.deepEqual(op.tags,['Data']);assert.match(op.description,/Original recruiter intake/);
+ output={reply:JSON.stringify({intent:'cv',message:'Review this factual fictional draft.',opportunity:null,tasks:[],star:null}),draft:{kind:'cv',title:'Fictional Master CV',content:'# Fictional Candidate\n\nFictional reporting experience.'}};
+ const cv=await send('master-cv','Make a master CV from the supplied fictional material.');assert.equal(cv.status,200);const cvId=cv.data.messages.at(-1).id;
+ await Promise.all([f.request('/api/buddy/workspace/'+cvId+'/apply',{method:'POST',body:{confirm:true}}),f.request('/api/buddy/workspace/'+cvId+'/apply',{method:'POST',body:{confirm:true}})]);assert.equal((await f.request('/api/documents')).data.documents.length,1);
+ const evidence=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional governance.txt',kind:'reference',contentBase64:Buffer.from('Fictional evidence: led governance workshops.').toString('base64')}})).data;
+ output={reply:JSON.stringify({intent:'coach',message:'Grounded fictional coaching.',opportunity:null,tasks:[],star:null})};
+ const automatic=await send('automatic-evidence','What governance strengths do I have?',{useLibrary:true,attachmentIds:[],templateId:evidence.id});assert.equal(automatic.status,200);assert.ok(context.excerpts.some(c=>c.sourceId===evidence.id));assert.equal(context.templateId,evidence.id);
+ output={reply:'not-json'};assert.equal((await send('failed-chat','Fictional failed message')).status,502);
+ const history=await f.request('/api/buddy/workspace');assert.ok(history.data.messages.some(m=>m.role==='user'&&m.status==='failed'));assert.ok(history.data.messages.some(m=>m.mode==='cv'));assert.ok(history.data.messages.some(m=>m.mode==='recruiter'));
+ const cursor=history.data.messages[2].cursor;assert.ok((await f.request('/api/buddy/workspace?before='+cursor)).data.messages.every(m=>m.cursor<cursor));
+ await f.restart();await f.login();assert.ok((await f.request('/api/buddy/workspace')).data.messages.some(m=>m.status==='failed'));
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM standalone_attachment_originals').get().n,1);db.close();
+ await f.request('/api/buddy/attachments/'+id,{method:'DELETE'});assert.equal((await f.request('/api/buddy/attachments/'+id+'/content')).status,404);
+});
+
+test('new opportunities get automatic tags and saved-criteria assessments without changing outcomes',async t=>{
+ const f=await fixture(t,{automationEnabled:true,buddyFetch:async(_,opts)=>{
+ const b=JSON.parse(opts.body),system=b.messages[0].content,context=JSON.parse(b.messages.at(-1).content);
+ return buddyResponse(buddyReply({reply:JSON.stringify(system.includes('at most ten short factual')?{tags:['Engineering']}:{recommendation:'insufficient-information',summary:'Salary needs clarification.',criteria:[{id:'pay',status:'unknown',reason:'No salary supplied.',sourceIds:[],questions:['What is the base salary?']}]})}));
+ }});await f.setup();await enableBuddy(f);await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{revision:1,items:[{id:'pay',description:'GBP 80,000 base minimum',priority:'required'}]}});
+ const op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,tags:['User tag']}})).data;
+ let state;for(let i=0;i<100;i++){state=(await f.request('/api/buddy/automation/'+op.id)).data.automation;if(state&&state.state!=='queued'&&state.state!=='running')break;await new Promise(r=>setTimeout(r,5));}
+ assert.equal(state.tags,'completed');assert.equal(state.fit,'completed');const current=(await f.request('/api/opportunities/'+op.id)).data;assert.ok(current.tags.includes('User tag'));assert.ok(current.tags.includes('Engineering'));assert.equal(current.outcome,'');
+ const review=(await f.request('/api/buddy/decisions/'+op.id)).data.assessments[0];assert.equal(review.stale,false);assert.equal(review.modelSource,'careerBuddy');assert.equal(review.results[0].status,'unknown');
+});
+
+test('saved Buddy conversations list legacy history and isolate model context and pagination',async t=>{
+ let context;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:JSON.stringify({intent:'coach',message:'Fictional reply',opportunity:null,tasks:[],star:null})}));}});await f.setup();await enableBuddy(f);
+ async function send(conversationId,message,requestId){return f.request('/api/buddy/workspace',{method:'POST',body:{mode:'auto',conversationId,message,requestId,documentIds:[]}});}
+ await send(undefined,'Fictional older history','legacy-turn');
+ await send('conversation-a','Fictional first project','same-id');
+ assert.equal(context.history.length,0);
+ await send('conversation-b','Fictional unrelated recruiter call','same-id');assert.equal(context.history.length,0);
+ await send('conversation-a','Continue the first project','another-turn');assert.ok(context.history.some(m=>m.content==='Fictional first project'));assert.equal(JSON.stringify(context.history).includes('unrelated recruiter'),false);assert.equal(JSON.stringify(context.history).includes('older history'),false);
+ const a=await f.request('/api/buddy/workspace?conversationId=conversation-a');assert.equal(a.data.messages.length,4);assert.equal(a.data.conversations.length,3);assert.ok(a.data.conversations.some(c=>c.id==='legacy'&&c.title==='Earlier chat history'));assert.ok(a.data.messages.every(m=>m.conversationId==='conversation-a'));
+ const cursor=a.data.messages[2].cursor;const older=await f.request('/api/buddy/workspace?conversationId=conversation-a&before='+cursor);assert.equal(older.data.messages.length,2);
+ const empty=await f.request('/api/buddy/workspace?conversationId=empty-new-chat');assert.equal(empty.data.messages.length,0);assert.equal(empty.data.conversations.length,3);
+ assert.equal((await f.request('/api/buddy/workspace?conversationId=bad%2Fpath')).status,400);
+ await f.restart();await f.login();assert.equal((await f.request('/api/buddy/workspace?conversationId=conversation-b')).data.messages.length,2);
 });

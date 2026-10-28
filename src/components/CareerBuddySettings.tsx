@@ -389,62 +389,66 @@ export default function CareerBuddySettings({
                 )}
               </div>
             </div>
-            <label className="field wide">
-              <span>API base URL</span>
-              <input
-                value={form.baseUrl}
-                readOnly={!["custom", "ollama"].includes(form.provider)}
-                onChange={(event) =>
-                  update({
-                    baseUrl: event.target.value,
-                    hasKey: Boolean(
-                      saved?.hasKey &&
-                      saved.provider === form.provider &&
-                      saved.baseUrl === event.target.value,
-                    ),
-                  })
-                }
-                placeholder="https://your-api.example/v1"
-              />
-              <small>
-                {form.provider === "ollama"
-                  ? "Use a private network URL such as http://your-server:11434, or http://host.docker.internal:11434 for Ollama on this host. The model must already be installed."
-                  : form.provider === "custom"
-                    ? "An OpenAI-compatible Chat Completions API. Include the base path (for example /v1), without /chat/completions."
-                    : "Requests go to the provider’s official API endpoint."}
-              </small>
-            </label>
-            <label className="field wide">
-              <span>
-                API key{" "}
-                {["ollama", "custom"].includes(form.provider)
-                  ? "(optional)"
-                  : ""}
-              </span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={key}
-                maxLength={4000}
-                placeholder={
-                  form.hasKey && !clearKey
-                    ? "A key is stored. Leave blank to keep it."
-                    : "Paste your API key"
-                }
-                onBlur={() => setKeyReady(true)}
-                onChange={(event) => {
-                  setKey(event.target.value);
-                  setKeyReady(false);
-                  setDirty(true);
-                  setNotice("");
-                }}
-              />
-              <small>
-                Kept on your private host and excluded from record exports.
-                Private backups include the key. Changing provider clears its
-                stored key.
-              </small>
-            </label>
+            {form.provider !== "codex" && (
+              <>
+                <label className="field wide">
+                  <span>API base URL</span>
+                  <input
+                    value={form.baseUrl}
+                    readOnly={!["custom", "ollama"].includes(form.provider)}
+                    onChange={(event) =>
+                      update({
+                        baseUrl: event.target.value,
+                        hasKey: Boolean(
+                          saved?.hasKey &&
+                          saved.provider === form.provider &&
+                          saved.baseUrl === event.target.value,
+                        ),
+                      })
+                    }
+                    placeholder="https://your-api.example/v1"
+                  />
+                  <small>
+                    {form.provider === "ollama"
+                      ? "Use a private network URL such as http://your-server:11434, or http://host.docker.internal:11434 for Ollama on this host. The model must already be installed."
+                      : form.provider === "custom"
+                        ? "An OpenAI-compatible Chat Completions API. Include the base path (for example /v1), without /chat/completions."
+                        : "Requests go to the provider’s official API endpoint."}
+                  </small>
+                </label>
+                <label className="field wide">
+                  <span>
+                    API key{" "}
+                    {["ollama", "custom"].includes(form.provider)
+                      ? "(optional)"
+                      : ""}
+                  </span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={key}
+                    maxLength={4000}
+                    placeholder={
+                      form.hasKey && !clearKey
+                        ? "A key is stored. Leave blank to keep it."
+                        : "Paste your API key"
+                    }
+                    onBlur={() => setKeyReady(true)}
+                    onChange={(event) => {
+                      setKey(event.target.value);
+                      setKeyReady(false);
+                      setDirty(true);
+                      setNotice("");
+                    }}
+                  />
+                  <small>
+                    Kept on your private host and excluded from record exports.
+                    Private backups include the key. Changing provider clears
+                    its stored key.
+                  </small>
+                </label>
+              </>
+            )}
           </div>
           {form.hasKey && (
             <label className="buddy-toggle">
@@ -479,6 +483,14 @@ export default function CareerBuddySettings({
               </small>
             </label>
           </details>
+          {form.provider === "codex" && (
+            <p className="buddy-privacy">
+              Codex runs through a helper on the board host, using its saved
+              sign-in. Messages and selected excerpts are sent to OpenAI and use
+              your Codex account limits. Credentials stay outside Docker. The
+              launcher manages the helper. Choose a model from the host CLI catalogue, use Codex’s default, or enter an ID manually. Refresh models updates the list; account/model access is checked when used.
+            </p>
+          )}
           <p className="buddy-privacy">
             {decision
               ? "Assessments send your criteria, the opportunity and selected evidence to this API. Each result is saved for review; it never changes the opportunity. Unknown facts stay unknown. "

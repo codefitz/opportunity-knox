@@ -553,6 +553,7 @@ export function createApp(options = {}) {
     record.revision++;
     record.updatedAt = now();
     putRecord(record);
+    queueMicrotask(()=>buddy.automate(record.id));
     return fullRecord(record);
   };
   const addEvent = (record, body, stage = record.stage) => {
@@ -609,6 +610,7 @@ export function createApp(options = {}) {
     record.stageEnteredAt = event.effectiveAt;
     record.currentStageEventId = event.id;
     putRecord(record);
+    queueMicrotask(()=>buddy.automate(record.id,{useLibrary:body.autoUseLibrary===true}));
     return fullRecord(record);
   }
   const saveDocument = ({
@@ -684,6 +686,7 @@ export function createApp(options = {}) {
     saveDocument,
     buddyFetch: options.buddyFetch,
     embeddingFn: options.embeddingFn,
+    automationEnabled:options.automationEnabled,
     createOpportunity,putTask,
   });
   obsidian = createObsidianIntegration({
@@ -1633,6 +1636,7 @@ export function createApp(options = {}) {
             conversations: buddy.exportMessages(),
             decisionAssessments: buddy.exportAssessments(),
             buddyWorkspace:buddy.exportWorkspace(),
+            buddyAttachments:buddy.exportAttachments(),
             decisionSettings: buddy.publicDecisionSettings(),
             fitCriteria: getConfig("fitCriteria"),
             opportunities: listRecords(),
@@ -1697,7 +1701,7 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
               for (const table of [
                 "records",
@@ -1709,6 +1713,9 @@ export function createApp(options = {}) {
                 "document_vectors",
                 "decision_assessments",
                 "standalone_messages",
+                "standalone_attachments",
+                "standalone_attachment_originals",
+                "opportunity_automation",
               ]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";

@@ -1,16 +1,21 @@
-import { useEffect, useState } from "react";
-import { api, json } from "../api";
+import { useEffect, useState, useRef } from "react";
+import { api, json, readFile } from "../api";
 type Message = {
   id: string;
   role: string;
   mode: string;
   content: string;
   createdAt: string;
+  cursor?: number;
+  status?: string;
+  attachments?: { id: string; name: string }[];
   appliedAt?: string;
+  result?: { id?: string };
   sourceIds?: string[];
   sources?: { id: string; name: string; index: number }[];
   proposal?: {
     opportunity: object | null;
+    cv?: { title: string; content: string } | null;
     tasks: object[];
     star: object | null;
     changes: object[];
@@ -20,27 +25,22 @@ type Message = {
 };
 type State = {
   messages: Message[];
+  conversations: {
+    id: string;
+    title: string;
+    updatedAt: string;
+    count: number;
+  }[];
+  attachments: {
+    id: string;
+    name: string;
+    status: string;
+    preview: string;
+    warnings: string[];
+  }[];
   settings: { enabled: boolean };
-  documents: { id: string; name: string }[];
+  documents: { id: string; name: string; folder?: string }[];
   opportunities: { id: string; company: string; role: string }[];
-};
-const modes = {
-  coach: {
-    name: "Encouragement coach",
-    hint: "Talk through a setback or remind yourself of your strengths. Buddy will stay realistic, use evidence and challenge unsupported assumptions.",
-  },
-  star: {
-    name: "Build a STAR highlight",
-    hint: "Tell Buddy what you did. It will ask about the situation, your task, your actions and the result before drafting a reusable story.",
-  },
-  recruiter: {
-    name: "Recruiter intake",
-    hint: "Paste an email, call transcript or notes. Review a proposed opportunity and dated action items before saving.",
-  },
-  update: {
-    name: "Opportunity update",
-    hint: "Choose the exact opportunity and describe what happened. If you are unsure which role it relates to, leave it unselected and ask Buddy to help clarify.",
-  },
 };
 export default function BuddyWorkspace({
   onError,
@@ -49,45 +49,83 @@ export default function BuddyWorkspace({
   onError: (e: unknown) => void;
   onChanged: () => void;
 }) {
+  const [conversationId, setConversationId] = useState(
+    () => localStorage.getItem("knox-buddy-conversation") || "legacy",
+  );
+  const [historySearch, setHistorySearch] = useState("");
+  const messagesEnd = useRef<HTMLDivElement>(null);
+  const drafts = useRef<Record<string, string>>({});
   const [state, setState] = useState<State | null>(null),
-    [mode, setMode] = useState<keyof typeof modes>("coach"),
+    [useLibrary, setUseLibrary] = useState(false),
+    [attached, setAttached] = useState<string[]>([]),
+    [templateId, setTemplateId] = useState(""),
+    [templateQuery, setTemplateQuery] = useState(""),
+    [olderAvailable, setOlderAvailable] = useState(true),
     [input, setInput] = useState(""),
-    [selected, setSelected] = useState<string[]>([]),
     [target, setTarget] = useState(""),
     [busy, setBusy] = useState(false),
     [pending, setPending] = useState<{
       message: string;
       requestId: string;
     } | null>(null);
-  async function load() {
-    setState(await api<State>("/buddy/workspace"));
+  async function load(id = conversationId) {
+    const result = await api<State>(
+      "/buddy/workspace?conversationId=" + encodeURIComponent(id),
+    );
+    setState(result);
+    setOlderAvailable(result.messages.length >= 100);
   }
   useEffect(() => {
     void load().catch(onError);
-  }, []);
+  }, [conversationId]);
+  useEffect(() => {
+    messagesEnd.current?.scrollIntoView({ block: "nearest" });
+  }, [conversationId, state?.messages.at(-1)?.id]);
+  function chooseConversation(id: string) {
+    if (busy || id === conversationId) return;
+    drafts.current[conversationId] = input;
+    localStorage.setItem("knox-buddy-conversation", id);
+    setState(null);
+    setInput(drafts.current[id] || "");
+    setTemplateId("");
+    setUseLibrary(false);
+    setPending(null);
+    setAttached([]);
+    setTarget("");
+    setConversationId(id);
+  }
   async function send() {
-    if (!input.trim()) return;
+    if (!input.trim() && !attached.length) return;
     setBusy(true);
     const draft =
-      pending?.message === input
+      pending?.message === (input || "Please review the attached material.")
         ? pending
-        : { message: input, requestId: crypto.randomUUID() };
+        : {
+            message: input || "Please review the attached material.",
+            requestId: crypto.randomUUID(),
+          };
     setPending(draft);
     try {
       await api(
         "/buddy/workspace",
         json({
           ...draft,
-          mode,
-          documentIds: selected,
-          targetId: mode === "update" ? target : "",
+          mode: "auto",
+          conversationId,
+          documentIds: [],
+          useLibrary,
+          attachmentIds: attached,
+          templateId,
+          targetId: target,
         }),
       );
       setPending(null);
       setInput("");
+
       await load();
     } catch (e) {
       onError(e);
+      await load().catch(onError);
     } finally {
       setBusy(false);
     }
@@ -104,92 +142,340 @@ export default function BuddyWorkspace({
           </p>
         </div>
       </div>
-      <section className="settings-section">
-        <div className="form-grid">
-          <label className="field">
-            <span>What would you like to work on?</span>
-            <select
+      <div className="buddy-workspace-layout">
+        <aside
+          className="buddy-history-sidebar"
+          aria-label="Chat history sidebar"
+        >
+          <details open>
+            <summary>Chat history</summary>
+            <button
+              type="button"
+              className="button primary small"
               disabled={busy}
-              value={mode}
-              onChange={(e) => {
-                setMode(e.target.value as keyof typeof modes);
-                setPending(null);
-              }}
+              onClick={() => chooseConversation(crypto.randomUUID())}
             >
-              {Object.entries(modes).map(([id, m]) => (
-                <option key={id} value={id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {mode === "update" && (
+              New conversation
+            </button>
             <label className="field">
-              <span>Related opportunity</span>
-              <select
-                disabled={busy}
-                value={target}
-                onChange={(e) => {
-                  setTarget(e.target.value);
-                  setPending(null);
-                }}
-              >
-                <option value="">Not sure — ask me to clarify</option>
-                {state?.opportunities.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.company} · {o.role}
-                  </option>
-                ))}
-              </select>
+              <span>Find a conversation</span>
+              <input
+                type="search"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Search history titles"
+              />
             </label>
-          )}
-        </div>
-        <p>{modes[mode].hint}</p>
-        <details>
-          <summary>
-            Supporting career evidence ({selected.length}/20 selected)
-          </summary>
-          <p className="buddy-muted">
-            Only selected library excerpts are sent. Recruiter/update modes also
-            include up to 200 recent opportunity names to help identify existing
-            roles. Paste email or transcript text below; attachments are not
-            read automatically.
-          </p>
-          <div className="buddy-source-picker">
-            {state?.documents.map((d) => (
-              <label key={d.id}>
-                <input
-                  type="checkbox"
-                  disabled={
-                    busy || (selected.length >= 20 && !selected.includes(d.id))
-                  }
-                  checked={selected.includes(d.id)}
+            <nav aria-label="Saved Career Buddy conversations">
+              {state?.conversations
+                ?.filter((c) =>
+                  c.title.toLowerCase().includes(historySearch.toLowerCase()),
+                )
+                .map((c) => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    disabled={busy}
+                    aria-pressed={c.id === conversationId}
+                    className="buddy-history-item"
+                    onClick={() => chooseConversation(c.id)}
+                  >
+                    <strong>{c.title}</strong>
+                    <small>
+                      {new Date(c.updatedAt).toLocaleDateString()} · {c.count}{" "}
+                      messages
+                    </small>
+                  </button>
+                ))}
+            </nav>
+            {state?.conversations?.length === 0 && (
+              <p>No saved conversations yet.</p>
+            )}
+          </details>
+        </aside>
+        <section
+          className="settings-section buddy-active-conversation"
+          aria-label="Active Career Buddy conversation"
+        >
+          <h2>
+            {state?.conversations?.find((c) => c.id === conversationId)
+              ?.title || "New conversation"}
+          </h2>
+          <details className="buddy-conversation-options">
+            <summary>Sources, attachments and related opportunity</summary>
+
+            <div className="form-grid">
+              <label className="field">
+                <span>Related opportunity</span>
+                <select
+                  disabled={busy}
+                  value={target}
                   onChange={(e) => {
-                    setSelected((s) =>
-                      e.target.checked
-                        ? [...s, d.id]
-                        : s.filter((id) => id !== d.id),
-                    );
+                    setTarget(e.target.value);
                     setPending(null);
                   }}
-                />
-                <span>{d.name}</span>
+                >
+                  <option value="">Not sure — ask me to clarify</option>
+                  {state?.opportunities.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.company} · {o.role}
+                    </option>
+                  ))}
+                </select>
               </label>
-            ))}
-          </div>
-        </details>
-        {!state?.settings.enabled && (
-          <p className="form-error">
-            Enable and configure Career Buddy in Settings to chat.
-          </p>
-        )}
-        <div aria-live="polite">
-          {state?.messages
-            .filter((m) => m.mode === mode)
-            .map((m) => (
-              <article className="settings-section" key={m.id}>
+            </div>
+            <p>
+              Talk naturally about a setback, achievement, recruiter message,
+              opportunity update or master CV. Buddy will identify the task and
+              ask questions where needed.
+            </p>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={useLibrary}
+                disabled={busy}
+                onChange={(e) => {
+                  setUseLibrary(e.target.checked);
+                  setPending(null);
+                }}
+              />
+              Use career library — automatically find relevant evidence
+            </label>
+            <p className="buddy-muted">
+              When checked, Buddy chooses relevant library/vault sources and
+              sends bounded excerpts to your configured provider. Attachments
+              and an explicitly chosen template are included independently.
+              Originals stay unchanged.
+            </p>
+            <details>
+              <summary>CV template and document sources</summary>
+              <label className="field">
+                <span>Template from configured career library or vault</span>
+                <input
+                  aria-label="Find a template by name or configured folder"
+                  placeholder="Find a template by name or configured folder"
+                  value={templateQuery}
+                  onChange={(e) => setTemplateQuery(e.target.value)}
+                />
+                <select
+                  aria-label="CV template"
+                  value={templateId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setTemplateId(e.target.value);
+                    setPending(null);
+                  }}
+                >
+                  <option value="">
+                    No template — start from scratch or use an upload
+                  </option>
+                  {state?.documents
+                    .filter(
+                      (d) =>
+                        (d.name + " " + d.folder)
+                          .toLowerCase()
+                          .includes(templateQuery.toLowerCase()) ||
+                        d.id === templateId,
+                    )
+                    .map((d) => (
+                      <option value={d.id} key={d.id}>
+                        {d.folder ? d.folder + " / " : ""}
+                        {d.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <p className="buddy-muted">
+                Upload a template below or choose a document already in your
+                configured folders. Ask Buddy to use its headings/structure.
+                Exact fonts, tables and page layout are not preserved. Google
+                Docs authentication and general folder browsing are planned.
+              </p>
+            </details>
+            <label className="field">
+              <span>
+                Attach a JD, recruiter email/text, project notes or CV template
+                (up to five files, 5 MB each)
+              </span>
+              <input
+                type="file"
+                multiple
+                disabled={busy}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  e.target.value = "";
+                  if (files.length + attached.length > 5) {
+                    onError(
+                      new Error("Choose up to five attachments per message."),
+                    );
+                    return;
+                  }
+                  setBusy(true);
+                  void (async () => {
+                    try {
+                      const added: string[] = [];
+                      for (const file of files) {
+                        if (file.size > 5 * 1024 * 1024)
+                          throw Error("Each attachment must be 5 MB or less.");
+                        const a = await api<State["attachments"][number]>(
+                          "/buddy/attachments",
+                          json({
+                            name: file.name,
+                            contentBase64: await readFile(file),
+                          }),
+                        );
+                        added.push(a.id);
+                      }
+                      setAttached((current) => [...current, ...added]);
+                      setPending(null);
+                      await load();
+                    } catch (error) {
+                      onError(error);
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+              />
+            </label>
+            {attached.map((id) => {
+              const file = state?.attachments?.find((a) => a.id === id);
+              return (
+                file && (
+                  <details key={id} open>
+                    <summary>
+                      {file.name} · {file.status}
+                    </summary>
+                    <p>{file.warnings.join(" ")}</p>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>
+                      {file.preview ||
+                        "No readable text. OCR or a text copy may be needed."}
+                    </pre>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      disabled={busy}
+                      onClick={() =>
+                        setAttached((current) =>
+                          current.filter((x) => x !== id),
+                        )
+                      }
+                    >
+                      Exclude from message
+                    </button>
+                  </details>
+                )
+              );
+            })}
+            <details>
+              <summary>Stored chat attachments</summary>
+              <p>
+                Chat attachments are stored privately with the board and
+                included in full backups. They are not added to or indexed in
+                the career library. Deleting a file does not remove conversation
+                text already saved in history.
+              </p>
+              {state?.attachments?.map((a) => (
+                <p key={a.id}>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    disabled={
+                      busy || (!attached.includes(a.id) && attached.length >= 5)
+                    }
+                    onClick={() =>
+                      setAttached((ids) =>
+                        ids.includes(a.id)
+                          ? ids.filter((id) => id !== a.id)
+                          : [...ids, a.id],
+                      )
+                    }
+                  >
+                    {attached.includes(a.id)
+                      ? "Exclude from message"
+                      : "Include in message"}
+                  </button>{" "}
+                  <a href={"/api/buddy/attachments/" + a.id + "/content"}>
+                    {a.name}
+                  </a>{" "}
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    disabled={busy}
+                    onClick={() => {
+                      void api("/buddy/attachments/" + a.id, {
+                        method: "DELETE",
+                      })
+                        .then(async () => {
+                          setAttached((ids) => ids.filter((id) => id !== a.id));
+                          await load();
+                        })
+                        .catch(onError);
+                    }}
+                  >
+                    Delete attachment
+                  </button>
+                </p>
+              ))}
+            </details>
+          </details>
+          {!state?.settings.enabled && (
+            <p className="form-error">
+              Enable and configure Career Buddy in Settings to chat.
+            </p>
+          )}
+          <div
+            className="buddy-chat-messages"
+            aria-live="polite"
+            aria-label="Messages in this conversation"
+          >
+            {olderAvailable && (state?.messages.length || 0) >= 100 && (
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={busy}
+                onClick={() => {
+                  const before = state?.messages[0]?.cursor;
+                  if (!before) return;
+                  void api<State>(
+                    "/buddy/workspace?conversationId=" +
+                      encodeURIComponent(conversationId) +
+                      "&before=" +
+                      before,
+                  )
+                    .then((older) => {
+                      setOlderAvailable(older.messages.length >= 100);
+                      setState((current) =>
+                        current
+                          ? {
+                              ...current,
+                              messages: [
+                                ...older.messages,
+                                ...current.messages,
+                              ],
+                            }
+                          : current,
+                      );
+                    })
+                    .catch(onError);
+                }}
+              >
+                Load earlier history
+              </button>
+            )}
+            {state?.messages.map((m) => (
+              <article
+                className="buddy-chat-message"
+                data-role={m.role}
+                key={m.id}
+              >
                 <strong>{m.role === "user" ? "You" : "Career Buddy"}</strong>
                 <p style={{ whiteSpace: "pre-wrap" }}>{m.content}</p>
+                {!!m.attachments?.length && (
+                  <p>
+                    Attachments: {m.attachments.map((a) => a.name).join(", ")}
+                  </p>
+                )}
                 {!!m.sources?.length && (
                   <details>
                     <summary>Evidence passages</summary>
@@ -206,7 +492,8 @@ export default function BuddyWorkspace({
                   </details>
                 )}
                 {m.proposal &&
-                  (m.proposal.opportunity ||
+                  (m.proposal.cv ||
+                    m.proposal.opportunity ||
                     m.proposal.star ||
                     m.proposal.changes.length > 0) && (
                     <details>
@@ -238,7 +525,9 @@ export default function BuddyWorkspace({
                                 opportunity: m.proposal.opportunity,
                                 actionItems: m.proposal.tasks,
                               }
-                            : m.proposal.star || m.proposal.changes
+                            : m.proposal.cv ||
+                              m.proposal.star ||
+                              m.proposal.changes
                         }
                       />
                       <p>
@@ -265,64 +554,82 @@ export default function BuddyWorkspace({
                       >
                         {m.appliedAt
                           ? "Saved"
-                          : m.proposal.star
-                            ? "Save STAR highlight to library"
-                            : m.proposal.opportunity
-                              ? "Create opportunity and action items"
-                              : "Confirm opportunity update"}
+                          : m.proposal.cv
+                            ? "Save master CV draft to library"
+                            : m.proposal.star
+                              ? "Save STAR highlight to library"
+                              : m.proposal.opportunity
+                                ? "Create opportunity and action items"
+                                : "Confirm opportunity update"}
                       </button>
+                      {m.proposal.cv && m.appliedAt && m.result?.id && (
+                        <a
+                          className="button secondary small"
+                          href={"/api/documents/" + m.result.id + "/content"}
+                        >
+                          Download master CV
+                        </a>
+                      )}
                     </details>
                   )}
               </article>
             ))}
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <label className="field">
-            <span>Your message, notes or transcript</span>
-            <textarea
-              rows={6}
-              maxLength={12000}
-              required
-              disabled={busy}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                setPending(null);
-              }}
-            />
-          </label>
-          <div className="form-actions">
-            <button
-              className="button primary"
-              disabled={busy || !state?.settings.enabled || !input.trim()}
-            >
-              {busy
-                ? "Buddy is working…"
-                : pending
-                  ? "Retry message"
-                  : "Send to Career Buddy"}
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void load().catch(onError)}
-            >
-              Refresh history
-            </button>
+            <div ref={messagesEnd} />
           </div>
-        </form>
-        <p className="buddy-muted">
-          Conversation history is saved by mode. Buddy never sends emails or
-          applications. Proposals need your confirmation; saved STAR stories are
-          draft reference material, not independently verified evidence.
-        </p>
-      </section>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
+          >
+            <label className="field">
+              <span>Your message, notes or transcript</span>
+              <textarea
+                rows={4}
+                maxLength={12000}
+                required={!attached.length}
+                disabled={busy}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setPending(null);
+                }}
+              />
+            </label>
+            <div className="form-actions">
+              <button
+                className="button primary"
+                disabled={
+                  busy ||
+                  !state?.settings.enabled ||
+                  (!input.trim() && !attached.length)
+                }
+              >
+                {busy
+                  ? "Buddy is working…"
+                  : pending
+                    ? "Retry message"
+                    : "Send to Career Buddy"}
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void load().catch(onError)}
+              >
+                Refresh history
+              </button>
+            </div>
+          </form>
+          <p className="buddy-muted">
+            Each conversation keeps its own context; earlier history is
+            accessible in the sidebar. Opportunity chats remain with their
+            opportunity. Buddy never sends emails or applications. Proposals
+            need your confirmation; saved STAR stories are draft reference
+            material, not independently verified evidence.
+          </p>
+        </section>
+      </div>
     </main>
   );
 }

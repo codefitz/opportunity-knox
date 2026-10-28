@@ -78,6 +78,27 @@ Open an opportunity's Fit assessment tab, review the saved criteria, optionally 
 
 ### Standalone Career Buddy
 
-Open Career Buddy in the sidebar and choose Encouragement coach, Build a STAR highlight, Recruiter intake or Opportunity update. This uses Career Buddy settings (independent of the decision model). Select supporting library evidence explicitly; conversation history is saved by mode. Start with a short project/achievement description; STAR mode asks for missing facts and can propose a story, CV bullet and cover-letter highlight. Review its facts before saving the draft to the library. Nothing is automatically added to a CV or cover letter.
+Open Career Buddy in the sidebar and describe what you need; Buddy now infers coaching, STAR development, recruiter intake, updates or master-CV work. This uses Career Buddy settings (independent of the decision model). Select supporting library evidence explicitly; conversation history is now unified across prior modes. Start with a short project/achievement description; STAR mode asks for missing facts and can propose a story, CV bullet and cover-letter highlight. Review its facts before saving the draft to the library. Nothing is automatically added to a CV or cover letter.
 
 Paste recruiter emails, notes or transcript text for intake. Confirm employer, role and dates in the proposed opportunity/action items before clicking Create opportunity and action items. Unknown due dates remain blank. For rejection/interview/other updates, choose the exact opportunity. Leaving it unselected prompts clarification; no update proposal can be applied without an explicit target. Review and confirm changes, or ask Buddy to correct its proposal. Stale opportunity revisions require a fresh proposal. Repeated saves do not create duplicate records. Coaching is career-focused and intended to be encouraging but candid; unsupported claims and fabricated impact metrics are forbidden by its prompt. Live AI outputs still need review.
+
+
+### Codex through the board host
+
+Choose Codex · local CLI in Career Buddy settings, select the default or manually enter an available Codex model ID, then save. No API key or endpoint is needed for this provider. The host must have Codex CLI installed and signed in with ChatGPT. The board launcher manages the helper; restart using the launcher after signing in. The helper runs locally but inference is remote at OpenAI, using your Codex account limits. Submitted messages and selected excerpts are supplied as context; the helper does not receive your document roots or database. Credentials remain on the host. The same reviewed proposal rules apply. The model picker queries the host CLI catalogue and shows its visible entries, plus Codex default. Refresh models fetches the catalogue again. Account/model access is checked when a request runs; a catalogue listing is not an entitlement guarantee. Hidden/internal models and model instructions are excluded. Manual IDs remain available if discovery is unsupported or the helper is busy. Codex has a five-minute request limit; this does not extend other providers’ timeouts.
+
+
+### Updated conversational workflow
+
+Use the standalone Buddy page naturally; manual modes have been removed from the UI. Select the exact related opportunity when proposing an update, or leave it unselected so Buddy asks for clarification. All prior standalone modes appear in one history; Load earlier history retrieves older turns. Failed requests preserve your message for retry.
+
+Check Use career library to automatically retrieve relevant library/vault excerpts, or leave it off and work from your message/uploads. Upload supported documents or a CV template (five per message, 5 MB each), inspect extraction previews and warnings, and exclude files before sending if needed. Files remain selected for follow-ups until excluded. Stored chat attachments can be downloaded, reused or deleted; deletion removes originals/extraction, not text already present in chat history or prior backups. Files are never automatically indexed as career evidence.
+
+Ask for a master CV from scratch or based on an uploaded/selected template. Buddy should ask about missing facts. Review the proposal, save it as a draft, and download its Word document. Only template text/headings/structure are reused; visual layout fidelity requires future work. The template picker searches tracked documents by name/configured folder; it is not a general host-file browser. Google Docs account authorization/search/import remain future work.
+
+New or changed opportunities are automatically tagged/reviewed when a model is enabled; the saved criteria profile is reused without choosing criteria per opportunity. Missing criteria/model results in a visible skipped state. Review progress or retry in Fit assessment. Automatic tags may add a revision, so stale editors must reload rather than overwrite newer data. Automatic reviews do not proceed/ignore/reject opportunities.
+
+
+### Finding and starting conversations
+
+Use Chat history beside the active conversation to search saved titles or choose an earlier chat. New conversation starts a separate model context; its title comes from the first submitted message. Existing messages from before this feature remain under Earlier chat history. The current chat has a scrollable message panel and scoped Load earlier history. Expand Sources, attachments and related opportunity when needed. Switching chats preserves unsent text within the current page, and resets library/template/attachment/target selections; browser reload does not preserve unsent drafts. On narrow screens, the collapsible history panel stacks above the chat. Opportunity-specific chats remain with their opportunities.

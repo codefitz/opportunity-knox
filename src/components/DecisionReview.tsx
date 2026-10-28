@@ -157,10 +157,19 @@ export default function DecisionReview({
     } | null>(null),
     [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false);
+  const [automation, setAutomation] = useState<{
+    state: string;
+    tags: string;
+    fit: string;
+  } | null>(null);
   const base = "/buddy/decisions/" + opportunity.id;
   async function load() {
     try {
       setState(await api(base));
+      const result = await api<{ automation: typeof automation }>(
+        "/buddy/automation/" + opportunity.id,
+      );
+      setAutomation(result.automation);
     } catch (e) {
       onError(e);
     }
@@ -168,11 +177,47 @@ export default function DecisionReview({
   useEffect(() => {
     void load();
   }, [opportunity.id, opportunity.revision]);
+  useEffect(() => {
+    if (!automation || !["queued", "running"].includes(automation.state))
+      return;
+    const timer = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(timer);
+  }, [automation?.state, opportunity.id]);
   return (
     <section className="buddy-panel">
       <div className="settings-section-heading">
         <div>
           <h2>Opportunity fit assessment</h2>
+          <p>
+            New or edited opportunities are automatically tagged and assessed
+            against your saved criteria when a model is available. No criteria
+            need selecting here.
+          </p>
+          {automation && (
+            <p role="status">
+              Automation: {automation.state} · Tags: {automation.tags} · Fit:{" "}
+              {automation.fit}
+            </p>
+          )}
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={
+              busy ||
+              automation?.state === "running" ||
+              automation?.state === "queued"
+            }
+            onClick={() => {
+              void api(
+                "/buddy/automation/" + opportunity.id,
+                json({ useLibrary: false }),
+              )
+                .then(() => load())
+                .catch(onError);
+            }}
+          >
+            Run / retry automatic review
+          </button>
           <p>
             Compare this role with your saved criteria. Recommendations are
             advice; your opportunity stage and outcome stay under your control.

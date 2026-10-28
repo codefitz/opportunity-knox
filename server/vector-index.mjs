@@ -190,6 +190,42 @@ export function createVectorIndex({
       indexedSources: checkedSources.size,
     };
   }
+  async function selectSources(query, candidates, limit = 20) {
+    const terms = new Set(
+      query.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [],
+    );
+    let queryVector;
+    if ((getConfig("embeddingSettings")?.provider || "builtin") === "builtin")
+      try {
+        [queryVector] = await embed([query.slice(0, 12000)]);
+      } catch {}
+    return candidates
+      .map((doc, order) => {
+        const cached = get(doc.id);
+        let score = 0;
+        if (queryVector?.length === 384 && cached?.model === model)
+          for (const v of cached.vectors || []) {
+            if (v.values?.length === 384)
+              score = Math.max(
+                score,
+                v.values.reduce((sum, n, i) => sum + n * queryVector[i], 0),
+              );
+          }
+        const text = db
+          .prepare("SELECT data FROM document_text WHERE id=?")
+          .get(doc.id);
+        const sample = (
+          doc.name +
+          " " +
+          (text ? JSON.parse(text.data).text || "" : "")
+        ).toLowerCase();
+        for (const term of terms) if (sample.includes(term)) score += 0.02;
+        return { id: doc.id, score, order };
+      })
+      .sort((a, b) => b.score - a.score || a.order - b.order)
+      .slice(0, limit)
+      .map((d) => d.id);
+  }
   async function run() {
     try {
       for (const item of job.items) {
@@ -349,6 +385,7 @@ export function createVectorIndex({
   return {
     status,
     search,
+    selectSources,
     start,
     cancel() {
       if (running) {
