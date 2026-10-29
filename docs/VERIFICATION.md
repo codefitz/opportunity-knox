@@ -244,3 +244,57 @@ P2 deployment: tested image healthy after an online SQLite backup. All existing 
 Isolated Docker/browser check with fictional CV/story documents verified individual category saves/count refresh, category filtering and bulk categorisation across both files. Category metadata does not move files or alter their approval status. Defaults are conservative; personal historical documents are not guessed into new categories.
 
 P3 deployment: online SQLite backup created; tested image is healthy on port 4318. All persisted table checksums matched before/after the update, and the existing vault mount remains read-only. No personal document files were changed or categorised speculatively during deployment. Category endpoint remains authenticated.
+
+
+## Application packs — 29 October 2026
+
+`npm run check`: production build, 146 Node tests and 24 Python launcher/helper tests passed. Fictional API regressions cover grouped approval/submission, pinned hashes/ZIP bytes, submitted-file protection, linked route/receipt/event, idempotence, export/restart persistence, copying, source scoping, cover requirements, stale edits and changed-file rejection without partial mutations. Isolated Docker/browser verification created, reviewed and approved a fictional CV/text/answer pack, recorded a fictional external submission and verified its Submitted state, route/reference and ZIP action. No personal application was created or submitted during verification.
+
+Application-pack deployment: online SQLite backup created before installing the tested image. All persisted table checksums matched before/after and the vault remains mounted read-only. Live health and pack authentication verified. No personal packs were created or documents approved/submitted during deployment.
+
+
+## Feedback — 29 October 2026
+
+`npm run check`: production build, 149 Node tests and 24 Python launcher/helper tests passed. Fictional tests verify authentication, duplicate-request replay/conflicts, safe page validation, persistent status/revision conflicts, JSON/full-backup inclusion, restart interruption without retry, feedback-only AI context, advisory output and cancelled/invalid-review preservation.
+
+Isolated Docker/browser verification confirmed the button on Dashboard, Opportunities, Kanban, To-do, Career Library, Career Buddy, Settings and sign-in. The native modal opens/closes correctly; sign-in is required to submit. Saved fictional feedback appeared in the inbox without AI, then a simulated provider supplied priority/improvements/questions. No real AI account, career evidence or user feedback was used.
+
+Feedback deployment: tested image installed after an online SQLite backup with AI/indexing/reviews idle. All existing table checksums matched before/after; the vault remains read-only. Live health/authentication checks passed. No personal feedback or real AI requests were created during verification.
+
+
+## Communications and interviews — 29 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 152 Node tests and 24 Python launcher tests. New API checks use fictional records and temporary storage to verify custom types/channels/direction, follow-up validation, authentication, stale-revision conflicts, no partial write after validation failure, attachment ownership/duplicate checks, unlinking without deleting originals, complete rescheduling snapshots, unavailable attachment handling, export and restart persistence. Dashboard tests cover rescheduled interviews and date-sorted follow-ups, completion/cancellation/outcome exclusion and the action-visibility toggle.
+
+An isolated Docker browser preview verified a saved incoming LinkedIn communication with contact/notes, existing document selection and a new file upload through the activity form, dated follow-up visibility in the to-do list, a custom final interview type, explicit rescheduling, expandable original date/contact/attachment history, the combined notes summary and continued dashboard interview visibility. Browser testing caught and corrected a file-selection event-lifetime issue; the corrected picker queued and saved the fictional file. Native date-change events were used because the browser automation fill operation alone did not notify React for date controls. No personal records or documents were used and no AI calls or external messages were sent.
+
+Deployment: the tested Docker image was installed after an online SQLite backup with AI/indexing/reviews idle. All persisted table checksums matched before/after deployment; the vault mount remains read-only and the launcher watcher was refreshed. Live health and unauthenticated-access checks passed. Fictional browser-preview containers were removed after verification.
+
+
+## Opportunity workflow — 29 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 155 Node tests and 24 launcher tests. Fictional API checks cover application-route creation/editing, manual review validation/required reason, optional stage movement, closed-opportunity protection, stage/event dates and snapshots, authentication, revision conflicts and failed writes without persistence. Offer checks cover independent outcomes/hire metrics, repeatable offers, strict dates/statuses, ownership of linked documents, unlinking without file deletion, idempotent create/reused-key conflicts, decisions/history, exports, full-backup snapshots and restart persistence. Queue tests exclude accepted/declined/undated offers, closed opportunities and hidden derived actions.
+
+An isolated Docker/browser workspace verified a strengths/gaps/proceed review saved without movement, explicit advance to CV & cover letter, retained review history, offer terms/contact and document selection, automatic dates and editable response/start dates, a pending offer deadline in the to-do list, recorded acceptance with the earlier pending version retained, current review/offer and timeline content in Summary, removal of the responded deadline and an unchanged Hired count of zero. Only fictional records/files were used; no external communications, real offer decisions or AI requests were made.
+
+Deployment: the tested opportunity-workflow image was installed after an online SQLite backup while AI/indexing/reviews were idle. All persisted table checksums matched before/after; the vault stayed read-only and the launcher watcher was refreshed. Live health and workflow authentication checks passed. The fictional browser preview was removed after verification.
+
+
+## Finding opportunities — 29 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 160 Node tests and 24 launcher tests. Five focused filter tests cover default active/all/completed/specific outcomes, intersections with stage/search, stable record order and no mutation, case/whitespace-normalised all/any tags and deduplicated counts, valid deadlines and inclusive/open ranges, reversed/invalid range errors, seven/thirty-day boundaries and workspace midnight across a daylight-saving boundary. Overdue tests cover overview next actions, unfinished follow-ups, pending offers and linked open tasks, with deduplication, legacy missing fields and closed/completed/cancelled/unlinked exclusions.
+
+An isolated Docker browser workspace with six fictional opportunities verified combined filters, all/any tags, search, result counts, persistence between list and Kanban, shared no-match feedback, reset, completed outcomes, removable chips, and a reversed custom range with an explanatory alert. The overdue filter showed all four distinct actionable opportunities, including the activity, offer and task sources. Desktop layout was visually reviewed; responsive rules were inspected, but a mobile browser/device was not exercised. No private records or files were used, and no AI requests or record changes were caused by filtering.
+
+Deployment: the tested finding-opportunities image was installed after an online SQLite backup with AI/indexing/reviews idle. All persisted table checksums matched before/after deployment; the vault stayed read-only and the launcher watcher was refreshed. Live health/authentication checks passed. Fictional preview containers were removed after verification.
+
+
+## Reliability and recovery — 29 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 167 Node tests and 39 Python launcher/recovery tests. Fictional persistent-queue checks cover retained bytes/options, workspace scoping, stable retry IDs, frozen attempted options, atomic quota failures, failed-file ordering and cross-tab leases. Scheduler checks cover default-off, daily/weekly revision conflicts, deferred maintenance, overdue catch-up and failure backoff. Host tests exercise submitted-byte preservation, copy/missing-root relink/restore, changed-preview rejection, read-only destinations before write probes, symlink backup escapes, unavailable mounts, pre-upgrade verification refusal, failed-build image recovery and restart/crash rollback.
+
+Actual isolated Docker services verified full migration, relinking and restore activation across container recreation with real SQLite/documents/mount remapping. A separate empty installation received a transferred full backup, replaced its empty workspace, recovered restored credentials and retained exact submitted CV bytes. These checks used fictional data only, including an account deliberately reset by restore; no real AI/provider account was called.
+
+Browser verification on those fictional services confirmed that a selected file and its notes survived reload, resumed upload and remained cleared after completion/reload. Settings saved a weekly schedule and ran a verified backup. The migration preview displayed the document count/bytes, disabled Apply until confirmation and completed a real restart. The clean restored installation showed its opportunity, Career Library document and unchanged submitted v1 CV through the browser. A themed preview is retained at `/private/tmp/opportunity-knox-reliability-preview.png`. No production restore/migration or read-only vault write was performed. Before deployment, all 1,761 live managed document locations/hashes passed a read-only preflight.
+
+Deployment: the normal product launcher created and verified a full pre-upgrade backup containing all 1,761 managed documents before rebuilding/restarting. Re-reading every backed-up document confirmed its saved hash; all live persisted-table checksums matched both the pre-upgrade workspace and backup database. The read-only vault mount was preserved, the refreshed host helper was available, and live health/protected-endpoint checks passed. A browser check of deployed Settings confirmed the new controls and that automatic scheduling remains disabled until selected. The two fictional test services and all verification-only browser tabs were removed. No production restore/migration, scheduling preference change or AI request was performed.

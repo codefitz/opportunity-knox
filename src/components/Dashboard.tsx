@@ -511,7 +511,9 @@ export default function Dashboard(props: Props) {
           <div className="knox-panel-heading">
             <div>
               <h2>Next steps</h2>
-              <p>Open tasks and active opportunity actions.</p>
+              <p>
+                Open tasks, opportunity actions, follow-ups and offer deadlines.
+              </p>
             </div>
             <button
               className="knox-text-button"
@@ -527,7 +529,7 @@ export default function Dashboard(props: Props) {
                   key={action.id}
                   className="knox-upcoming-row"
                   onClick={() =>
-                    action.source === "opportunity"
+                    action.source !== "task"
                       ? onOpenOpportunity(action.opportunityId)
                       : onNavigate("todos")
                   }
@@ -542,7 +544,13 @@ export default function Dashboard(props: Props) {
                   <span className="knox-upcoming-copy">
                     <strong>{action.title}</strong>
                     <small>
-                      {action.source === "task" ? "Task" : "Opportunity action"}
+                      {action.source === "task"
+                        ? "Task"
+                        : action.source === "activity"
+                          ? "Activity follow-up"
+                          : action.source === "offer"
+                            ? "Offer response"
+                            : "Opportunity action"}
                       {action.opportunityLabel
                         ? ` · ${action.opportunityLabel}`
                         : ""}
@@ -576,7 +584,7 @@ export default function Dashboard(props: Props) {
           <div className="knox-panel-heading">
             <div>
               <h2>Interviews to prepare</h2>
-              <p>Planned entries on active opportunities.</p>
+              <p>Planned and rescheduled entries on active opportunities.</p>
             </div>
             <CalendarDays size={18} className="knox-muted-icon" />
           </div>
@@ -613,8 +621,8 @@ export default function Dashboard(props: Props) {
                 <CalendarDays size={25} />
                 <h3>A little preparation goes a long way</h3>
                 <p>
-                  Planned interviews will appear here when you add them to an
-                  opportunity.
+                  Planned and rescheduled interviews will appear here when you
+                  add them to an opportunity.
                 </p>
               </div>
             )}

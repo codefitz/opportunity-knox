@@ -21,6 +21,7 @@ import webbrowser
 
 REPO = Path(__file__).resolve().parents[1]
 PROJECT = "opportunity-board"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 class LauncherError(Exception):
@@ -327,7 +328,23 @@ def start_watcher(state_dir: Path) -> None:
         pass
 
 
+def maintenance_start(state_dir, config):
+    atomic_json(state_dir / "launcher.json", config)
+    atomic_json(state_dir / "runtime.compose.json", compose_override(config, state_dir, setup_token(state_dir)))
+    run(compose_command(state_dir) + ["up", "--detach", "--no-build", "--force-recreate", "--wait", "--wait-timeout", "60", "board"], capture=True)
+    if fetch_json(base_url(config) + "/api/health") is None:
+        raise LauncherError("Updated workspace did not answer its health check.")
+
+
 def watch_loop(state_dir: Path, *, once: bool = False) -> int:
+    import reliability
+    reliability.recover(state_dir,
+        lambda: run(compose_command(state_dir) + ["stop", "board"], capture=True),
+        lambda config: maintenance_start(state_dir, config))
+    maintenance_status = state_dir / "maintenance-status.json"
+    if maintenance_status.exists() and read_json(maintenance_status).get("phase") in ("queued", "running"):
+        (state_dir / "pending-maintenance.json").unlink(missing_ok=True)
+        atomic_json(maintenance_status, {"phase": "interrupted", "message": "Host operation was interrupted; preview again to retry."})
     if not once:
         from codex_buddy import CodexWorker
     worker = CodexWorker(state_dir) if not once else None
@@ -342,6 +359,24 @@ def watch_loop(state_dir: Path, *, once: bool = False) -> int:
     try:
         while True:
             heartbeat_path.touch()
+            maintenance_path = state_dir / "pending-maintenance.json"
+            if maintenance_path.exists():
+                try:
+                    import reliability
+                    request = read_json(maintenance_path)
+                    maintenance_path.unlink()
+                    config = read_json(state_dir / "launcher.json")
+                    if request.get("action") == "apply" and worker:
+                        reliability.idle(state_dir)
+                        worker.close(); worker = None
+                    reliability.process_request(state_dir, config, request,
+                        lambda: run(compose_command(state_dir) + ["stop", "board"], capture=True),
+                        lambda updated: maintenance_start(state_dir, updated))
+                except (Exception, KeyboardInterrupt) as exc:
+                    atomic_json(state_dir / "maintenance-status.json", {"requestId": locals().get("request", {}).get("requestId", ""), "phase": "failed", "message": str(exc)[:1000]})
+                finally:
+                    if not once and worker is None: worker = CodexWorker(state_dir)
+                if once: return 0
             if request_path.exists():
                 try:
                     request = read_json(request_path)
@@ -394,6 +429,10 @@ def main(argv=None) -> int:
     ensure_docker()
     state_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(state_dir, 0o700)
+    import reliability
+    reliability.recover(state_dir,
+        lambda: run(compose_command(state_dir) + ["stop", "board"], capture=True),
+        lambda saved: maintenance_start(state_dir, saved))
     config, has_pending = make_config(args, state_dir)
     token = setup_token(state_dir)
     override = compose_override(config, state_dir, token)
@@ -402,9 +441,26 @@ def main(argv=None) -> int:
     atomic_json(runtime_path, override)
     command = compose_command(state_dir)
     url = base_url(config)
+    previous_image = ""
     try:
         # Validate generated Compose before changing a running service.
         run(command + ["config", "--quiet"], capture=True)
+        if (state_dir / "board.sqlite").exists():
+            import reliability
+            reliability.idle(state_dir)
+            old_config = read_json(config_path) if config_path.exists() else config
+            previous_image = run(command + ["images", "--quiet", "board"], capture=True).stdout.strip()
+            if previous_image:
+                run(["docker", "tag", previous_image, "opportunity-knox-pre-upgrade:" + str(int(time.time()))], capture=True)
+            run(command + ["stop", "board"], capture=True)
+            try:
+                backup = reliability.snapshot(state_dir, old_config)
+                atomic_json(state_dir / "last-upgrade-backup.json", {"name": backup.name, "location": str(backup), "createdAt": time.time()})
+                print("Pre-upgrade backup verified.", flush=True)
+            except (Exception, KeyboardInterrupt):
+                if previous_override is not None: atomic_json(runtime_path, previous_override)
+                run(command + ["start", "board"], capture=True, check=False)
+                raise
         print("Preparing Opportunity Knox…", flush=True)
         up_args = ["up", "--detach", "--build", "--wait", "--wait-timeout", "60"]
         if args.command == "restart":
@@ -412,13 +468,19 @@ def main(argv=None) -> int:
         run(command + up_args + ["board"])
         if fetch_json(url + "/api/health") is None:
             raise LauncherError("The container started but the board did not answer. Run ./board logs to inspect it.")
-    except (LauncherError, OSError, KeyboardInterrupt):
+    except (LauncherError, OSError, ValueError, KeyboardInterrupt) as failure:
         # Preserve the last working host settings; pending requests remain available
         # for correction/retry. This does not claim to roll back a running container.
         if previous_override is None:
             runtime_path.unlink(missing_ok=True)
         else:
             atomic_json(runtime_path, previous_override)
+            if (state_dir / "board.sqlite").exists():
+                if previous_image:
+                    run(["docker", "tag", previous_image, PROJECT + "-board:latest"], capture=True, check=False)
+                    run(command + ["up", "--detach", "--no-build", "--force-recreate", "--wait", "--wait-timeout", "60", "board"], capture=True, check=False)
+                else: run(command + ["start", "board"], capture=True, check=False)
+        if isinstance(failure, ValueError): raise LauncherError(str(failure)) from failure
         raise
     atomic_json(config_path, config)
     if has_pending:

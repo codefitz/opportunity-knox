@@ -92,10 +92,8 @@ export default function Todos({
   const today = calendarDay(new Date(), timezone);
   const openTasks = tasks.filter((task) => !task.completed);
   const completedTasks = sortTasks(tasks.filter((task) => task.completed));
-  const derivedCount = opportunities.filter(
-    (item) => !item.outcome && item.nextAction.trim(),
-  ).length;
   const queue = buildActionQueue(tasks, opportunities, includeActions);
+  const derivedCount = buildActionQueue([], opportunities).length;
   const overdueItems = queue.filter(
     (item) => item.dueDate && item.dueDate < today,
   ).length;
@@ -252,7 +250,11 @@ export default function Todos({
         </button>
         <div className="knox-task-meta">
           <span className="knox-source-label is-derived">
-            Opportunity action
+            {action.source === "activity"
+              ? "Activity follow-up"
+              : action.source === "offer"
+                ? "Offer response"
+                : "Opportunity action"}
           </span>
           <span>{action.opportunityLabel}</span>
         </div>
@@ -294,7 +296,8 @@ export default function Todos({
           <strong>{completedTasks.length}</strong> completed
         </span>
         <span>
-          <strong>{derivedCount}</strong> active opportunity actions
+          <strong>{derivedCount}</strong> opportunity actions, follow-ups and
+          offer deadlines
         </span>
       </div>
 
@@ -445,7 +448,7 @@ export default function Todos({
                 checked={includeActions}
                 onChange={(event) => setIncludeActions(event.target.checked)}
               />
-              Show opportunity actions
+              Show opportunity actions, follow-ups and offer deadlines
             </label>
           )}
         </div>
@@ -500,9 +503,10 @@ export default function Todos({
           )}
         </div>
         <p className="knox-definition knox-task-list-foot">
-          Due dates use your {timezone} workspace calendar. Opportunity actions
-          open their source record; complete and reopen controls apply only to
-          saved tasks.
+          Due dates use your {timezone} workspace calendar. Opportunity actions,
+          follow-ups and offer deadlines open their source record. Record
+          responses in Offers, and mark follow-ups completed in the activity.
+          Task completion controls apply to saved tasks.
         </p>
       </section>
     </section>

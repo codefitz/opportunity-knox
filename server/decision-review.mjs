@@ -301,6 +301,7 @@ export function createDecisionReview(ctx) {
           opportunity: {
             ...opportunity,
             events: undefined,
+              applicationPacks:undefined,
             activities: undefined,
           },
           criteria: profile.items,

@@ -1,3 +1,5 @@
+> Status note — 29 October 2026: dated sections below are a delivery history, not a cumulative current backlog. Earlier statements such as “not implemented” or “still open” may be superseded by later milestones. Use [PLAN.md](PLAN.md) and [PLAN_AUDIT.md](PLAN_AUDIT.md) for reconciled status.
+
 # Implementation roadmap
 
 Started 22 October 2026. See `PLAN.md` for the agreed product plan. The private local board is running; production remote hosting remains to be configured.
@@ -141,3 +143,44 @@ Document Studio is available in Career Library and opportunity Documents. It sup
 ## P3 career document categories — 29 October 2026
 
 Structured categories distinguish master/tailored/general CVs, cover letters, templates, supporting statements, STAR/interview stories, job descriptions, references and other documents. Categories are independent of file kind, tags, approval status and physical folders. Uploads accept categories; document rows allow individual edits; library selections support atomic batches up to 500 with revision conflicts checked before any write. Category filtering combines with the existing folder/preparation/tag views. Legacy defaults are derived without rewriting stored rows; known master/tailored generation context supplies reliable defaults. Templates remain selectable explicitly but are excluded from automatic standalone Buddy/fit evidence. Reclassifying a source as a template makes its prior fit assessment stale. Studio copies inherit source category. Files and submitted bytes are preserved.
+
+
+## Plan reconciliation — 29 October 2026
+
+Audited all 39 previously unchecked markers against code, tests and dated verification notes. Corrected stale entries for configured-root browsing/in-place selection, fit-criteria/assessment structure, request state, templates/PDF export and restore UI. Split partial items rather than marking broad milestones complete: isolated restore is implemented; clean/remote service activation, live-board replacement and record reconciliation remain open. Google app authorization remains deferred despite separate connector-assisted private exports. No implementation or runtime state changed during this documentation audit.
+
+
+## Application packs — 29 October 2026
+
+Opportunity Documents groups exact file versions, supporting text and answers into reviewed/approved packs. Recording external submission retains route/receipt/dates, creates a linked event and locks selected versions as submitted. Copy-to-draft preserves earlier packs. Metadata/hash preflight and atomic writes prevent partial submission; repeat submit is idempotent. ZIPs include pinned files and text/manifest. Existing exports/backups retain pack data without a migration. No AI or external sending is added. See [APPLICATION_PACKS.md](APPLICATION_PACKS.md).
+
+
+## Feedback inbox — 29 October 2026
+
+A shared right-edge Feedback button is available on all workspace pages and sign-in/loading/error screens. Signed-in users save messages/page context privately, track Open/Planned/Done and export JSON. Optional Career Buddy provider review returns advisory priority/improvements/questions without career data or automatic code changes. Cancellation, restart interruption, idempotent submission and revision conflicts preserve feedback. Full backups and record exports include the inbox. See [FEEDBACK.md](FEEDBACK.md).
+
+
+## Communications and interviews — 29 October 2026
+
+Activity forms now record incoming/outgoing communications and custom channels, custom interview types, a distinct rescheduled status, follow-up text/due dates/completion, and links to opportunity document versions. Files can be uploaded in the activity form or selected from existing opportunity documents. Unlinking an attachment preserves its original; deleted originals are shown as unavailable. New activity edits retain full previous field snapshots, with expandable history; earlier limited history is preserved as recorded. Follow-ups appear by due date in the dashboard/to-do action queue; completed follow-ups, cancelled activities and closed opportunities are excluded. Rescheduled interviews remain in the dashboard preparation list. Existing Career Buddy activity proposals remain compatible; the new fields are manually editable, with no new AI calls or external communications. See [COMMUNICATIONS.md](COMMUNICATIONS.md).
+
+
+## Opportunity workflow — 29 October 2026
+
+Creation and Overview now expose a dedicated application route; existing submitted packs keep their own recorded route. Fit assessment includes a separate manual strengths/gaps editor and dated proceed/ignore/defer decision with a required reason, revision snapshots and timeline entries. An explicit checkbox can advance to CV & cover letter, close as Ignored or move to Review; recording alone does not move stages. Closed opportunities require explicit reopening before a review can move them.
+
+A new Offers tab stores multiple offers, compensation/package, terms, contact, received/response/start dates, linked opportunity document versions, and pending/accepted/declined/withdrawn/expired decisions with editable dates, reasons and retained history. Creating or accepting an offer does not mark Hired or close/move the opportunity. Pending response deadlines appear in the dated dashboard/to-do queues and disappear after a response or closed outcome. Timeline and Summary include reviews/offers; record exports/full backups preserve their metadata and histories. Workflow saves do not start new AI requests or send communications. See [OPPORTUNITY_WORKFLOW.md](OPPORTUNITY_WORKFLOW.md).
+
+
+## Finding opportunities — 29 October 2026
+
+The opportunity list and Kanban board now share combined search/outcome/stage, multi-tag (all/any), application-deadline and overdue-action filters. Deadline choices include passed/today/next 7 or 30 days/dated/undated and inclusive custom ranges with visible validation. Overdue work includes overview next actions, unfinished activity follow-ups, pending offer responses and linked open to-dos on active opportunities; the workspace overdue count uses the same rule. Selected filters have removable chips, a matching-record count, a shared no-results explanation and reset to the default active view. Selections survive navigation/list-board switching while the app remains open; reloading resets them. Filtering uses loaded metadata without AI requests or record changes. Responsive control styles are provided. See [FINDING_OPPORTUNITIES.md](FINDING_OPPORTUNITIES.md).
+
+
+## Reliability — 29 October 2026
+
+Library/opportunity Documents upload queues now retain file bytes and options in browser IndexedDB, scoped to the server workspace and document context. Explicit resume/pause, frozen attempt options and request IDs recover interrupted uploads without duplicate versions; cross-tab leases and unattempted-before-failed ordering preserve batch behaviour. Browser storage limits apply; clearing site data/private browsing can clear this browser-only queue, which is outside server backups.
+
+Settings adds opt-in daily/weekly full backups with one overdue catch-up, failure backoff and status, while the launcher verifies a full private backup before rebuilding/restarting an existing installation. Failure blocks an upgrade and attempts previous-image/config recovery. Backup document hashes are checked before publication.
+
+The launcher-managed recovery flow previews and confirms migration, relinking or backup activation. It checks paths/hashes, rejects changed/expired plans and unavailable/read-only target conflicts before stopping, preserves originals and a portable pre-change backup, remaps managed documents, restarts the selected service and rolls back failures. A transaction journal recovers interrupted preparation/switching. Restore activation signs out restored sessions and preserves the current host’s source-access configuration; historical record import/merge remains separate. Verified with fictional Docker migration/relink/replacement and a transferred full backup into a separate empty installation, including browser sign-in/records/documents and exact submitted bytes. See [RELIABILITY.md](RELIABILITY.md).

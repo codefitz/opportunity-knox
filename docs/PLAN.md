@@ -1,8 +1,10 @@
 # Application board — initial product plan
 
-Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md` for delivered features and remaining work. The plan below describes the full intended product, rather than claiming every feature is available in the first increment.
+Product plan agreed 22 October 2026; reconciled against the repository on 29 October 2026. See `ROADMAP.md` for dated delivery history and [PLAN_AUDIT.md](PLAN_AUDIT.md) for the unchecked-item audit. Checked items mean the stated scope is implemented; runtime/provider/hosting verification is recorded separately. Unchecked parent delivery phases can contain completed sub-items. Repeated references to an open feature are not separate implementation tasks.
 
 ## Feature Requests
+
+- [x] Global Feedback button/text box, private persistent inbox and JSON export, Open/Planned/Done tracking, and optional advisory AI review using only feedback/page context. Failed/cancelled/interrupted reviews preserve originals; no automatic application changes.
 
 - [x] Separate embedding provider, endpoint, model and server-side API key configuration from Career Buddy chat settings (OpenAI, Ollama and custom compatible endpoints). No embedding requests or indexing are triggered by saving.
 - [x] Bundle a pinned, checksum-verified local MiniLM embedding model in Docker with offline CPU inference and a fictional-text self-test. Use it by default for new embedding configurations; preserve saved external providers.
@@ -20,7 +22,7 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 
 ## Career Buddy follow-ups (28 October 2026)
 
-- [x] Optional Codex CLI provider using the host’s ChatGPT sign-in, with a launcher-managed private queue, read-only ephemeral execution, bounded requests and existing review controls. Messages/selected excerpts go to OpenAI under Codex account limits; credentials remain outside Docker. User explicitly authorized this destination. Host CLI catalogue discovery is implemented; richer progress/cancellation remain future work. See `CODEX_BUDDY_DESIGN.md`.
+- [x] Optional Codex CLI provider using the host’s ChatGPT sign-in, with a launcher-managed private queue, read-only ephemeral execution, bounded requests and existing review controls. Messages/selected excerpts go to OpenAI under Codex account limits; credentials remain outside Docker. User explicitly authorized this destination. Host CLI catalogue discovery and stage/elapsed progress/cancellation are implemented; token streaming and provider-side acknowledgement remain open. See `CODEX_BUDDY_DESIGN.md`.
 
 - [x] Standalone chat attachments with extraction preview, original download/reuse/deletion and documented limits. Stored separately from the career library; no silent indexing. Optional attachment-to-library copying remains future work.
 - [x] P1 standalone Buddy request controls: polled stage/elapsed progress, Cancel/retry, HTTP abort and owned Codex process termination, persisted secret-safe request diagnostics, restart interruption state, configurable AI response timeouts (30–900 seconds), HTTP response-token and source-context budgets. Existing defaults retained; no silent retries. Responses remain non-streaming.
@@ -30,7 +32,7 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 ## Confirmed direction
 
 - [x] A custom browser-based Kanban board for tracking job opportunities from identification through hire or rejection.
-- [x] Accessible across several devices through a privately hosted service.
+- [x] Browser/API capability for private multi-device access, configurable host binding and conflict handling. Production remote HTTPS/VPN deployment remains unchecked below.
 - [x] Easy to start and stop, with records and documents surviving shutdowns and upgrades.
 - [x] Docker is an implementation detail: routine operation uses a single launcher command or host shortcut, with no manual Compose, mount, or environment-file editing.
 - [x] Optional, pluggable AI support for identification, fit review, and document generation. Choose the provider later. *(Career Buddy supports OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs; Stage 1 AI extraction and per-stage toggles remain open.)*
@@ -46,18 +48,18 @@ One card represents one application opportunity, including a stable ID so repeat
 - [x] Opportunity cards with stable ID, employer, role, current stage, priority, deadline, next action/date, and time in stage.
 - [x] Drag-and-drop Kanban board, stage selector in details, and a separate list view (`#/opportunities`).
 - [x] Search by employer, role, tags, and location; filter by active, completed, and specific outcomes.
-- [ ] Dedicated toolbar filters for stage, tags, deadline, and overdue action.
+- [x] Shared list/Kanban toolbar filters for stage, multiple tags (all/any), deadline presets/inclusive date ranges, and overdue next actions/follow-ups/offer responses/linked to-dos. Composable with search/outcomes, removable selections, counts, range validation and reset.
 
 | Stage | Information and behaviour |
 | --- | --- |
-| 1. Identification | [x] Add a URL, upload a PDF/DOCX, or paste JD text. Capture role, employer, job reference, source, location, working arrangement, salary/rate/currency, employment type, contact, closing date, requirements, and source documents. Unknown fields remain visibly unknown.<br>[ ] Dedicated `applicationRoute` field (currently captured in notes/description). |
-| 2. Review | [x] Optional AI-assisted comparison against selected career evidence (via Career Buddy "Am I a good fit?" prompt) and manual proceed/ignore/defer transitions with notes.<br>[ ] Dedicated structured fields for strengths, gaps, questions, recommendation, user-defined fit criteria, and proceed/ignore/defer decision reason outside chat/notes. |
-| 3. Generate CV and cover letter | [x] Select reference material in Career Buddy and generate versioned editable `.docx` and `.md` drafts; allow existing documents to be uploaded/attached instead.<br>[x] Built-in and marked DOCX template layouts, measured page targets, previews and reviewed PDF/Word exports.<br>[ ] Full arbitrary-template fidelity and an explicit "cover letter not required" toggle. |
-| 4. Application review | [x] Read and revise drafts in Career Buddy or upload revised versions; mark individual document versions as `draft`, `approved`, or `submitted`.<br>[ ] Dedicated fields for supporting statements / application answers and formal application-pack approval grouping. |
-| 5. Application submitted | [x] Reaching this stage is a user action; moving a card does not submit an application externally. Submitted documents are preserved as immutable snapshots.<br>[ ] Dedicated submission receipt/reference and application route fields on the submission record, and explicit linking of a multi-document submitted pack to the submission event. |
-| 6. Communications and interviews | [x] Record communications and any number of interview/assessment entries with type, scheduled date, status, contacts, preparation/notes, and revision history.<br>[ ] Per-activity document attachments, dedicated follow-up field on activities, explicit `incoming`/`outgoing` direction and channel on communications, custom interview types, and `rescheduled` as a distinct status value. |
+| 1. Identification | [x] Add a URL, upload a PDF/DOCX, or paste JD text. Capture role, employer, job reference, source, location, working arrangement, salary/rate/currency, employment type, contact, closing date, requirements, and source documents. Unknown fields remain visibly unknown.<br>[x] Dedicated editable `applicationRoute` field on creation/Overview and in summaries; submitted packs retain their separately recorded route. |
+| 2. Review | [x] Optional AI-assisted comparison against selected career evidence (via Career Buddy "Am I a good fit?" prompt) and manual proceed/ignore/defer transitions with notes.<br>[x] Separate editable strengths/gaps fields and a dated user proceed/ignore/defer decision/reason with revision history. Stage updates require an explicit choice. Saved criteria, per-criterion met/unmet/unknown results, questions, evidence, summary and model recommendation are already implemented in Fit assessment. |
+| 3. Generate CV and cover letter | [x] Select reference material in Career Buddy and generate versioned editable `.docx` and `.md` drafts; allow existing documents to be uploaded/attached instead.<br>[x] Built-in and marked DOCX template layouts, measured page targets, previews and reviewed PDF/Word exports.<br>[ ] Full arbitrary-template fidelity. The cover-letter exemption is implemented in application packs. |
+| 4. Application review | [x] Read and revise drafts in Career Buddy or upload revised versions; mark individual document versions as `draft`, `approved`, or `submitted`.<br>[x] Application packs with supporting statements/answers, pinned versions, explicit grouped approval, cover-letter exemption and ZIP downloads. |
+| 5. Application submitted | [x] Reaching this stage is a user action; moving a card does not submit an application externally. Submitted documents are preserved as immutable snapshots.<br>[x] Pack submission date/recording time, route, receipt/reference and linked event, with exact submitted document versions preserved. |
+| 6. Communications and interviews | [x] Record communications and any number of interview/assessment entries with type, scheduled date, status, contacts, preparation/notes, and revision history.<br>[x] Per-activity document attachments, dedicated follow-up with due date/completion, explicit `incoming`/`outgoing` direction and channel on communications, custom interview types, and `rescheduled` as a distinct status value. Follow-ups join the dated action queue; activity revisions are expandable. |
 | 7. Final interview | [x] A milestone associated with a particular interview entry (`isFinal`). Retain earlier interviews; support more than one final-stage meeting without losing history. |
-| 8. Outcome | [x] Hired or rejected, with date, reason/feedback in notes, and relevant documents. Also support ignored, withdrawn, and role closed.<br>[ ] Record an offer and its decision separately so an offer is not automatically counted as a hire. |
+| 8. Outcome | [x] Hired or rejected, with date, reason/feedback in notes, and relevant documents. Also support ignored, withdrawn, and role closed.<br>[x] Record multiple offers, terms/package/contact, response/start dates, document versions and dated pending/accepted/declined/withdrawn/expired decisions with history. Offers and acceptances do not automatically change stage/outcome; pending response deadlines join the action queue. |
 
 - [x] Ignored opportunities close directly from Review. Rejection, withdrawal, or role closure can occur at any stage.
 - [x] The default board filter shows active opportunities; completed/outcome filters retain closed records.
@@ -83,7 +85,10 @@ One card represents one application opportunity, including a stable ID so repeat
    - [x] Automatic/editable tags and tag filters; independently collapsible prepared and unprepared views and folder groups.
    - [x] Structured categories for master/tailored/general CVs, templates, supporting statements and STAR/interview stories; upload/individual/bulk categorisation and category filtering.
 4. [x] **Settings:** profile name/photo, light/dark and contrasting themes, automatically saved custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
-   - [ ] Record import / backup restore UI and per-stage AI enablement controls.
+   - [x] Backup listing, inspection/validation and confirmed isolated restore UI in Settings. The restored workspace is not automatically started or made live.
+   - [x] Confirmed restore activation/replacement UI with hash-verified managed files, pre-change backup, rollback and fresh sign-in.
+   - [ ] Record JSON import/merge UI.
+   - [ ] Per-stage AI enablement controls (see Pluggable AI design).
 
 ## Document storage and existing material
 
@@ -94,17 +99,19 @@ One card represents one application opportunity, including a stable ID so repeat
 
 Offer two document actions:
 
-- [x] Upload/copy into managed storage: available from every device through the board. File count is not capped by the upload queue; the existing 15 MB per-file browser limit and hidden/system-folder exclusions still apply. A large queue is held in the browser until uploaded and is lost on reload.
+- [x] Upload/copy into managed storage: available from every device through the board. File count is not capped by the upload queue; the existing 15 MB per-file browser limit and hidden/system-folder exclusions still apply. Library/opportunity Documents queues retain files/options in browser IndexedDB across reloads, with explicit resume and server retry IDs; browser storage limits and clearing site data still apply.
 - [x] Move individual or selected library files between folders inside the configured library; preserve identifiers and prepared text. One bulk move is limited to 500 files; collision and submitted-document protections apply.
 - [x] Connect an Obsidian host vault read-only for inspection and optional explicit sync into the library. The read-only mount blocks exports into the vault; a sync copies eligible files into managed library storage and prepares their text.
-- [ ] Attach an existing document in-place from a configured server-accessible folder or supported cloud connector (e.g. Google Docs link remaining a cloud document with availability shown).
+- [x] Select existing files in-place from read-only configured server folders or an Obsidian vault; resolve availability when browsing/using sources and cache selected text without copying originals.
+- [x] Google Docs setup/search/explicit snapshot import is implemented; live app authorization remains deferred.
+- [ ] Live in-place cloud-document references with availability/refresh tracking. Current Google Docs imports are local Word snapshots, not live cloud documents.
 
 Storage configuration and folder browsing:
 
 - [x] Settings exposes an application-document root, reference subfolder, backup destination, and pending host document root handoff.
 - [x] Save and validate preferences so they survive restarts; retain earlier document roots when a new host root is applied.
-- [ ] Multiple independent reference locations (e.g. read-only reference roots outside the main document root).
-- [ ] Server-side folder browser within available locations on the hosting machine.
+- [x] Multiple independent read-only reference roots outside managed document storage, configured in the app and mounted by the launcher.
+- [x] Paged server-side folder browsing inside configured read-only roots. This is not unrestricted browsing of the host filesystem.
 
 Proposed managed layout:
 
@@ -123,8 +130,10 @@ Proposed managed layout:
 
 - [x] Keep document paths relative to the configured storage root (`opportunities/<id>/` and `references/`).
 - [ ] Use `<stable-id>-<company>-<role>/` folder naming with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories.
-- [ ] Detect missing/offline files in the UI with a relinking workflow, and provide a guided attach-existing or copy-and-validate migration workflow when changing storage roots.
-- [ ] Previewed import of existing folders (`Career Transition`, `Work/Applications`) with duplicate detection using document hashes and job reference/URL/employer-role matches.
+- [x] Report unavailable source roots/files and reject missing configured drives rather than replacing them with empty defaults. Retain previous managed roots when changing storage.
+- [x] Dedicated relinking and guided copy-and-validate migration between managed storage roots: preview/hash checks, explicit confirmation, originals retained, stale-plan rejection, full pre-change backup and rollback/restart recovery.
+- [ ] Previewed historical opportunity/record import with content-hash and job reference/URL/employer-role duplicate matching. Existing folder uploads, explicit Obsidian sync, retry IDs and Google source-version deduplication do not implement this workflow.
+- [x] Durable library/opportunity Documents upload queues, retained bytes/options, explicit resume/pause, per-file retry idempotence, failure recovery and cross-tab leases.
 
 ## Pluggable AI design
 
@@ -139,7 +148,8 @@ Proposed managed layout:
 - [x] Stage 3 built-in/marked-template layout preservation, page-target review and PDF generation in Document Studio.
 - [ ] Exact fidelity for arbitrary unmarked templates and Google Docs/Word pagination across rendering engines.
 - [x] Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.
-- [ ] Background AI task queue recording prompt version, token/cost usage, and `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted` states across restarts.
+- [x] Persist Buddy request lifecycle/diagnostics, automatic review queue/state and host Codex queue; progress/cancel/retry controls and interrupted-on-restart handling. These are workflow-specific mechanisms.
+- [ ] Unified persisted scheduler for all AI task types, prompt-version tracking and token/cost accounting. The current request registry is not that full scheduler.
 - [ ] External-assistant task-pack export and result import.
 
 ## Launcher and first-run experience
@@ -171,7 +181,10 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Optimistic concurrency (`revision` checks returning `409 Conflict`) so a stale browser tab on another device cannot silently overwrite newer edits.
 - [x] Persist opportunities, event history, notes, settings, profile, tasks, document metadata, extracted text chunks, and Career Buddy chat history independently of the container.
 - [x] On-demand consistent SQLite + managed document backup (`POST /api/backup`) and secret-free JSON record/manifest export (`GET /api/export`).
-- [ ] Automated scheduled backups while running, automatic pre-upgrade backup hook in the launcher, and guided portable restore/import with document reconciliation.
+- [x] Backup inspection and verified isolated restore, with copied managed files, remapped document roots and a restore report; offline command and browser confirmation are available.
+- [x] Opt-in daily/weekly full backups while running, one overdue catch-up, failure backoff/status and manual run; verified pre-upgrade full backups in the launcher, with build/start refusal on verification failure and previous-image recovery.
+- [x] Portable restore activation on a clean installation, confirmed live-workspace replacement, managed-document path/hash reconciliation and crash-recoverable rollback. Existing host read-only connections are retained without expanding access.
+- [ ] Historical record merge/import with duplicate reconciliation (separate from full-workspace replacement).
 - [ ] Production remote host selection and authenticated HTTPS reverse proxy or VPN deployment configuration.
 
 ## Initial data model
@@ -182,7 +195,9 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] **Document/version:** opportunity or library association, kind, storage root & relative path, version, sha256 hash, approval state (`draft`/`approved`/`submitted`), generation metadata.
 - [x] **Task & Profile (added in v0.3):** persisted to-do items with due dates and opportunity links; workspace profile name and avatar.
 - [x] **Career Buddy chat & prepared chunks (added in v0.4):** provider configuration, locally extracted document text chunks, conversation messages, reviewed change proposals, and saved draft references.
-- [ ] **Standalone AI task table & reference profiles:** background task lifecycle/usage records, reusable CV/cover templates, and saved fit criteria profiles.
+- [x] **Persisted AI request/review state:** `buddy_requests`, `opportunity_automation` and host Codex queue metadata; lifecycle diagnostics are retained.
+- [x] **Criteria and templates:** saved required/preferred criteria profile, document categories, reusable marked DOCX templates and built-in layouts.
+- [ ] **Remaining model extensions:** named reusable reference profiles and task usage/cost/prompt-version records; see the unified scheduler item above.
 
 ## Delivery sequence
 
@@ -190,11 +205,16 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 2. [ ] **Existing-workflow integration:**
    - [x] Concurrent-device editing checks (`409` revision handling), host-folder retention across restarts, and read-only Obsidian mounting with explicit optional sync.
    - [x] Organise uploaded library documents into folders and upload selections over 500 with optional batches.
-   - [ ] Previewed import of chosen historical records (`Career Transition`, `Work/Applications`), attach-existing file workflow, duplicate detection, and guided backup/restore verification.
+   - [x] Attach-existing read-only folder/vault files, backup inspection and isolated restore with document verification.
+   - [x] Portable restore activation and managed-document reconciliation, verified on an empty isolated installation.
+   - [ ] Historical record import and duplicate matching (scope described above).
 3. [ ] **AI integration:**
    - [x] Multi-provider adapter, model discovery, local PDF/DOCX/text chunk retrieval, grounded opportunity chat, reviewed record updates, fit/salary/skills prompts, and versioned Word/Markdown draft generation.
-   - [ ] Stage 1 AI extraction, per-stage controls, template-preserving generation, PDF export, and external-assistant task-pack export/import.
-4. [ ] **Optional extensions:** calendar/email integrations, reminders, richer reporting, cloud storage providers (Google Drive/Docs), vector DB / Obsidian / directory sources, and Career Buddy sidebar chat.
+   - [x] Saved fit criteria, automatic reviews, standalone Buddy, request controls, built-in/marked-template layouts and PDF export.
+   - [ ] Stage 1 JD extraction with source passages/OCR/snapshots, per-stage controls, arbitrary-template fidelity and external-assistant task-pack exchange.
+4. [ ] **Optional extensions:**
+   - [x] Dashboard statistics, local SQLite vectors/hybrid retrieval, Obsidian/directory sources, standalone Buddy/history sidebar and Google Docs setup/snapshot connector.
+   - [ ] Calendar/email/reminders, additional reporting, external vector backends/cloud providers and live Google app authorization (deferred).
 
 ## Acceptance examples
 
@@ -206,7 +226,8 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Read/export all notes and communications as one chronological summary with AI disabled.
 - [x] Submit version 2 of a CV; generate version 3 later; the submission record still opens the original version 2 snapshot.
 - [x] Stop and restart the service; verify cards, dates, notes, attachments, settings, and task state survive. Interrupted AI work does not silently rerun.
-- [ ] Restore a backup into a clean installation through a guided restore workflow and verify the same records and managed documents are accessible *(backups are created with SQLite + files, but guided restore is not yet implemented)*.
+- [x] Create a verified private isolated restore from a selected backup through Settings, with restored files and remapped paths; leave the running board unchanged. Covered by fictional restore tests.
+- [x] Activate a transferred backup in a clean isolated installation and verify sign-in, records and submitted documents through the browser. Production remote hosting/access remains separate.
 - [x] Edit the same card from two devices and receive a clear conflict/reload choice rather than silently losing one edit.
 - [x] Start with the default launcher command, stop, and start again without editing Docker files or re-entering saved folders; verify the same board and documents reopen.
 - [x] Change a document subfolder in Settings and verify it persists. Request a new host folder outside current mounts, apply it with one launcher restart, and verify existing document links still work.
@@ -215,9 +236,11 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 ## Remaining choices
 
 - [ ] **Host:** existing computer/home server/NAS or a private cloud server; confirm its OS, persistent disk, and remote-access method so the one-command launcher and optional desktop shortcut can be tailored appropriately.
-- [ ] **Storage:** which existing folders should be connected, which documents should be copied into managed storage, and whether native Google Docs editing/export is required initially.
+- [x] **Storage approach:** managed copies plus selectable read-only folder/vault sources; Google Docs snapshot export/import available with app OAuth setup.
+- [ ] **Storage choices:** further user-selected source locations/migrations and whether native cloud editing/live references are required. These are configuration/product choices, not missing root/browse support.
 - [x] **AI adapter contract:** implemented in Career Buddy supporting OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible servers (specific live provider/model choice remains configurable by the user in Settings).
-- [ ] **Document templates:** identify the initial approved CV/cover templates and their layout requirements before implementing template-preserving generation and PDF export.
+- [x] **Initial template choice:** user requested built-in CV/cover templates and a recent Google Docs CV as private reference; presets, marked templates, previews and PDF export are implemented.
+- [ ] **Bespoke template approval:** approve final tailored layouts and address source-system pagination differences; do not assume the private reference CV is an approved generated template.
 
 ## Technical references
 
@@ -234,7 +257,7 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Automatic opportunity tags when a configured chat model is available; retain existing tags, model provenance and visible failure state.
 - [x] Automatically assess new/changed opportunities against the saved criteria profile; serialize/coalesce jobs, report skipped/interrupted/failed states, and leave stages/outcomes unchanged. Use the independent decision model when enabled, otherwise the enabled chat model. Library evidence is selected automatically when opted in; missing criteria/model is reported.
 - [x] Expanded recruiter intake fields include contact names/email/phone, reference, work arrangement, employment type, deadline and action dates. Preserve submitted notes/extracted text in the description within documented limits; uploaded originals remain retrievable in chat storage.
-- [x] Master CV creation from scratch or uploaded/library template structure, with follow-up questions, reviewed editable Word draft saves/downloads and explicit layout limitations. Exact template fonts/tables/page layout remain pending.
+- [x] Master CV creation from scratch or uploaded/library template structure, with follow-up questions, reviewed editable Word draft saves/downloads and explicit layout limitations. Document Studio now supports built-in and marked templates; arbitrary unmarked-template fidelity and cross-engine pagination remain pending.
 - [x] Template lookup by filename/configured folder among tracked library and selected vault sources; uploaded templates supported.
 - [x] General directory browsing/multiple roots and Google Docs OAuth configuration, setup instructions, read-only search and explicit versioned snapshot imports.
 - [ ] Validate Google Docs with the user’s own OAuth client and account after setup; currently verified with simulated Google responses. Connected Codex tools are not the board’s Google login.

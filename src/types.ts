@@ -9,6 +9,7 @@ export type StageId =
   | "outcome";
 export type Stage = { id: StageId; label: string };
 export type StageEvent = {
+  title?: string;
   id: string;
   stage: StageId;
   note: string;
@@ -27,10 +28,16 @@ export type Activity = {
   contact: string;
   isFinal: boolean;
   createdAt: string;
-  history?: unknown[];
+  direction?: "" | "incoming" | "outgoing";
+  channel?: string;
+  followUp?: string;
+  followUpDate?: string;
+  followUpDone?: boolean;
+  documentIds?: string[];
+  history?: (Partial<Omit<Activity, "history">> & { changedAt: string })[];
 };
 export type BoardDocument = {
-  category?:string;
+  category?: string;
   id: string;
   name: string;
   kind: string;
@@ -44,7 +51,36 @@ export type BoardDocument = {
   tags?: string[];
   url: string;
 };
+export type OpportunityReview = {
+  strengths: string;
+  gaps: string;
+  decision: "" | "proceed" | "ignore" | "defer";
+  reason: string;
+  effectiveAt: string;
+  recordedAt: string;
+  history?: (Omit<OpportunityReview, "history"> & { changedAt: string })[];
+};
+export type OpportunityOffer = {
+  id: string;
+  title: string;
+  compensation: string;
+  terms: string;
+  contact: string;
+  offeredAt: string;
+  responseDueDate: string;
+  startDate: string;
+  decision: "pending" | "accepted" | "declined" | "withdrawn" | "expired";
+  decidedAt: string;
+  decisionReason: string;
+  documentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  history?: (Omit<OpportunityOffer, "history"> & { changedAt: string })[];
+};
 export type Opportunity = {
+  applicationRoute?: string;
+  review?: OpportunityReview;
+  offers?: OpportunityOffer[];
   id: string;
   company: string;
   role: string;

@@ -256,3 +256,21 @@ test("planned interview queue excludes closed opportunities, communications and 
     ["first", "later", "undated"],
   );
 });
+
+test('rescheduled interviews stay upcoming and unfinished activity follow-ups join the dated action queue',()=>{
+  const activity={id:'a',kind:'interview',type:'custom panel',title:'Panel',status:'rescheduled',createdAt:'2026-10-29T10:00:00Z',scheduledAt:'2026-11-02',followUp:'Send slides',followUpDate:'2026-10-30'};
+  const o=opportunity('panel',{activities:[activity,{...activity,id:'done',followUpDone:true},{...activity,id:'cancelled',status:'cancelled'},{...activity,id:'comms',kind:'communication',status:'completed',followUp:'Reply to recruiter',followUpDate:'2026-10-29'}]});
+  assert.equal(plannedInterviews([o]).length,2);
+  const queue=buildActionQueue([task('later','2026-11-01')],[o]);
+  assert.deepEqual(queue.map(i=>i.title),['Reply to recruiter','Send slides','later']);assert.equal(queue[0].source,'activity');assert.equal(queue[0].opportunityId,o.id);
+  assert.equal(buildActionQueue([], [o], false).length,0);
+  assert.equal(buildActionQueue([], [{...o,outcome:'rejected'}]).length,0);
+  assert.equal(plannedInterviews([{...o,outcome:'rejected'}]).length,0);
+});
+
+test('pending offer deadlines join dated queues while accepted/declined offers never count as hires',()=>{
+ const offer={id:'initial',title:'Initial package',decision:'pending',responseDueDate:'2026-10-30',createdAt:'2026-10-29T10:00:00Z'};
+ const o=opportunity('offers',{stage:'final-interview',offers:[offer,{...offer,id:'accepted',decision:'accepted'},{...offer,id:'declined',decision:'declined'},{...offer,id:'undated',responseDueDate:''}]});
+ const rows=buildActionQueue([task('later','2026-11-01')],[o]);assert.deepEqual(rows.map(r=>r.title),['Respond to offer: Initial package','later']);assert.equal(rows[0].source,'offer');assert.equal(rows[0].opportunityId,o.id);assert.equal(buildActionQueue([],[o],false).length,0);assert.equal(buildActionQueue([],[{...o,outcome:'hired'}]).length,0);
+ assert.equal(dashboardMetrics([o],[],'Europe/London',now).outcomes.find(v=>v.id==='hired').count,0);
+});

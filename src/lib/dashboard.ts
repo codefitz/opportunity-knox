@@ -70,7 +70,7 @@ export function firstSubmission(opportunity: Opportunity): string {
 
 export type ActionItem = {
   id: string;
-  source: "task" | "opportunity";
+  source: "task" | "opportunity" | "activity" | "offer";
   title: string;
   dueDate: string;
   opportunityId: string;
@@ -119,7 +119,39 @@ export function buildActionQueue(
     });
   if (includeOpportunityActions) {
     for (const opportunity of opportunities) {
-      if (opportunity.outcome || !opportunity.nextAction.trim()) continue;
+      if (!opportunity.outcome)
+        for (const offer of opportunity.offers || []) {
+          if (offer.decision !== "pending" || !offer.responseDueDate) continue;
+          rows.push({
+            id: `offer:${opportunity.id}:${offer.id}`,
+            source: "offer",
+            title: `Respond to offer: ${offer.title}`,
+            dueDate: offer.responseDueDate,
+            opportunityId: opportunity.id,
+            opportunityLabel: `${opportunity.company} · ${opportunity.role}`,
+            createdAt: offer.createdAt,
+          });
+        }
+      if (!opportunity.outcome)
+        for (const activity of opportunity.activities || []) {
+          if (
+            !activity.followUp?.trim() ||
+            activity.followUpDone ||
+            activity.status === "cancelled"
+          )
+            continue;
+          rows.push({
+            id: `activity:${opportunity.id}:${activity.id}`,
+            source: "activity",
+            title: activity.followUp,
+            dueDate: activity.followUpDate || "",
+            opportunityId: opportunity.id,
+            opportunityLabel: `${opportunity.company} · ${opportunity.role} · ${activity.title}`,
+            createdAt: activity.createdAt,
+          });
+        }
+      if (opportunity.outcome || !(opportunity.nextAction || "").trim())
+        continue;
       rows.push({
         id: `opportunity:${opportunity.id}`,
         source: "opportunity",
@@ -139,7 +171,10 @@ export function plannedInterviews(opportunities: Opportunity[]) {
   for (const opportunity of opportunities) {
     if (opportunity.outcome) continue;
     for (const activity of opportunity.activities || []) {
-      if (activity.kind === "interview" && activity.status === "planned") {
+      if (
+        activity.kind === "interview" &&
+        ["planned", "rescheduled"].includes(activity.status)
+      ) {
         interviews.push({ opportunity, activity });
       }
     }

@@ -1,3 +1,11 @@
+import ReliabilitySettings from "./components/ReliabilitySettings";
+import {useUploadQueue} from "./components/useUploadQueue";
+import {calendarDay} from "./lib/dashboard";
+import OpportunityFiltersToolbar from "./components/OpportunityFilters";
+import {defaultOpportunityFilters,filterOpportunities,overdueOpportunityIds} from "./lib/opportunity-filters";
+import {OpportunityReviewForm,OpportunityOffers} from "./components/OpportunityWorkflow";
+import Feedback from "./components/Feedback";
+import ApplicationPacks from "./components/ApplicationPacks";
 import DocumentCategory from "./components/DocumentCategory";
 import documentCategories from "../server/document-categories.json";
 import DocumentStudio from "./components/DocumentStudio";
@@ -265,8 +273,7 @@ export default function App() {
     appearanceRevision = useRef(0);
   appearanceSettingsRef.current = settings;
   const [page, setPage] = useState<Page>(routePage),
-    [search, setSearch] = useState(""),
-    [filter, setFilter] = useState("active");
+    [opportunityFilters, setOpportunityFilters] = useState({...defaultOpportunityFilters,tags:[] as string[]});
   const [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true),
@@ -588,28 +595,19 @@ export default function App() {
     setNewText("");
     setNewOpen(true);
   }
-  const filtered = opportunities.filter(
-    (o) =>
-      (filter === "all" ||
-        (filter === "active"
-          ? !o.outcome
-          : filter === "completed"
-            ? !!o.outcome
-            : o.outcome === filter)) &&
-      `${o.company} ${o.role} ${o.tags?.join(" ")} ${o.location}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
+  const filterTimezone = settings?.timezone || "Europe/London";
+  const filterNow = new Date();
+  const overdueIds = overdueOpportunityIds(opportunities,tasks,calendarDay(filterNow,filterTimezone));
+  const filtered = filterOpportunities(opportunities,opportunityFilters,overdueIds,filterTimezone,filterNow);
   const active = opportunities.filter((o) => !o.outcome),
     interviews = active.filter((o) =>
       ["interviews", "final-interview"].includes(o.stage),
     ),
-    overdue = active.filter(
-      (o) => o.nextActionDate && o.nextActionDate < today(settings?.timezone),
-    );
+    overdue = active.filter(o => overdueIds.has(o.id));
   if (bootError)
     return (
       <div className="auth-screen">
+        <Feedback authenticated={false}/>
         <div className="auth-card">
           <h1>Let’s reconnect.</h1>
           <p>{bootError}</p>
@@ -625,13 +623,15 @@ export default function App() {
   if (!session)
     return (
       <div className="auth-screen">
+        <Feedback authenticated={false}/>
         <Busy text="Opening your workspace…" />
       </div>
     );
   if (!session.authenticated)
-    return <Auth session={session} token={token} onDone={setSession} />;
+    return <><Feedback authenticated={false}/><Auth session={session} token={token} onDone={setSession} /></>;
   return (
     <div className="app-shell">
+      <Feedback authenticated={true}/>
       <aside className="sidebar">
         <a
           className="brand"
@@ -901,7 +901,7 @@ export default function App() {
               />
               <Metric
                 icon={<Clock3 size={17} />}
-                label="Follow-ups overdue"
+                label="Overdue actions"
                 value={overdue.length}
                 tone="amber"
               />
@@ -918,39 +918,7 @@ export default function App() {
                 tone="blue"
               />
             </div>
-            <div className="board-toolbar">
-              <span className="view-caption">
-                {page === "board" ? "PIPELINE VIEW" : "OPPORTUNITY REGISTER"}
-              </span>
-              <div className="toolbar-right">
-                <div className="search-input">
-                  <Search size={16} />
-                  <input
-                    aria-label="Search opportunities"
-                    placeholder="Search opportunities…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
-                <label className="filter-select">
-                  <span className="sr-only">Filter by outcome</span>
-                  <select
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                  >
-                    <option value="active">Active opportunities</option>
-                    <option value="completed">Completed</option>
-                    <option value="all">All opportunities</option>
-                    {OUTCOMES.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} />
-                </label>
-              </div>
-            </div>
+            <OpportunityFiltersToolbar value={opportunityFilters} onChange={setOpportunityFilters} opportunities={opportunities} resultCount={filtered.length} board={page==="board"} timezone={filterTimezone}/>
             {loading ? (
               <div className="loading-board">
                 <Busy text="Loading your opportunities…" />
@@ -1096,7 +1064,7 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
-                {!filtered.length && (
+                {!opportunities.length && (
                   <div className="empty-state">
                     <Search size={26} />
                     <h3>
@@ -1668,6 +1636,19 @@ function NewOpportunity({
                 placeholder="Permanent, contract…"
               />
             </Field>
+            <Field
+              label="Application route"
+              hint="Where and how to apply; submission packs retain their own recorded route."
+            >
+              <input
+                maxLength={10000}
+                value={form.applicationRoute || ""}
+                onChange={(e) =>
+                  setForm({ ...form, applicationRoute: e.target.value })
+                }
+                placeholder="Employer portal, recruiter, email…"
+              />
+            </Field>
             <Field label="Job reference">
               <input
                 value={form.jobReference}
@@ -1720,7 +1701,6 @@ function NewOpportunity({
     </Modal>
   );
 }
-
 function OpportunityDetail({
   opportunity: o,
   timezone,
@@ -1789,6 +1769,7 @@ function OpportunityDetail({
           ["decision", "Fit assessment"],
           ["timeline", "Timeline & notes"],
           ["activities", "Interviews & comms"],
+          ["offers", "Offers"],
           ["documents", "Documents"],
           ["summary", "Summary"],
           ["buddy", "Career Buddy"],
@@ -1850,6 +1831,8 @@ function OpportunityDetail({
           />
         )}{" "}
         {tab === "documents" && (
+          <>
+          <ApplicationPacks opportunity={o} timezone={timezone} onChanged={onReload} onError={onError}/>
           <Documents
             documents={o.documents || []}
             opportunityId={o.id}
@@ -1860,8 +1843,10 @@ function OpportunityDetail({
               if (e instanceof ApiError && e.status === 401) onError(e);
             }}
           />
+          </>
         )}{" "}
-        {tab === "decision" && <DecisionReview opportunity={o} onError={onError} />}
+        {tab === "decision" && <><OpportunityReviewForm key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/><DecisionReview opportunity={o} onError={onError} /></>}
+        {tab === "offers" && <OpportunityOffers key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/>}
         {tab === "summary" && <Summary o={o} timezone={timezone} />}
         {tab === "buddy" && (
           <CareerBuddy
@@ -1894,6 +1879,7 @@ function Overview({
           "role",
           "url",
           "jobReference",
+          "applicationRoute",
           "location",
           "workMode",
           "salary",
@@ -2072,6 +2058,17 @@ function Overview({
         <Field label="Contact">
           <input value={form.contact} onChange={set("contact")} />
         </Field>
+        <Field
+          label="Application route"
+          hint="Where and how to apply; submission packs retain their own recorded route."
+        >
+          <input
+            maxLength={10000}
+            value={form.applicationRoute}
+            onChange={set("applicationRoute")}
+            placeholder="Employer portal, recruiter, email…"
+          />
+        </Field>
         <Field label="Job reference">
           <input value={form.jobReference} onChange={set("jobReference")} />
         </Field>
@@ -2214,7 +2211,11 @@ function Timeline({
               <span className="timeline-dot" />
               <div className="timeline-content">
                 <div className="timeline-header">
-                  <strong>{stageLabel(event.stage)}</strong>
+                  <strong>
+                    {event.title
+                      ? `${event.title} · ${stageLabel(event.stage)}`
+                      : stageLabel(event.stage)}
+                  </strong>
                   <time>{formatDate(event.effectiveAt, timezone, true)}</time>
                   <button
                     className="text-button"
@@ -2312,11 +2313,50 @@ function Activities({
     notes: "",
     contact: "",
     isFinal: false,
+    direction: "",
+    channel: "",
+    followUp: "",
+    followUpDate: "",
+    followUpDone: false,
+    documentIds: [] as string[],
   };
   const [form, setForm] = useState(empty),
     [open, setOpen] = useState(false),
     [editId, setEditId] = useState("");
+  const [saving, setSaving] = useState(false),
+    [error, setError] = useState("");
+  const [files, setFiles] = useState<{ file: File; requestId: string }[]>([]);
+  const [uploaded, setUploaded] = useState<BoardDocument[]>([]);
+  const documents = [...(o.documents || []), ...uploaded].filter(
+    (d, i, all) => all.findIndex((v) => v.id === d.id) === i,
+  );
+  function attachments(ids: string[] = []) {
+    return ids.length ? (
+      <ul className="activity-attachments">
+        {ids.map((id) => {
+          const doc = documents.find((d) => d.id === id);
+          return (
+            <li key={id}>
+              {doc ? (
+                <a
+                  href={doc.url || `/api/documents/${id}/content`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {doc.name} · v{doc.version}
+                </a>
+              ) : (
+                <span>Attachment unavailable (removed document)</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    ) : null;
+  }
   function edit(a: Activity) {
+    setError("");
+    setFiles([]);
     setForm({
       kind: a.kind,
       type: a.type,
@@ -2326,31 +2366,71 @@ function Activities({
       notes: a.notes,
       contact: a.contact,
       isFinal: a.isFinal,
+      direction: a.direction || "",
+      channel: a.channel || (a.kind === "communication" ? a.type : ""),
+      followUp: a.followUp || "",
+      followUpDate: a.followUpDate || "",
+      followUpDone: a.followUpDone || false,
+      documentIds: a.documentIds || [],
     });
     setEditId(a.id);
     setOpen(true);
   }
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (
-      await mutate(
-        `/opportunities/${o.id}/activities${editId ? `/${editId}` : ""}`,
-        {
-          ...form,
-          scheduledAt: editedTimestamp(
-            form.scheduledAt,
-            editId
-              ? o.activities?.find((a) => a.id === editId)?.scheduledAt
-              : undefined,
-          ),
-          revision: o.revision,
-        },
-        editId ? "PATCH" : "POST",
-      )
-    ) {
-      setOpen(false);
-      setEditId("");
-      setForm(empty);
+    setSaving(true);
+    setError("");
+    try {
+      const documentIds = [...form.documentIds];
+      for (const item of files) {
+        const doc = await api<BoardDocument>(
+          "/documents",
+          json({
+            opportunityId: o.id,
+            name: item.file.name,
+            kind: "other",
+            status: "draft",
+            contentBase64: await readFile(item.file),
+            importRequestId: item.requestId,
+          }),
+        );
+        documentIds.push(doc.id);
+        setUploaded((current) => [...current, doc]);
+        setForm((current) => ({
+          ...current,
+          documentIds: [...new Set([...current.documentIds, doc.id])],
+        }));
+        setFiles((current) =>
+          current.filter((v) => v.requestId !== item.requestId),
+        );
+      }
+      if (
+        await mutate(
+          `/opportunities/${o.id}/activities${editId ? `/${editId}` : ""}`,
+          {
+            ...form,
+            documentIds: [...new Set(documentIds)],
+            scheduledAt: editedTimestamp(
+              form.scheduledAt,
+              editId
+                ? o.activities?.find((a) => a.id === editId)?.scheduledAt
+                : undefined,
+            ),
+            revision: o.revision,
+          },
+          editId ? "PATCH" : "POST",
+        )
+      ) {
+        setOpen(false);
+        setEditId("");
+        setForm(empty);
+      }
+    } catch (e) {
+      setError(
+        `${displayError(e)} Uploaded files remain in this opportunity’s Documents tab; you can retry saving this activity.`,
+      );
+    } finally {
+      setSaving(false);
     }
   }
   return (
@@ -2362,8 +2442,11 @@ function Activities({
         </div>
         <button
           className="button secondary small"
+          disabled={saving || busy}
           onClick={() => {
             setForm(empty);
+            setFiles([]);
+            setError("");
             setEditId("");
             setOpen(!open);
           }}
@@ -2372,108 +2455,279 @@ function Activities({
           Add activity
         </button>
       </div>
+      {error && (
+        <div className="alert error" role="alert">
+          {error}
+        </div>
+      )}
       {open && (
         <form className="inset-form" onSubmit={submit}>
-          <div className="form-grid">
-            <Field label="Activity">
-              <select
-                value={form.kind}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    kind: e.target.value,
-                    type:
-                      e.target.value === "communication" ? "email" : "video",
-                  })
-                }
-              >
-                <option value="interview">Interview / assessment</option>
-                <option value="communication">Communication</option>
-              </select>
-            </Field>
-            <Field label="Format">
-              <select
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
-              >
-                {[
-                  ["text", "Text / written"],
-                  ["phone", "Phone"],
-                  ["video", "Video"],
-                  ["in-person", "In-person"],
-                  ["assessment", "Assessment"],
-                  ["email", "Email"],
-                  ["other", "Other"],
-                ].map(([id, label]) => (
-                  <option value={id} key={id}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Title" wide>
-              <input
-                required
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="First conversation, technical interview…"
-              />
-            </Field>
-            <Field label="Date and time" hint="Uses this device’s timezone.">
-              <input
-                type="datetime-local"
-                value={form.scheduledAt}
-                onChange={(e) =>
-                  setForm({ ...form, scheduledAt: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Status">
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-              >
-                <option value="planned">Planned</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </Field>
-            <Field label="Contact / participants" wide>
-              <input
-                value={form.contact}
-                onChange={(e) => setForm({ ...form, contact: e.target.value })}
-              />
-            </Field>
-            <Field label="Notes / preparation" wide>
-              <textarea
-                rows={4}
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              />
-            </Field>
-            {form.kind === "interview" && (
+          <fieldset className="activity-form-fields" disabled={saving || busy}>
+            <div className="form-grid">
+              <Field label="Activity">
+                <select
+                  value={form.kind}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      kind: e.target.value,
+                      type:
+                        e.target.value === "communication" ? "email" : "video",
+                      channel:
+                        e.target.value === "communication" ? "email" : "",
+                      direction:
+                        e.target.value === "communication"
+                          ? form.direction
+                          : "",
+                      isFinal:
+                        e.target.value === "interview" ? form.isFinal : false,
+                    })
+                  }
+                >
+                  <option value="interview">Interview / assessment</option>
+                  <option value="communication">Communication</option>
+                </select>
+              </Field>
+              {form.kind === "communication" ? (
+                <>
+                  <Field label="Direction">
+                    <select
+                      value={form.direction}
+                      onChange={(e) =>
+                        setForm({ ...form, direction: e.target.value })
+                      }
+                    >
+                      <option value="">Not recorded</option>
+                      <option value="incoming">Incoming</option>
+                      <option value="outgoing">Outgoing</option>
+                    </select>
+                  </Field>
+                  <Field label="Channel">
+                    <input
+                      maxLength={100}
+                      list="activity-channels"
+                      value={form.channel}
+                      onChange={(e) =>
+                        setForm({ ...form, channel: e.target.value })
+                      }
+                      placeholder="Email, LinkedIn, phone…"
+                    />
+                    <datalist id="activity-channels">
+                      {[
+                        "email",
+                        "phone",
+                        "text",
+                        "video",
+                        "in-person",
+                        "LinkedIn",
+                        "WhatsApp",
+                        "recruiter portal",
+                        "other",
+                      ].map((v) => (
+                        <option key={v} value={v} />
+                      ))}
+                    </datalist>
+                  </Field>
+                </>
+              ) : (
+                <Field
+                  label="Interview type / format"
+                  hint="Choose a suggestion or enter your own type."
+                >
+                  <input
+                    required
+                    maxLength={100}
+                    list="interview-types"
+                    value={form.type}
+                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  />
+                  <datalist id="interview-types">
+                    {[
+                      "text",
+                      "phone",
+                      "video",
+                      "in-person",
+                      "assessment",
+                      "technical panel",
+                      "presentation",
+                      "other",
+                    ].map((v) => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
+                </Field>
+              )}
+              <Field label="Title" wide>
+                <input
+                  required
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="First conversation, technical interview…"
+                />
+              </Field>
+              <Field label="Date and time" hint="Uses this device’s timezone.">
+                <input
+                  type="datetime-local"
+                  value={form.scheduledAt}
+                  onChange={(e) =>
+                    setForm({ ...form, scheduledAt: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Status">
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                >
+                  <option value="planned">Planned</option>
+                  <option value="rescheduled">Rescheduled</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </Field>
+              <Field label="Contact / participants" wide>
+                <input
+                  value={form.contact}
+                  onChange={(e) =>
+                    setForm({ ...form, contact: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Notes / preparation" wide>
+                <textarea
+                  rows={4}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </Field>
+              <Field label="Follow-up" wide>
+                <textarea
+                  rows={2}
+                  maxLength={50000}
+                  value={form.followUp}
+                  onChange={(e) =>
+                    setForm({ ...form, followUp: e.target.value })
+                  }
+                  placeholder="Send a thank-you, ask about next steps…"
+                />
+              </Field>
+              <Field label="Follow-up due date">
+                <input
+                  type="date"
+                  value={form.followUpDate}
+                  onChange={(e) =>
+                    setForm({ ...form, followUpDate: e.target.value })
+                  }
+                />
+              </Field>
               <label className="check-field">
                 <input
                   type="checkbox"
-                  checked={form.isFinal}
+                  checked={form.followUpDone}
                   onChange={(e) =>
-                    setForm({ ...form, isFinal: e.target.checked })
+                    setForm({ ...form, followUpDone: e.target.checked })
                   }
                 />
-                Final-stage interview
+                Follow-up completed
               </label>
-            )}
-          </div>
+              <fieldset className="activity-document-picker">
+                <legend>Attachments</legend>
+                <p className="quiet-empty">
+                  Choose opportunity documents or upload files. Originals stay
+                  in the Documents tab when a link is removed.
+                </p>
+                {documents.map((d) => (
+                  <label className="check-field" key={d.id}>
+                    <input
+                      type="checkbox"
+                      checked={form.documentIds.includes(d.id)}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          documentIds: e.target.checked
+                            ? [...form.documentIds, d.id]
+                            : form.documentIds.filter((id) => id !== d.id),
+                        })
+                      }
+                    />
+                    {d.name} · v{d.version}
+                  </label>
+                ))}
+                {form.documentIds
+                  .filter((id) => !documents.some((d) => d.id === id))
+                  .map((id) => (
+                    <label className="check-field" key={id}>
+                      <input
+                        type="checkbox"
+                        checked
+                        onChange={() =>
+                          setForm({
+                            ...form,
+                            documentIds: form.documentIds.filter(
+                              (v) => v !== id,
+                            ),
+                          })
+                        }
+                      />
+                      Unavailable attachment — untick to unlink
+                    </label>
+                  ))}
+                <label>
+                  Upload files (up to 15 MB each)
+                  <input
+                    type="file"
+                    multiple
+                    disabled={saving}
+                    onChange={(e) => {
+                      const selected = Array.from(e.target.files || []).map(
+                        (file) => ({ file, requestId: crypto.randomUUID() }),
+                      );
+                      setFiles((current) => [...current, ...selected]);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {files.map((item) => (
+                  <div key={item.requestId}>
+                    {item.file.name}{" "}
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={saving}
+                      onClick={() =>
+                        setFiles((current) => current.filter((v) => v !== item))
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </fieldset>
+              {form.kind === "interview" && (
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={form.isFinal}
+                    onChange={(e) =>
+                      setForm({ ...form, isFinal: e.target.checked })
+                    }
+                  />
+                  Final-stage interview
+                </label>
+              )}
+            </div>
+          </fieldset>
           <div className="form-actions">
             <button
               type="button"
               className="button secondary small"
+              disabled={saving || busy}
               onClick={() => setOpen(false)}
             >
               Cancel
             </button>
-            <button className="button primary small" disabled={busy}>
-              {busy ? <Busy text="Saving…" /> : "Save activity"}
+            <button className="button primary small" disabled={busy || saving}>
+              {busy || saving ? <Busy text="Saving…" /> : "Save activity"}
             </button>
           </div>
         </form>
@@ -2513,21 +2767,78 @@ function Activities({
                     {a.isFinal && <Badge kind="purple">Final stage</Badge>}
                   </div>
                   <p className="activity-meta">
-                    {a.type} ·{" "}
+                    {a.kind === "communication"
+                      ? [
+                          a.direction || "Direction not recorded",
+                          a.channel || a.type,
+                        ].join(" · ")
+                      : a.type}{" "}
+                    ·{" "}
                     {a.scheduledAt
                       ? formatDate(a.scheduledAt, timezone, true)
                       : "Date to be confirmed"}
                     {a.contact ? ` · ${a.contact}` : ""}
                   </p>
                   {a.notes && <p className="preserve-lines">{a.notes}</p>}
+                  {a.followUp && (
+                    <p className="preserve-lines">
+                      <strong>
+                        Follow-up{a.followUpDone ? " (completed)" : ""}:
+                      </strong>{" "}
+                      {a.followUp}
+                      {a.followUpDate
+                        ? ` · Due ${formatDate(a.followUpDate, timezone)}`
+                        : ""}
+                    </p>
+                  )}
+                  {attachments(a.documentIds)}
                   {!!a.history?.length && (
-                    <small>
-                      {a.history.length} earlier revision
-                      {a.history.length === 1 ? "" : "s"} retained
-                    </small>
+                    <details className="activity-history">
+                      <summary>
+                        {a.history.length} earlier revision
+                        {a.history.length === 1 ? "" : "s"} retained
+                      </summary>
+                      {[...a.history].reverse().map((h, i) => (
+                        <article key={i}>
+                          <strong>
+                            Changed {formatDate(h.changedAt, timezone, true)}
+                          </strong>
+                          <p>
+                            {h.title || a.title} · {h.kind || a.kind} ·{" "}
+                            {h.channel || h.type || ""}
+                            {h.direction ? ` · ${h.direction}` : ""} ·{" "}
+                            {h.status}
+                            {h.isFinal ? " · Final stage" : ""}
+                          </p>
+                          <p>
+                            {h.scheduledAt
+                              ? formatDate(h.scheduledAt, timezone, true)
+                              : "Date to be confirmed"}
+                            {h.contact ? ` · ${h.contact}` : ""}
+                          </p>
+                          {h.notes && (
+                            <p className="preserve-lines">{h.notes}</p>
+                          )}
+                          {h.followUp && (
+                            <p className="preserve-lines">
+                              Follow-up{h.followUpDone ? " (completed)" : ""}:{" "}
+                              {h.followUp}
+                              {h.followUpDate
+                                ? ` · Due ${formatDate(h.followUpDate, timezone)}`
+                                : ""}
+                            </p>
+                          )}
+                          {attachments(h.documentIds)}
+                        </article>
+                      ))}
+                    </details>
                   )}
                 </div>
-                <button className="text-button" onClick={() => edit(a)}>
+                <button
+                  className="text-button"
+                  disabled={saving || busy}
+                  onClick={() => edit(a)}
+                >
                   Edit
                 </button>
               </article>
@@ -2570,8 +2881,7 @@ function Documents({
   selectedTag?: string;
   onSelectTag?: (tag: string) => void;
 }) {
-  const [files, setFiles] = useState<DroppedFile[]>([]),
-    [kind, setKind] = useState(opportunityId ? "jd" : "reference"),
+  const [kind, setKind] = useState(opportunityId ? "jd" : "reference"),
     [status, setStatus] = useState("draft"),
     [notes, setNotes] = useState(""),
     [busy, setBusy] = useState(false),
@@ -2598,6 +2908,10 @@ function Documents({
     [moveError, setMoveError] = useState(""),
     [moving, setMoving] = useState(false);
   const [categoryFilter,setCategoryFilter]=useState(''),[uploadCategory,setUploadCategory]=useState(''),[bulkCategory,setBulkCategory]=useState(''),[categorising,setCategorising]=useState(false);
+  const queue=useUploadQueue(opportunityId, options=>{setKind(options.kind);setStatus(options.status);setNotes(options.notes);setUploadCategory(options.category);setBatchUploads(options.batchUploads);});
+  const files=queue.files,uploadAbort=useRef<AbortController|null>(null);
+  useEffect(()=>()=>uploadAbort.current?.abort(),[]);
+  useEffect(()=>{if(queue.ready)void queue.saveOptions({kind,status,notes,category:uploadCategory,batchUploads});},[queue.ready,kind,status,notes,uploadCategory,batchUploads]);
   const documents=useMemo(()=>allDocuments.filter(d=>!categoryFilter||d.category===categoryFilter),[allDocuments,categoryFilter]);
   async function categoriseSelected(){if(!bulkCategory||!selectedForMove.length)return;setCategorising(true);try{await api('/documents/categories',json({category:bulkCategory,documents:movableDocuments.filter(d=>selectedForMove.includes(d.id)).map(d=>({id:d.id,revision:d.revision??1}))}));setSelectedForMove([]);onChanged();onNotice?.('Document categories saved. Files stay in their current folders.');}catch(e){onError(e);}finally{setCategorising(false);}}
   const movableDocuments = documents.filter((d) => {
@@ -2669,25 +2983,13 @@ function Documents({
     if (groupByFolder) setExpandedFolders({});
   }, [groupByFolder]);
   function addQueued(incoming: DroppedFile[]) {
-    if (!incoming.length) return;
-    setFiles((current) => {
-      const seen = new Set(current.map((item) => item.path));
-      const merged = [...current];
-      for (const item of incoming) {
-        if (!seen.has(item.path)) {
-          seen.add(item.path);
-          merged.push(item);
-        }
-      }
-      return merged;
-    });
+    if(incoming.length)void queue.add(incoming).catch(onError);
   }
   useEffect(() => {
-    if (externalQueue?.length) {
-      addQueued(externalQueue);
-      onExternalQueueConsumed?.();
+    if (externalQueue?.length && queue.ready) {
+      void queue.add(externalQueue).then(()=>onExternalQueueConsumed?.()).catch(onError);
     }
-  }, [externalQueue]);
+  }, [externalQueue,queue.ready]);
   async function handleDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -2706,13 +3008,16 @@ function Documents({
   }
   async function upload(e: FormEvent) {
     e.preventDefault();
-    if (!files.length || busy) return;
+    if (!files.length || busy || !queue.ready) return;
     setBusy(true);
     const batch = batchUploads ? files.slice(0, 500) : files;
     const succeeded = new Set<string>();
     const failed: { path: string; message: string }[] = [];
     try {
+      await queue.begin();
+      uploadAbort.current = new AbortController();
       for (let i = 0; i < batch.length; i++) {
+        if (uploadAbort.current.signal.aborted) break;
         const item = batch[i];
         setProgress(
           batch.length > 1
@@ -2720,20 +3025,32 @@ function Documents({
             : `Uploading ${item.path}…`,
         );
         try {
-          await api(
-            "/documents",
-            json({
-              opportunityId,
-              name: item.path,
-              contentBase64: await readFile(item.file),
+          const stored = await queue.attempt(item, {
               kind,
               status,
               notes,
-              ...(uploadCategory?{category:uploadCategory}:{}),
+              category: uploadCategory,
+              batchUploads,
             }),
-          );
+            options = stored.attempt!;
+          await api("/documents", {
+            ...json({
+              opportunityId,
+              name: item.path,
+              contentBase64: await readFile(item.file),
+              kind: options.kind,
+              status: options.status,
+              notes: options.notes,
+              importRequestId: stored.id,
+              ...(options.category ? { category: options.category } : {}),
+            }),
+            signal: uploadAbort.current.signal,
+          });
+          await queue.complete(item);
           succeeded.add(item.path);
         } catch (err) {
+          if (uploadAbort.current?.signal.aborted) break;
+          await queue.failed(item, displayError(err));
           if (err instanceof ApiError && err.status === 401) throw err;
           failed.push({ path: item.path, message: displayError(err) });
         }
@@ -2745,23 +3062,27 @@ function Documents({
         );
       }
       if (failed.length) {
-        onError(new Error(
-          `Could not upload ${failed.length} file${failed.length === 1 ? "" : "s"}: ${failed.slice(0, 3).map((item) => `${item.path} (${item.message})`).join("; ")}${failed.length > 3 ? ` (+${failed.length - 3} more)` : ""}. Failed files remain in the queue.`,
-        ));
+        onError(
+          new Error(
+            `Could not upload ${failed.length} file${failed.length === 1 ? "" : "s"}: ${failed
+              .slice(0, 3)
+              .map((item) => `${item.path} (${item.message})`)
+              .join(
+                "; ",
+              )}${failed.length > 3 ? ` (+${failed.length - 3} more)` : ""}. Failed files remain in the queue.`,
+          ),
+        );
       }
       if (!remaining) setNotes("");
     } catch (error) {
       onError(error);
     } finally {
       if (succeeded.size) {
-        // Keep unattempted files ahead of failures, so later batches can proceed.
-        const failedPaths = new Set(failed.map((item) => item.path));
-        setFiles((current) => [
-          ...current.filter((item) => !succeeded.has(item.path) && !failedPaths.has(item.path)),
-          ...current.filter((item) => failedPaths.has(item.path)),
-        ]);
+        await queue.refresh();
         onChanged();
       }
+      uploadAbort.current = null;
+      await queue.end();
       setBusy(false);
       setProgress("");
     }
@@ -2812,6 +3133,8 @@ function Documents({
       />
       <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>d.category===c.id).length})</option>)}</select></label>
       <DocumentStudio onError={onError} onChanged={onChanged} opportunityId={opportunityId}/>
+      {queue.error&&<div className="alert error" role="alert">{queue.error} Queue changes could not be saved. Free browser storage or choose fewer files, then select them again; originals are unchanged.</div>}
+      <p className="quiet-empty" role="status">{!queue.ready?"Opening saved upload queue…":queue.saving?"Saving files to this browser…":files.length?`${files.length} ${files.length===1?"file":"files"} saved in this browser’s upload queue. Reloading or closing this tab will not clear them. Select Upload to resume.`:"Selected files are kept in this browser until uploaded or removed."} Browser storage limits apply; this queue is private to this browser and is not part of server backups.</p>
       <form className="document-upload" onSubmit={upload}>
         <label
           className={`upload-drop ${files.length ? "has-file" : ""} ${dragOver ? "drag-active" : ""}`}
@@ -2836,10 +3159,11 @@ function Documents({
             key={files.map((f) => f.path).join("|") || "empty"}
             type="file"
             multiple
-            disabled={busy}
+            disabled={busy || !queue.ready || queue.saving}
             onChange={(e) => addQueued(collectFileList(e.target.files))}
           />
         </label>
+        {busy&&<button type="button" className="button secondary small" onClick={()=>uploadAbort.current?.abort()}>Pause uploads</button>}
         {files.length > 0 && (
           <>
             {(files.length > 500 || batchUploads) && (
@@ -2852,23 +3176,23 @@ function Documents({
                 {batchUploads && <small>After each batch, the remaining files stay queued. Select the upload button to continue.</small>}
               </div>
             )}
-            {files.length > 1 && (
+            {files.length > 0 && (
               <div className="upload-queue" aria-label="Queued files">
                 <div className="upload-queue-header">
-                  <strong>{files.length} files ready to upload</strong>
+                  <strong>{files.length} {files.length===1?"file":"files"} ready to upload</strong>
                   <button
                     type="button"
                     className="text-button"
                     disabled={busy}
-                    onClick={() => setFiles([])}
+                    onClick={() => void queue.remove(null)}
                   >
                     Clear all
                   </button>
                 </div>
                 <ul className="upload-queue-list">
                   {files.slice(0, 25).map((item) => (
-                    <li key={item.path}>
-                      <span>{item.path}</span>
+                    <li key={item.id}>
+                      <span>{item.path}{item.attempt&&<small> · Retry retains original document options</small>}{item.error&&<small> · {item.error}</small>}</span>
                       <small>
                         {Math.max(1, Math.round(item.file.size / 1024))} KB
                       </small>
@@ -2877,11 +3201,7 @@ function Documents({
                         className="icon-button"
                         disabled={busy}
                         aria-label={`Remove ${item.path}`}
-                        onClick={() =>
-                          setFiles((current) =>
-                            current.filter((x) => x.path !== item.path),
-                          )
-                        }
+                        onClick={() => void queue.remove([item.id])}
                       >
                         <X size={13} />
                       </button>
@@ -2935,11 +3255,11 @@ function Documents({
                 type="button"
                 className="button secondary small"
                 disabled={busy}
-                onClick={() => setFiles([])}
+                onClick={() => void queue.remove(null)}
               >
                 Cancel
               </button>
-              <button className="button primary small" disabled={busy}>
+              <button className="button primary small" disabled={busy || !queue.ready || queue.saving}>
                 {busy ? (
                   <Busy text={progress || "Uploading…"} />
                 ) : (
@@ -3709,14 +4029,21 @@ function Summary({ o, timezone }: { o: Opportunity; timezone: string }) {
   const entries = [
     ...(o.events || []).map((e) => ({
       date: e.effectiveAt,
-      title: stageLabel(e.stage),
+      title: e.title || stageLabel(e.stage),
       text: e.note || "Entered this stage.",
     })),
     ...(o.activities || []).map((a) => ({
       date: a.scheduledAt || a.createdAt,
       title: `${a.kind === "interview" ? "Interview" : "Communication"}: ${a.title}`,
       text: [
-        `${a.type} · ${a.status}${a.isFinal ? " · Final stage" : ""}`,
+        `${a.kind === "communication" ? [a.direction || "Direction not recorded", a.channel || a.type].join(" · ") : a.type} · ${a.status}${a.isFinal ? " · Final stage" : ""}`,
+        a.followUp
+          ? `Follow-up${a.followUpDone ? " (completed)" : ""}: ${a.followUp}${a.followUpDate ? ` · Due ${formatDate(a.followUpDate, timezone)}` : ""}`
+          : "",
+        ...(a.documentIds || []).map(
+          (id) =>
+            `Attachment: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
+        ),
         a.contact,
         a.notes,
       ]
@@ -3728,6 +4055,41 @@ function Summary({ o, timezone }: { o: Opportunity; timezone: string }) {
     `${o.role} — ${o.company}`,
     `Stage: ${stageLabel(o.stage)}${o.outcome ? ` | Outcome: ${o.outcome}` : ""}`,
     o.url ? `Job link: ${o.url}` : "",
+    o.applicationRoute ? `Application route: ${o.applicationRoute}` : "",
+    ...(o.review
+      ? [
+          "CURRENT REVIEW",
+          `Decision: ${o.review.decision || "Not decided"}`,
+          o.review.strengths ? `Strengths: ${o.review.strengths}` : "",
+          o.review.gaps ? `Gaps: ${o.review.gaps}` : "",
+          o.review.reason ? `Reason: ${o.review.reason}` : "",
+        ]
+      : []),
+    ...(o.offers?.length
+      ? [
+          "CURRENT OFFERS",
+          ...o.offers.flatMap((v) => [
+            `${v.title}: ${v.decision} · Offered ${formatDate(v.offeredAt, timezone, true)}`,
+            v.compensation,
+            v.terms,
+            v.contact,
+            v.responseDueDate
+              ? `Respond by: ${formatDate(v.responseDueDate, timezone)}`
+              : "",
+            v.startDate
+              ? `Proposed start: ${formatDate(v.startDate, timezone)}`
+              : "",
+            v.decidedAt
+              ? `Decision date: ${formatDate(v.decidedAt, timezone, true)}`
+              : "",
+            v.decisionReason,
+            ...v.documentIds.map(
+              (id) =>
+                `Offer document: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
+            ),
+          ]),
+        ]
+      : []),
     o.nextAction
       ? `Next action: ${o.nextAction}${o.nextActionDate ? ` (${formatDate(o.nextActionDate)})` : ""}`
       : "",
@@ -5092,7 +5454,7 @@ function SettingsPage({
             <Field
               label="New host document root (optional)"
               wide
-              hint="Enter an absolute folder path on the host. Save, then run ./board restart on that machine to apply it. Existing files stay at their original locations."
+              hint="Enter an absolute folder path on the host, save, then choose Update & restart. Use Reliability & recovery below to copy or reconnect existing files."
             >
               <input
                 value={form.pendingHostPath || ""}
@@ -5143,6 +5505,7 @@ function SettingsPage({
           </div>
         </section>
       </form>
+      <ReliabilitySettings onError={onError} timezone={settings.timezone}/>
       <section className="settings-section">
         <div className="settings-section-heading">
           <ShieldCheck size={21} />
@@ -5157,7 +5520,7 @@ function SettingsPage({
             <p>
               Save a consistent database snapshot and managed documents in your
               configured backup subfolder. This includes account data and Career
-              Buddy API keys; keep it private. Portable restore is planned.
+              Buddy API keys; keep it private. Use Reliability & recovery above to activate a verified backup.
             </p>
           </div>
           <button

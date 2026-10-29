@@ -223,3 +223,39 @@ class LauncherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class PreUpgradeBackupTests(unittest.TestCase):
+    setUp = LauncherTests.setUp
+    tearDown = LauncherTests.tearDown
+    args = LauncherTests.args
+    save = LauncherTests.save
+    def populate(self, corrupt=False):
+        import sqlite3,hashlib
+        config,_=launcher.make_config(self.args(),self.state);self.save(config)
+        launcher.atomic_json(self.state/'runtime.compose.json',launcher.compose_override(config,self.state,'fictional-token'))
+        doc_id='12345678-1234-4234-8234-123456789abc';path=self.files/'fictional.txt';path.write_bytes(b'Fictional original')
+        db=sqlite3.connect(self.state/'board.sqlite')
+        for table,key in [('config','key'),('documents','id'),('records','id')]:db.execute(f'CREATE TABLE {table}({key} TEXT PRIMARY KEY,data TEXT NOT NULL)')
+        doc={'id':doc_id,'name':'fictional.txt','storageRoot':launcher.mount_path(str(self.files)),'relativePath':'fictional.txt','sha256':'bad' if corrupt else hashlib.sha256(path.read_bytes()).hexdigest()}
+        db.execute('INSERT INTO documents VALUES(?,?)',(doc_id,json.dumps(doc)));db.commit();db.close()
+        return config
+    def test_upgrade_creates_verified_full_snapshot_before_rebuild(self):
+        self.populate()
+        with patch.object(launcher,'ensure_docker'),patch.object(launcher,'fetch_json',return_value={'setupRequired':False}),patch.object(launcher,'run',return_value=subprocess.CompletedProcess([],0,stdout='',stderr='')) as run:
+            launcher.main(['restart','--state-dir',str(self.state),'--no-open','--no-watch'])
+        result=launcher.read_json(self.state/'last-upgrade-backup.json');self.assertTrue((Path(result['location'])/'board.sqlite').exists());self.assertEqual((Path(result['location'])/'documents'/'12345678-1234-4234-8234-123456789abc').read_bytes(),b'Fictional original')
+        commands=[c.args[0] for c in run.call_args_list];stop=next(i for i,c in enumerate(commands) if c[-2:]==['stop','board']);build=next(i for i,c in enumerate(commands) if '--build' in c);self.assertLess(stop,build)
+    def test_failed_verification_prevents_build_and_restarts_previous_service(self):
+        self.populate(corrupt=True)
+        with patch.object(launcher,'ensure_docker'),patch.object(launcher,'run',return_value=subprocess.CompletedProcess([],0,stdout='',stderr='')) as run:
+            with self.assertRaises(launcher.LauncherError):launcher.main(['restart','--state-dir',str(self.state),'--no-open','--no-watch'])
+        self.assertFalse(any('--build' in c.args[0] for c in run.call_args_list));self.assertTrue(any(c.args[0][-2:]==['start','board'] for c in run.call_args_list))
+    def test_failed_rebuild_reinstates_the_previous_image(self):
+        self.populate()
+        def command(cmd,**kwargs):
+            if '--build' in cmd:raise launcher.LauncherError('Fictional build failure')
+            return subprocess.CompletedProcess(cmd,0,stdout='sha256:fictional-image' if 'images' in cmd else '',stderr='')
+        with patch.object(launcher,'ensure_docker'),patch.object(launcher,'run',side_effect=command) as run:
+            with self.assertRaises(launcher.LauncherError):launcher.main(['restart','--state-dir',str(self.state),'--no-open','--no-watch'])
+        self.assertTrue(any(c.args[0]==['docker','tag','sha256:fictional-image',launcher.PROJECT+'-board:latest'] for c in run.call_args_list))
+        self.assertTrue(any('--no-build' in c.args[0] for c in run.call_args_list))

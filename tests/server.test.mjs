@@ -2757,6 +2757,8 @@ test('criteria assessments use independent private settings, persist snapshots, 
  await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{...saved.data,items:[{...criteria.items[0],description:'Remote role'}]}});
  await f.restart();await f.login();const old=(await f.request(route)).data.assessments[0];assert.equal(old.stale,true);assert.equal(old.criteria.items[0].description,'London based role');
  const exported=await f.request('/api/export');assert.equal(exported.data.decisionAssessments.length,1);assert.equal(JSON.stringify(exported.data).includes('fictional-decision-private'),false);
+ assert.equal((await f.request('/api/backup',{method:'POST',body:{}})).status,409);
+ writeFileSync(join(storedSource.storageRoot,storedSource.relativePath),'Fictional career evidence.');
  const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM decision_assessments').get().n,1);db.close();
 });
 
@@ -2983,4 +2985,169 @@ test('templates stay selectable explicitly but are excluded from automatic Buddy
  const send=(id,extra={})=>f.request('/api/buddy/workspace',{method:'POST',body:{mode:'auto',message:'Help with data engineering skills',requestId:id,documentIds:[],useLibrary:true,...extra}});
  assert.equal((await send('template-auto')).status,200);assert.ok(!context.excerpts.some(e=>e.sourceId===template.id));
  assert.equal((await send('template-explicit',{templateId:template.id})).status,200);assert.ok(context.excerpts.some(e=>e.sourceId===template.id));
+});
+
+test('application packs pin reviewed versions, freeze submission details and export exact bytes',async t=>{
+ const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const bytes=Buffer.from('Fictional CV version one.');const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.txt',kind:'cv',status:'draft',opportunityId:op.id,contentBase64:bytes.toString('base64')}})).data;
+ const base='/api/opportunities/'+op.id+'/packs';assert.equal((await f.request(base,{auth:false})).status,401);
+ let r=await f.request(base,{method:'POST',body:{revision:op.revision,title:'Fictional pack',documentIds:[doc.id],coverLetterNotRequired:true,supportingStatement:'Verified fictional supporting text.',answers:[{question:'Why this role?',answer:'Fictional supported answer.'}]}});assert.equal(r.status,201);const id=r.data.pack.id;
+ r=await f.request(base+'/'+id+'/approve',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true}});assert.equal(r.status,200);assert.equal(r.data.pack.state,'approved');
+ const revision=r.data.opportunity.revision;const submit={revision,confirm:true,submittedAt:'2026-10-29T10:00:00.000Z',applicationRoute:'Fictional portal',receipt:'FICTIONAL-123',advanceStage:true};
+ r=await f.request(base+'/'+id+'/submit',{method:'POST',body:submit});assert.equal(r.status,200);assert.equal(r.data.opportunity.stage,'submitted');assert.equal(r.data.pack.submission.receipt,'FICTIONAL-123');assert.equal(r.data.opportunity.events.find(e=>e.applicationPackId===id).id,r.data.pack.submission.eventId);
+ const count=r.data.opportunity.events.length;assert.equal((await f.request(base+'/'+id+'/submit',{method:'POST',body:submit})).data.opportunity.events.length,count);
+ assert.equal((await f.request('/api/documents/'+doc.id,{method:'DELETE'})).status,409);assert.deepEqual((await f.request('/api/documents/'+doc.id+'/content',{binary:true})).data,bytes);
+ assert.equal((await f.request(base+'/'+id,{method:'PATCH',body:{revision:r.data.opportunity.revision,title:'Overwrite'}})).status,409);
+ const zipResult=await f.request(base+'/'+id+'/download',{binary:true});assert.equal(zipResult.status,200);const {default:JSZip}=await import('jszip');const zip=await JSZip.loadAsync(zipResult.data);const manifest=JSON.parse(await zip.file('manifest.json').async('string'));assert.deepEqual(await zip.file(manifest.documents[0].archivePath).async('nodebuffer'),bytes);assert.match(await zip.file('application-answers.txt').async('string'),/Fictional supported answer/);
+ await f.restart();await f.login();const list=(await f.request(base)).data;assert.equal(list.packs[0].state,'submitted');assert.equal(list.packs[0].submission.applicationRoute,'Fictional portal');assert.match(JSON.stringify((await f.request('/api/export')).data),/FICTIONAL-123/);
+ const copy=await f.request(base+'/'+id+'/copy',{method:'POST',body:{revision:list.opportunityRevision}});assert.equal(copy.status,201);assert.equal(copy.data.pack.state,'draft');assert.notEqual(copy.data.pack.id,id);assert.equal(copy.data.pack.submission,undefined);
+});
+
+test('pack approval rejects absent cover letters, stale documents and out-of-scope selections without partial changes',async t=>{
+ const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;const other=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Other fictional employer'}})).data;
+ const createDoc=async(id,name)=>(await f.request('/api/documents',{method:'POST',body:{opportunityId:id,name,kind:'cv',status:'draft',contentBase64:Buffer.from('Fictional bytes').toString('base64')}})).data;
+ const doc=await createDoc(op.id,'CV.txt'),wrong=await createDoc(other.id,'Other CV.txt');const base='/api/opportunities/'+op.id+'/packs';const body={revision:op.revision,title:'Fictional pack',documentIds:[doc.id],coverLetterNotRequired:false,answers:[]};
+ assert.equal((await f.request(base,{method:'POST',body:{...body,documentIds:[wrong.id]}})).status,400);
+ let r=await f.request(base,{method:'POST',body});const id=r.data.pack.id;assert.equal((await f.request(base+'/'+id+'/approve',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true}})).status,400);
+ r=await f.request(base+'/'+id,{method:'PATCH',body:{...body,revision:r.data.opportunity.revision,coverLetterNotRequired:true}});await f.request('/api/documents/'+doc.id,{method:'PATCH',body:{revision:doc.revision,notes:'Fictional changed review note'}});
+ assert.equal((await f.request(base+'/'+id+'/approve',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true}})).status,409);assert.equal((await f.request('/api/documents')).data.documents.find(d=>d.id===doc.id).status,'draft');
+ assert.equal((await f.request(base,{method:'POST',body})).status,409);
+});
+
+test('pack submission is atomic when a reviewed file becomes unavailable',async t=>{
+ const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;const docs=[];
+ for(const name of ['First','Second'])docs.push((await f.request('/api/documents',{method:'POST',body:{name:name+'.txt',kind:'cv',status:'draft',opportunityId:op.id,contentBase64:Buffer.from('Fictional '+name).toString('base64')}})).data);
+ const base='/api/opportunities/'+op.id+'/packs';let r=await f.request(base,{method:'POST',body:{revision:op.revision,title:'Fictional pack',documentIds:docs.map(d=>d.id),coverLetterNotRequired:true}});const id=r.data.pack.id;r=await f.request(base+'/'+id+'/approve',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true}});
+ const raw=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(docs[1].id).data);writeFileSync(join(raw.storageRoot,raw.relativePath),'Fictional external edit');
+ const result=await f.request(base+'/'+id+'/submit',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true,submittedAt:'2026-10-29T10:00:00.000Z',advanceStage:true}});assert.equal(result.status,409);assert.equal((await f.request('/api/documents')).data.documents.find(d=>d.id===docs[0].id).status,'approved');const current=(await f.request('/api/opportunities/'+op.id)).data;assert.equal(current.stage,'identification');assert.equal(current.applicationPacks[0].state,'approved');assert.equal(current.events.some(e=>e.applicationPackId===id),false);
+});
+
+test('feedback is private, idempotent, persistent and included in exports/backups',async t=>{
+ const f=await fixture(t);await f.setup();const body={text:'Fictional dashboard suggestion.',page:'dashboard',requestId:'fictional-feedback'};
+ assert.equal((await f.request('/api/feedback',{auth:false})).status,401);const first=await f.request('/api/feedback',{method:'POST',body});assert.equal(first.status,201);assert.equal(first.data.item.reviewStatus,'not-reviewed');assert.equal((await f.request('/api/feedback',{method:'POST',body})).data.item.id,first.data.item.id);
+ assert.equal((await f.request('/api/feedback',{method:'POST',body:{...body,text:'Different fictional text'}})).status,409);assert.equal((await f.request('/api/feedback',{method:'POST',body:{...body,page:'https://private.example/?token=secret'}})).status,400);
+ const url='/api/feedback/'+first.data.item.id;const updated=await f.request(url,{method:'PATCH',body:{revision:1,status:'planned'}});assert.equal(updated.status,200);assert.equal((await f.request(url,{method:'PATCH',body:{revision:1,status:'done'}})).status,409);
+ assert.match(JSON.stringify((await f.request('/api/export')).data.feedback),/Fictional dashboard/);assert.match(JSON.stringify((await f.request('/api/feedback/export')).data),/Fictional dashboard/);
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(backup.status,200);const snapshot=new DatabaseSync(join(f.options.filesDir,'backups',backup.data.name,'board.sqlite'));assert.match(snapshot.prepare("SELECT data FROM config WHERE key='feedbackInbox'").get().data,/Fictional dashboard/);snapshot.close();
+ const interrupted=JSON.parse(f.app.db.prepare("SELECT data FROM config WHERE key='feedbackInbox'").get().data);interrupted.items[0].reviewStatus='running';f.app.db.prepare("UPDATE config SET data=? WHERE key='feedbackInbox'").run(JSON.stringify(interrupted));
+ await f.restart();await f.login();assert.equal((await f.request('/api/feedback')).data.items[0].status,'planned');assert.equal((await f.request('/api/feedback')).data.items[0].reviewStatus,'interrupted');
+});
+
+test('feedback AI review receives only submitted feedback/page and cannot apply changes',async t=>{
+ let supplied;const f=await fixture(t,{buddyFetch:async(_,opts)=>{supplied=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:JSON.stringify({summary:'Fictional filter improvement',priority:'medium',improvements:['Add a visible filter.'],questions:['Which view?']})}));}});await f.setup();await enableBuddy(f);await f.request('/api/opportunities',{method:'POST',body:{...opportunity,description:'Private career text must not be sent.'}});
+ const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Improve dashboard filters.',page:'dashboard',requestId:'ai-feedback'}})).data.item;const route='/api/feedback/'+item.id+'/review';assert.equal((await f.request(route,{method:'POST',body:{}})).status,400);
+ const review=await f.request(route,{method:'POST',body:{confirm:true}});assert.equal(review.status,200);assert.deepEqual(supplied,{page:'dashboard',feedback:'Improve dashboard filters.'});assert.equal(review.data.item.review.priority,'medium');assert.equal(review.data.item.status,'open');assert.equal(review.data.item.reviewStatus,'completed');
+});
+
+test('cancelled and malformed AI feedback reviews preserve original feedback',async t=>{
+ let release,started;const ready=new Promise(r=>started=r);const f=await fixture(t,{buddyFetch:async()=>{started();await new Promise(r=>release=r);return buddyResponse(buddyReply({reply:'not valid review JSON'}));}});await f.setup();await enableBuddy(f);
+ const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Fictional feedback retained.',page:'settings',requestId:'cancel-feedback'}})).data.item;const route='/api/feedback/'+item.id;
+ const pending=f.request(route+'/review',{method:'POST',body:{confirm:true}});await ready;await f.request(route+'/cancel',{method:'POST',body:{}});release();assert.equal((await pending).status,499);let saved=(await f.request('/api/feedback')).data.items[0];assert.equal(saved.text,item.text);assert.equal(saved.reviewStatus,'cancelled');
+ const second=f.request(route+'/review',{method:'POST',body:{confirm:true}});for(let i=0;i<50;i++){if((await f.request('/api/feedback')).data.items[0].reviewStatus==='running')break;await new Promise(r=>setTimeout(r,5));}release();assert.equal((await second).status,502);saved=(await f.request('/api/feedback')).data.items[0];assert.equal(saved.reviewStatus,'failed');assert.equal(saved.text,item.text);
+});
+
+test("communications retain direction, custom channels, follow-ups and scoped document links across edits and restart", async t => {
+  const f = await fixture(t); await f.setup();
+  let record = (await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+  const other = (await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Fictional Other'}})).data;
+  async function upload(opportunityId) {return (await f.request('/api/documents',{method:'POST',body:{opportunityId,name:'fictional-notes.txt',kind:'other',contentBase64:Buffer.from('Fictional recruiter notes').toString('base64')}})).data;}
+  const doc = await upload(record.id), otherDoc = await upload(other.id), library = await upload('');
+  const path = `/api/opportunities/${record.id}/activities`;
+  const body={kind:'communication',type:'email',title:'Recruiter follow-up',contact:'Fictional Jamie',direction:'incoming',channel:'LinkedIn',status:'completed',scheduledAt:'2026-10-29',notes:'Discussed next interview.',followUp:'Send availability',followUpDate:'2026-10-30',followUpDone:false,documentIds:[doc.id]};
+  for (const documentIds of [[otherDoc.id],[library.id],['missing'],[doc.id,doc.id]]) assert.equal((await f.request(path,{method:'POST',body:{...body,documentIds}})).status,400);
+  for (const invalid of [{direction:'sideways'},{followUpDate:'2026-02-30'},{followUpDone:'yes'},{followUp:'',followUpDate:'2026-10-30'},{type:'x'.repeat(101)}]) assert.equal((await f.request(path,{method:'POST',body:{...body,...invalid}})).status,400);
+  assert.equal((await f.request(path,{method:'POST',auth:false,body})).status,401);
+  record=(await f.request(path,{method:'POST',body})).data;
+  assert.equal(record.activities.length,1);const activity=record.activities[0];
+  assert.equal(activity.contact,'Fictional Jamie');assert.equal(activity.direction,'incoming');assert.equal(activity.channel,'LinkedIn');assert.equal(activity.followUpDate,'2026-10-30');assert.deepEqual(activity.documentIds,[doc.id]);
+  let result=await f.request(`${path}/${activity.id}`,{method:'PATCH',body:{revision:record.revision-1,status:'rescheduled'}});assert.equal(result.status,409);
+  result=await f.request(`${path}/${activity.id}`,{method:'PATCH',body:{revision:record.revision,direction:'bad'}});assert.equal(result.status,400);
+  assert.equal((await f.request(`/api/opportunities/${record.id}`)).data.activities[0].history.length,0);
+  record=(await f.request(`${path}/${activity.id}`,{method:'PATCH',body:{revision:record.revision,direction:'outgoing',channel:'phone',contact:'Fictional Sam',notes:'Availability sent.',followUpDone:true,documentIds:[]}})).data;
+  const saved=record.activities[0], old=saved.history[0];
+  for (const key of ['direction','channel','contact','notes','followUp','followUpDate','followUpDone','documentIds']) assert.deepEqual(old[key],activity[key]);
+  assert.deepEqual(saved.documentIds,[]);assert.equal(saved.followUpDone,true);
+  assert.equal((await f.request(`/api/documents/${doc.id}/content`,{binary:true})).data.toString(),'Fictional recruiter notes');
+  await f.restart();await f.login();
+  const restored=(await f.request(`/api/opportunities/${record.id}`)).data.activities[0];assert.deepEqual(restored,saved);
+  const exported=(await f.request('/api/export')).data;assert.deepEqual(exported.opportunities.find(o=>o.id===record.id).activities[0],saved);
+});
+
+test("custom interviews preserve original dates and attachments in full rescheduling history", async t=>{
+  const f=await fixture(t);await f.setup();
+  let o=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+  const doc=(await f.request('/api/documents',{method:'POST',body:{opportunityId:o.id,name:'fictional-panel.txt',kind:'other',contentBase64:Buffer.from('Panel brief').toString('base64')}})).data;
+  const path=`/api/opportunities/${o.id}/activities`;
+  o=(await f.request(path,{method:'POST',body:{title:'Architecture panel',kind:'interview',type:'Architecture whiteboard panel',scheduledAt:'2026-10-30T10:00:00Z',isFinal:true,documentIds:[doc.id]}})).data;
+  const id=o.activities[0].id;
+  o=(await f.request(`${path}/${id}`,{method:'PATCH',body:{revision:o.revision,status:'rescheduled',scheduledAt:'2026-11-02T11:30:00Z',notes:'Panel moved by recruiter.'}})).data;
+  const a=o.activities[0];assert.equal(a.type,'Architecture whiteboard panel');assert.equal(a.status,'rescheduled');assert.equal(a.isFinal,true);assert.deepEqual(a.documentIds,[doc.id]);assert.equal(a.history[0].scheduledAt,'2026-10-30T10:00:00.000Z');assert.equal(a.history[0].status,'planned');assert.deepEqual(a.history[0].documentIds,[doc.id]);
+  // Removing an original leaves an explicit unavailable link; editing the activity remains possible.
+  const deleted=await f.request(`/api/documents/${doc.id}`,{method:'DELETE',body:{revision:doc.revision}});assert.equal(deleted.status,200);
+  const edited=await f.request(`${path}/${id}`,{method:'PATCH',body:{revision:o.revision,documentIds:[doc.id],notes:'Original removed elsewhere.'}});assert.equal(edited.status,200);assert.deepEqual(edited.data.activities[0].documentIds,[doc.id]);
+});
+
+test('manual opportunity review preserves strengths/gaps and dated history; stage changes require an explicit choice',async t=>{
+ const f=await fixture(t);await f.setup();
+ let o=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,applicationRoute:'Fictional recruiter portal'}})).data;
+ assert.equal(o.applicationRoute,'Fictional recruiter portal');const initial=o;
+ const path=`/api/opportunities/${o.id}/review`;
+ const review={strengths:'Led integration delivery.',gaps:'Databricks experience not established.',decision:'proceed',reason:'Strong relevant delivery experience.',effectiveAt:'2026-10-28',applyStage:false};
+ assert.equal((await f.request(path,{method:'PATCH',auth:false,body:{revision:o.revision,...review}})).status,401);
+ for(const patch of [{decision:'yes'},{reason:''},{effectiveAt:'2026-02-30'},{applyStage:'yes'},{strengths:'x'.repeat(50001)},{outcome:'hired'}])assert.equal((await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,...patch}})).status,400);
+ assert.equal((await f.request(`/api/opportunities/${o.id}`)).data.revision,o.revision);
+ o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,...review}})).data;
+ assert.equal(o.stage,'identification');assert.equal(o.outcome,'');assert.equal(o.currentStageEventId,initial.currentStageEventId);assert.equal(o.stageEnteredAt,initial.stageEnteredAt);assert.equal(o.review.effectiveAt,'2026-10-28');assert.equal(o.events.at(-1).title,'Review decision');assert.equal(o.review.history.length,0);
+ assert.equal((await f.request(path,{method:'PATCH',body:{revision:initial.revision,...review}})).status,409);
+ o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,applyStage:true}})).data;
+ assert.equal(o.stage,'documents');assert.equal(o.outcome,'');assert.equal(o.stageEnteredAt,'2026-10-28');assert.equal(o.events.at(-1).id,o.currentStageEventId);assert.equal(o.review.history[0].decision,'proceed');assert.equal(o.review.history[0].gaps,review.gaps);
+ o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,decision:'defer',reason:'Awaiting clarification.',applyStage:true,effectiveAt:'2026-10-29'}})).data;
+ assert.equal(o.stage,'review');assert.equal(o.review.history.length,2);assert.equal(o.events[0].effectiveAt,initial.events[0].effectiveAt);
+ o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,decision:'ignore',reason:'Required working arrangement is unsuitable.',applyStage:true}})).data;
+ assert.equal(o.stage,'outcome');assert.equal(o.outcome,'ignored');assert.equal(o.review.history.at(-1).decision,'defer');
+ assert.equal((await f.request(path,{method:'PATCH',body:{revision:o.revision,decision:'proceed',reason:'Changed my mind.',applyStage:true}})).status,409);
+ assert.deepEqual((await f.request(path)).data.review,o.review);
+ await f.restart();await f.login();const restored=(await f.request(`/api/opportunities/${o.id}`)).data;assert.deepEqual(restored.review,o.review);assert.equal(restored.applicationRoute,'Fictional recruiter portal');
+ const updated=(await f.request(`/api/opportunities/${o.id}`,{method:'PATCH',body:{revision:restored.revision,applicationRoute:'Fictional email application'}})).data;assert.equal(updated.applicationRoute,'Fictional email application');assert.deepEqual(updated.review,restored.review);
+});
+
+test('offers are independent of outcomes; preserve versions, dates and idempotent creation across restart and backup',async t=>{
+ const f=await fixture(t);await f.setup();
+ let o=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,stage:'final-interview'}})).data;const initial=o;
+ const other=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Fictional Other'}})).data;
+ async function upload(opportunityId){return (await f.request('/api/documents',{method:'POST',body:{opportunityId,name:'fictional-offer.txt',kind:'other',contentBase64:Buffer.from('Fictional offer letter').toString('base64')}})).data;}
+ const doc=await upload(o.id),foreign=await upload(other.id),path=`/api/opportunities/${o.id}/offers`;
+ const body={revision:o.revision,requestId:'fictional-offer-request-001',title:'Initial package',compensation:'Fictional GBP 100,000 per year',terms:'Subject to references.',contact:'Fictional Jamie',offeredAt:'2026-10-28',responseDueDate:'2026-11-04',startDate:'2027-01-04',decision:'pending',documentIds:[doc.id]};
+ assert.equal((await f.request(path,{method:'POST',auth:false,body})).status,401);
+ for(const patch of [{documentIds:[foreign.id]},{documentIds:[doc.id,doc.id]},{responseDueDate:'2026-02-30'},{offeredAt:'2026-02-30T10:00:00Z'},{decision:'hired'},{outcome:'hired'},{title:''}])assert.equal((await f.request(path,{method:'POST',body:{...body,...patch}})).status,400);
+ o=(await f.request(path,{method:'POST',body})).data;assert.equal(o.offers.length,1);assert.equal(o.stage,'final-interview');assert.equal(o.outcome,'');assert.equal(o.stageEnteredAt,initial.stageEnteredAt);assert.equal(o.currentStageEventId,initial.currentStageEventId);assert.equal(o.offers[0].decision,'pending');assert.equal(o.offers[0].decidedAt,'');
+ assert.equal((await f.request(path,{method:'POST',body})).data.revision,o.revision);assert.equal((await f.request(path,{method:'POST',body:{...body,title:'Changed request'}})).status,409);
+ const offer=o.offers[0],edit=`${path}/${offer.id}`;
+ assert.equal((await f.request(edit,{method:'PATCH',body:{revision:initial.revision,decision:'accepted'}})).status,409);
+ assert.equal((await f.request(edit,{method:'PATCH',body:{revision:o.revision,decision:'accepted',decidedAt:'2026-10-27'}})).status,400);
+ o=(await f.request(edit,{method:'PATCH',body:{revision:o.revision,decision:'accepted',decidedAt:'2026-10-29',decisionReason:'Package agreed.'}})).data;
+ assert.equal(o.outcome,'');assert.equal(o.stage,'final-interview');assert.equal(o.offers[0].decidedAt,'2026-10-29');assert.equal(o.offers[0].history[0].decision,'pending');assert.equal(o.offers[0].history[0].compensation,body.compensation);assert.deepEqual(o.offers[0].history[0].documentIds,[doc.id]);assert.equal(o.events.at(-1).title,'Offer accepted');
+ o=(await f.request(edit,{method:'PATCH',body:{revision:o.revision,decision:'declined',decidedAt:'2026-10-30',decisionReason:'Changed circumstances.',documentIds:[]}})).data;
+ assert.equal(o.outcome,'');assert.equal(o.offers[0].history.at(-1).decision,'accepted');assert.deepEqual(o.offers[0].documentIds,[]);assert.equal((await f.request(`/api/documents/${doc.id}/content`,{binary:true})).data.toString(),'Fictional offer letter');
+ o=(await f.request(path,{method:'POST',body:{...body,revision:o.revision,requestId:'fictional-offer-request-002',title:'Revised offer',offeredAt:'',responseDueDate:'',startDate:'',documentIds:[]}})).data;
+ assert.equal(o.offers.length,2);assert.ok(Number.isFinite(Date.parse(o.offers[1].offeredAt)));assert.equal(o.offers[1].decision,'pending');
+ const backup=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(backup.status,200);const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.deepEqual(JSON.parse(db.prepare('SELECT data FROM records WHERE id=?').get(o.id).data).offers,o.offers);db.close();
+ const exported=(await f.request('/api/export')).data;assert.deepEqual(exported.opportunities.find(v=>v.id===o.id).offers,o.offers);
+ await f.restart();await f.login();assert.deepEqual((await f.request(`/api/opportunities/${o.id}`)).data.offers,o.offers);
+ // Confirming Hired remains a separate explicit outcome action.
+ o=(await f.request(`/api/opportunities/${o.id}`,{method:'PATCH',body:{revision:o.revision,outcome:'hired'}})).data;assert.equal(o.stage,'outcome');assert.equal(o.outcome,'hired');assert.equal(o.offers.length,2);
+});
+
+test('reliability settings are private and host changes require an available helper, a validated plan and explicit confirmation',async t=>{
+ const f=await fixture(t);await f.setup();
+ assert.equal((await f.request('/api/uploads/workspace',{auth:false})).status,401);const workspace=(await f.request('/api/uploads/workspace')).data;assert.equal((await f.request('/api/uploads/workspace')).data.id,workspace.id);
+ assert.equal((await f.request('/api/reliability/status',{auth:false})).status,401);assert.equal((await f.request('/api/reliability/status')).data.available,false);
+ assert.equal((await f.request('/api/reliability/preview',{method:'POST',body:{kind:'migrate',destination:'/tmp/example'}})).status,503);
+ writeFileSync(join(f.options.dataDir,'.watcher.heartbeat'),'');
+ assert.equal((await f.request('/api/reliability/preview',{method:'POST',body:{kind:'migrate',destination:'relative'}})).status,400);
+ assert.equal((await f.request('/api/reliability/apply',{method:'POST',body:{planId:'fake',confirm:false}})).status,400);
+ const result=await f.request('/api/reliability/preview',{method:'POST',body:{kind:'migrate',destination:'/tmp/fictional-destination'}});assert.equal(result.status,202);assert.equal(JSON.parse(readFileSync(join(f.options.dataDir,'pending-maintenance.json'),'utf8')).destination,'/tmp/fictional-destination');
+ assert.equal((await f.request('/api/reliability/preview',{method:'POST',body:{kind:'migrate',destination:'/tmp/other'}})).status,409);
+ assert.equal((await f.request('/api/backups/schedule',{auth:false})).status,401);const schedule=(await f.request('/api/backups/schedule')).data;assert.equal(schedule.enabled,false);assert.equal((await f.request('/api/backups/schedule',{method:'PATCH',body:{revision:schedule.revision,enabled:true,intervalHours:24}})).status,200);assert.equal((await f.request('/api/backups/schedule',{method:'PATCH',body:{revision:schedule.revision,enabled:true,intervalHours:24}})).status,409);
+ await f.restart();await f.login();assert.equal((await f.request('/api/uploads/workspace')).data.id,workspace.id);assert.equal((await f.request('/api/backups/schedule')).data.enabled,true);
 });

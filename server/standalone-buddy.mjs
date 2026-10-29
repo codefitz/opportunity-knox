@@ -393,6 +393,7 @@ export function createStandaloneBuddy(ctx) {
                   target: target
                     ? {
                         ...target,
+              applicationPacks:undefined,
                         description: target.description?.slice(0, 20000),
                         events: target.events?.slice(-20),
                         activities: target.activities?.slice(-20),

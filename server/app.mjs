@@ -1,3 +1,8 @@
+import {createReliability} from "./reliability.mjs";
+import {createBackupSchedule} from "./backup-schedule.mjs";
+import {createOpportunityWorkflow} from "./opportunity-workflow.mjs";
+import {createFeedback} from "./feedback.mjs";
+import {createApplicationPacks} from "./application-packs.mjs";
 import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
@@ -13,6 +18,7 @@ import {
 } from "node:crypto";
 import {
   mkdirSync,
+  chmodSync,
   existsSync,
   realpathSync,
   lstatSync,
@@ -62,6 +68,7 @@ const textFields = [
   "role",
   "url",
   "jobReference",
+  "applicationRoute",
   "location",
   "workMode",
   "salary",
@@ -683,6 +690,117 @@ export function createApp(options = {}) {
     }
     return publicDocument(document);
   };
+  function createBackup() {
+    const createdAt = now();
+    const name = `board-${createdAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+    const backupRoot = folder(filesDir, settings().backupSubdir);
+    const destination = join(backupRoot, `.partial-${name}`);
+    const completedDestination = join(backupRoot, name);
+    try {
+      mkdirSync(join(destination, "documents"), {
+        recursive: true,
+        mode: 0o700,
+      });
+      // Copy only database-tracked documents, never walk the storage tree: prior backups
+      // and this snapshot are excluded even when backupRoot is inside filesDir.
+      // All copies and metadata reads are synchronous, so requests cannot interleave.
+      const manifest = [];
+      for (const doc of getDocuments()) {
+        let source;
+        try {
+          source = documentPath(doc);
+          if (!statSync(source).isFile()) throw Error("Unavailable");
+        } catch {
+          fail(
+            409,
+            `Backup incomplete: ${doc.name} is unavailable. Restore its document location and retry.`,
+          );
+        }
+        const destinationPath = join(destination, "documents", doc.id);
+        copyFileSync(source, destinationPath);
+        if (
+          createHash("sha256")
+            .update(readFileSync(destinationPath))
+            .digest("hex") !== doc.sha256
+        )
+          fail(
+            409,
+            "Backup could not verify a document. Originals remain unchanged.",
+          );
+        manifest.push({
+          ...publicDocument(doc),
+          backupPath: `documents/${doc.id}`,
+          storageRoot: doc.storageRoot,
+          relativePath: doc.relativePath,
+        });
+      }
+      // Serialize metadata and credentials into a standalone database snapshot before yielding.
+      const snapshot = new DatabaseSync(join(destination, "board.sqlite"));
+      try {
+        snapshot.exec(
+          "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_requests (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+        );
+        for (const table of [
+          "records",
+          "documents",
+          "config",
+          "tasks",
+          "buddy_messages",
+          "document_text",
+          "document_vectors",
+          "decision_assessments",
+          "standalone_messages",
+          "standalone_attachments",
+          "standalone_attachment_originals",
+          "opportunity_automation",
+          "buddy_requests",
+        ]) {
+          const rows = db.prepare(`SELECT * FROM ${table}`).all();
+          const key = table === "config" ? "key" : "id";
+          const insert = snapshot.prepare(
+            `INSERT INTO ${table}(${key},data) VALUES (?,?)`,
+          );
+          snapshot.exec("BEGIN");
+          for (const row of rows) insert.run(row[key], row.data);
+          snapshot.exec("COMMIT");
+        }
+      } finally {
+        snapshot.close();
+      }
+      chmodSync(join(destination, "board.sqlite"), 0o600);
+      writeFileSync(
+        join(destination, "manifest.json"),
+        JSON.stringify(
+          {
+            format: "opportunity-board-backup",
+            version: 1,
+            createdAt,
+            documents: manifest,
+            restore:
+              "Restore board.sqlite into a stopped installation and copy documents to their recorded storageRoot/relativePath, or remap roots before use. Backup contains the private password hash, Career Buddy API key and conversations. Keep it private.",
+          },
+          null,
+          2,
+        ),
+        { mode: 0o600 },
+      );
+      renameSync(destination, completedDestination);
+    } catch (error) {
+      // Incomplete backups never appear under a finished snapshot name.
+      try {
+        rmSync(destination, { recursive: true, force: true });
+      } catch {
+        /* A remaining .partial directory clearly identifies failed work. */
+      }
+      throw error;
+    }
+    return { name, createdAt, location: completedDestination };
+  }
+  const reliability=createReliability({dataDir,settings,createRestore:(name)=>{const id="restore-"+randomUUID();restoreIsolatedBackup(safePath(filesDir,settings().backupSubdir),name,join(folder(dataDir,"restores",{create:true}),id));return id;}});
+  const backupSchedule=createBackupSchedule({getConfig,putConfig,createBackup,clock:options.backupClock,timers:options.backupTimers!==false,canRun:()=>!reliability.applying()});
+  const feedback=createFeedback({getConfig,putConfig,fetcher:options.buddyFetch});
+  const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
+  const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
   const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
@@ -868,7 +986,13 @@ export function createApp(options = {}) {
       if(path==="/api/connections/google/callback") {try{if(await googleDocuments.handle(path,method,req,res,{json,readBody}))return;}catch(e){if(e.status)fail(e.status,e.message);throw e;}}
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
-        try {if(await studio.handle(path,method,req,res,{json,readBody}))return;
+        if(reliability.applying()&&!['GET','HEAD'].includes(method)&&!path.startsWith('/api/reliability/')&&path!=='/api/logout')fail(503,"Workspace maintenance is in progress. Wait for it to finish.");
+        try {if(await reliability.handle(path,method,req,res,{json,readBody}))return;
+        if(await backupSchedule.handle(path,method,req,res,{json,readBody}))return;
+        if(await feedback.handle(path,method,req,res,{json,readBody}))return;
+        if(await workflow.handle(path,method,req,res,{json,readBody}))return;
+        if(await packs.handle(path,method,req,res,{json,readBody}))return;
+        if(await studio.handle(path,method,req,res,{json,readBody}))return;
         if(await directories.handle(path,method,req,res,{json,readBody}))return;
         if(await googleDocuments.handle(path,method,req,res,{json,readBody}))return;}catch(e){if(e.status)fail(e.status,e.message);throw e;}
         if (path === "/api/obsidian" || path.startsWith("/api/obsidian/")) {
@@ -1148,20 +1272,22 @@ export function createApp(options = {}) {
                 isFinal: false,
                 createdAt: now(),
                 history: [],
+                direction: "",
+                channel: "",
+                followUp: "",
+                followUpDate: "",
+                followUpDone: false,
+                documentIds: [],
               };
             else if (method === "PATCH" && match[3]) {
               requireRevision(body, record);
               activity = record.activities.find((a) => a.id === match[3]);
               if (!activity) fail(404, "Activity not found.");
               activity.history ||= [];
-              activity.history.push({
-                scheduledAt: activity.scheduledAt,
-                status: activity.status,
-                notes: activity.notes,
-                changedAt: now(),
-              });
+              const { history, ...previous } = structuredClone(activity);
+              activity.history.push({ ...previous, changedAt: now() });
             } else fail(405, "Method not allowed.");
-            for (const key of ["title", "notes", "contact"])
+            for (const key of ["title", "notes", "contact", "followUp"])
               if (body[key] !== undefined)
                 activity[key] = cleanText(body[key], key, 50000);
             if (!activity.title) fail(400, "Activity title is required.");
@@ -1171,24 +1297,49 @@ export function createApp(options = {}) {
                 ["interview", "communication"],
                 "activity kind",
               );
-            if (body.type !== undefined)
-              activity.type = choice(
-                body.type,
-                [
-                  "text",
-                  "phone",
-                  "video",
-                  "in-person",
-                  "assessment",
-                  "email",
-                  "other",
-                ],
-                "activity type",
+            if (body.type !== undefined) {
+              activity.type = cleanText(body.type, "Activity type", 100);
+              if (!activity.type) fail(400, "Activity type is required.");
+            }
+            if (body.direction !== undefined)
+              activity.direction = choice(
+                body.direction,
+                ["", "incoming", "outgoing"],
+                "communication direction",
               );
+            if (body.channel !== undefined)
+              activity.channel = cleanText(body.channel, "Communication channel", 100);
+            if (body.followUpDate !== undefined)
+              activity.followUpDate = dateOnly(body.followUpDate, "Follow-up date");
+            if (body.followUpDone !== undefined) {
+              if (typeof body.followUpDone !== "boolean")
+                fail(400, "Follow-up completed must be true or false.");
+              activity.followUpDone = body.followUpDone;
+            }
+            if (activity.followUpDate && !activity.followUp)
+              fail(400, "Describe the follow-up before setting its date.");
+            if (body.documentIds !== undefined) {
+              const ids = body.documentIds;
+              if (
+                !Array.isArray(ids) ||
+                ids.length > 100 ||
+                ids.some((id) => typeof id !== "string") ||
+                new Set(ids).size !== ids.length
+              )
+                fail(400, "Choose up to 100 distinct attachments.");
+              const documents = getDocuments();
+              for (const id of ids) {
+                const doc = documents.find((d) => d.id === id);
+                if (!doc && activity.documentIds?.includes(id)) continue; // Retain a visibly unavailable old link.
+                if (!doc || doc.opportunityId !== record.id)
+                  fail(400, "Attachments must belong to this opportunity.");
+              }
+              activity.documentIds = [...ids];
+            }
             if (body.status !== undefined)
               activity.status = choice(
                 body.status,
-                ["planned", "completed", "cancelled"],
+                ["planned", "rescheduled", "completed", "cancelled"],
                 "activity status",
               );
             if (body.scheduledAt !== undefined)
@@ -1206,6 +1357,9 @@ export function createApp(options = {}) {
             return json(res, changed(record));
           }
           fail(405, "Method not allowed.");
+        }
+        if (path === "/api/uploads/workspace" && method === "GET") {
+          let id=getConfig("uploadWorkspaceId");if(!id){id=randomUUID();putConfig("uploadWorkspaceId",id);}return json(res,{id});
         }
         if (path === "/api/documents" && method === "GET")
           return json(res, { documents: getDocuments().map(publicDocument) });
@@ -1666,6 +1820,7 @@ export function createApp(options = {}) {
             buddyAttachments:buddy.exportAttachments(),
             decisionSettings: buddy.publicDecisionSettings(),
             fitCriteria: getConfig("fitCriteria"),
+            feedback:getConfig("feedbackInbox")?.items||[],
             opportunities: listRecords(),
             documents: getDocuments().map(publicDocument),
           });
@@ -1687,104 +1842,7 @@ export function createApp(options = {}) {
           const root = safePath(filesDir, settings().backupSubdir);
           try { return json(res, inspectBackup(root, body.name)); } catch { fail(400, "Backup is incomplete, invalid, unreadable, or unsupported."); }
         }
-        if (path === "/api/backup" && method === "POST") {
-          const createdAt = now();
-          const name = `board-${createdAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-          const backupRoot = folder(filesDir, settings().backupSubdir);
-          const destination = join(backupRoot, `.partial-${name}`);
-          const completedDestination = join(backupRoot, name);
-          try {
-            mkdirSync(join(destination, "documents"), {
-              recursive: true,
-              mode: 0o700,
-            });
-            // Copy only database-tracked documents, never walk the storage tree: prior backups
-            // and this snapshot are excluded even when backupRoot is inside filesDir.
-            // All copies and metadata reads are synchronous, so requests cannot interleave.
-            const manifest = [];
-            for (const doc of getDocuments()) {
-              let source;
-              try {
-                source = documentPath(doc);
-                if (!statSync(source).isFile()) throw Error("Unavailable");
-              } catch {
-                fail(
-                  409,
-                  `Backup incomplete: ${doc.name} is unavailable. Restore its document location and retry.`,
-                );
-              }
-              const destinationPath = join(destination, "documents", doc.id);
-              copyFileSync(source, destinationPath);
-              manifest.push({
-                ...publicDocument(doc),
-                backupPath: `documents/${doc.id}`,
-                storageRoot: doc.storageRoot,
-                relativePath: doc.relativePath,
-              });
-            }
-            // Serialize metadata and credentials into a standalone database snapshot before yielding.
-            const snapshot = new DatabaseSync(
-              join(destination, "board.sqlite"),
-            );
-            try {
-              snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_requests (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
-              );
-              for (const table of [
-                "records",
-                "documents",
-                "config",
-                "tasks",
-                "buddy_messages",
-                "document_text",
-                "document_vectors",
-                "decision_assessments",
-                "standalone_messages",
-                "standalone_attachments",
-                "standalone_attachment_originals",
-                "opportunity_automation",
-                "buddy_requests",
-              ]) {
-                const rows = db.prepare(`SELECT * FROM ${table}`).all();
-                const key = table === "config" ? "key" : "id";
-                const insert = snapshot.prepare(
-                  `INSERT INTO ${table}(${key},data) VALUES (?,?)`,
-                );
-                snapshot.exec("BEGIN");
-                for (const row of rows) insert.run(row[key], row.data);
-                snapshot.exec("COMMIT");
-              }
-            } finally {
-              snapshot.close();
-            }
-            writeFileSync(
-              join(destination, "manifest.json"),
-              JSON.stringify(
-                {
-                  format: "opportunity-board-backup",
-                  version: 1,
-                  createdAt,
-                  documents: manifest,
-                  restore:
-                    "Restore board.sqlite into a stopped installation and copy documents to their recorded storageRoot/relativePath, or remap roots before use. Backup contains the private password hash, Career Buddy API key and conversations. Keep it private.",
-                },
-                null,
-                2,
-              ),
-              { mode: 0o600 },
-            );
-            renameSync(destination, completedDestination);
-          } catch (error) {
-            // Incomplete backups never appear under a finished snapshot name.
-            try {
-              rmSync(destination, { recursive: true, force: true });
-            } catch {
-              /* A remaining .partial directory clearly identifies failed work. */
-            }
-            throw error;
-          }
-          return json(res, { name, createdAt, location: completedDestination });
-        }
+        if (path === "/api/backup" && method === "POST") {await readBody(req);return json(res,createBackup());}
         if (path === "/api/restart/status" && method === "GET") {
           try { return json(res, JSON.parse(readFileSync(join(dataDir, "restart-status.json"), "utf8"))); }
           catch { return json(res, { state: "unknown" }); }
@@ -1916,6 +1974,7 @@ export function createApp(options = {}) {
     close: async () => {
       if (closed) return;
       closed = true;
+      feedback.close();backupSchedule.close();
       await new Promise((done, reject) =>
         server.listening
           ? server.close((err) => (err ? reject(err) : done()))

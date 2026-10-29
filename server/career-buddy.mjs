@@ -679,6 +679,7 @@ export function createCareerBuddy(ctx) {
             opportunity: {
               ...full,
               documents: undefined,
+              applicationPacks:undefined,
               description: full.description.slice(0, 35000),
               events: full.events.slice(-50),
               activities: full.activities.slice(-40),
