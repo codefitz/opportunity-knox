@@ -198,3 +198,49 @@ The production build and all 122 Node tests plus 21 launcher/helper tests pass. 
 A disposable browser installation with fictional records and a simulated provider was inspected: the sidebar showed earlier history, New conversation opened an empty chat, sending a message created a separate titled history entry, and selecting earlier history restored the original coaching/STAR turns without the newer conversation. Screenshot/accessibility inspection confirmed the two-column layout, active selection and bounded chat panel. Responsive CSS is implemented; a phone-size browser check was not performed. No personal data or real AI calls were needed for this change.
 
 The verified sidebar image was deployed after an online SQLite backup with AI/indexing jobs idle. Docker reported healthy. All tracked records, documents, tasks, chats, caches, assessments, attachment originals/metadata, automation state and settings matched pre-update checksums. Legacy messages were not rewritten. The disposable browser preview was removed.
+
+
+## P1 — request progress, cancellation and limits
+
+The production build and all 127 Node tests plus 22 launcher/helper tests pass. Fictional regression tests verify configured bounds/output budgets, HTTP transport abort, board deadline vs cancellation, authenticated status retrieval, safe request metadata, no saved proposal after cancel, explicit retry/persistence, restart interruption state, Codex cancel marker/queue cleanup and actual termination of a simulated owned CLI process. No real career records or AI inference were required.
+
+A disposable browser preview with a deliberately slow simulated provider showed waiting stage, elapsed time, AI response limit and Cancel request. Cancel returned the UI to Retry, preserved the user submission and showed cancelled status without a failure alert. Settings exposed limits and accepted/saved a changed timeout. Screenshot/accessibility checks confirmed the controls. The final settings-test correction and cancellation label cleanup passed the full check. Shared settings apply to other provider calls, but interactive cancellation/status controls are currently standalone-chat scope.
+
+P1 was deployed after an online SQLite backup while AI/indexing were idle; the host watcher/helper was restarted with process cancellation support. Docker reported healthy. A fictional prompt from the deployed container completed through real Codex and reported queued-codex then running-codex. All existing records, chats, documents, caches, assessments, attachments, automation state and configuration matched pre-update checksums. Existing provider choices/default limits were not changed. The disposable preview was removed.
+
+
+## Document connections — 29 October 2026
+
+- `npm run check`: production TypeScript/Vite build, 129 Node tests and 24 Python launcher/helper tests passed. New tests use fictional folders/documents and simulated Google responses.
+- Verified folder path containment, hidden/symlink exclusion, persistent selection, local text preparation without original changes, deselection cache cleanup and detach preservation. Launcher tests verify independent read-only bind configuration and rejection of state/managed-root overlap.
+- Google tests verify private configuration redaction, OAuth state/PKCE, mismatched board-session rejection, replay rejection, token refresh, native-document search/export, version duplicate handling, restart persistence, disconnect/revocation and record-export credential exclusion. No live Google account was connected.
+- Isolated read-only Docker preview with disposable state: browser verified nested folder browsing, checkbox selection/save, automatic semantic-source count refresh, collapsible Google setup instructions, masked client-secret/configuration fields and disabled Connect until configured. Existing personal documents/vault were not used for testing.
+- Live Google OAuth acceptance/export still requires the user's own Google Cloud client and consent. General folder mount behavior is covered by launcher tests; real personal roots remain unconfigured.
+
+Deployment: tested image installed on the running board after an online SQLite backup. All persisted table checksums matched before/after deployment; existing vault mount remained read-only. Launcher watcher refreshed for source-mount requests. Google remains unconfigured; no user files imported, indexed or submitted to AI during verification.
+
+
+## Opportunity AI request controls — 29 October 2026
+
+`npm run check`: production build, 133 Node tests and 24 Python launcher/helper tests. New delayed fictional-provider regressions cover opportunity cancellation with late-response rejection and retry/restart persistence, manual decision cancellation without saving, and automatic tag cancellation without late mutations. Scoped status lookup is verified. Isolated Docker/browser check confirmed waiting-provider/elapsed display, cancellation, retained message for immediate resend, enabled send controls after cancellation, and persisted cancelled status after switching tabs. No personal documents or live AI accounts used. Manual/automatic cancellation is covered through API tests; their full live-provider playthrough remains pending.
+
+P1 deployment: online database backup created before the update; tested image healthy on port 4318. All existing SQLite table checksums matched before/after. Existing read-only vault mount retained. No real AI requests or personal-source indexing used for verification.
+
+
+## P2 document studio — 29 October 2026
+
+- `npm run check`: TypeScript/Vite production build, 139 Node tests and 24 Python launcher/helper tests passed. New tests cover built-in content/style differences, template tables/style preservation and XML escaping, required unique content markers, unsafe package rejection, protected previews, page-target warnings, reviewed/idempotent saves, source conflicts and original-byte preservation. Renderer failures do not publish drafts.
+- Isolated Docker renders use actual LibreOffice, PDF metadata and page PNGs. Fictional Classic/Compact/Executive/letter pages were visually inspected. The document skill renderer also rendered a fictional Word sample successfully with the bundled workspace Python.
+- Isolated browser verification: source/layout/page-target controls, real one-page preview, explicit review before save, saved new PDF draft and disabled saves after changing settings. Preview does not approve or submit a document.
+- A user-authorized private Google Docs CV was exported for layout comparison. Its native PDF has two pages; DOCX-to-PDF conversion produced four, including overflow. This is a known cross-engine fidelity limitation, not a verified reproduction. The original cloud file is unchanged; personal exports are kept outside Git. The faithful source PDF is retained alongside the editable snapshot in private managed storage.
+
+P2 deployment: tested image healthy after an online SQLite backup. All existing table checksums matched before/after deployment and the vault remains read-only. Both explicitly requested private CV snapshots were uploaded through the signed-in library; saved hashes match source exports, with draft status and native Google Docs provenance in notes. Live studio presence and authenticated endpoint protection verified. No personal files are part of Git or the image.
+
+
+## P3 document categories — 29 October 2026
+
+`npm run check`: production build, 143 Node tests and 24 Python launcher/helper tests passed. Added API regressions cover category persistence, unchanged submitted bytes/type/status, invalid/stale edits, atomic bulk conflicts and duplicate IDs, legacy defaults without stored-row rewrites, and template exclusion from automatic Buddy evidence while preserving explicit template use.
+
+Isolated Docker/browser check with fictional CV/story documents verified individual category saves/count refresh, category filtering and bulk categorisation across both files. Category metadata does not move files or alter their approval status. Defaults are conservative; personal historical documents are not guessed into new categories.
+
+P3 deployment: online SQLite backup created; tested image is healthy on port 4318. All persisted table checksums matched before/after the update, and the existing vault mount remains read-only. No personal document files were changed or categorised speculatively during deployment. Category endpoint remains authenticated.

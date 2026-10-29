@@ -1,3 +1,4 @@
+import {createBuddyRequests} from "./buddy-requests.mjs";
 import {createOpportunityAutomation} from "./opportunity-automation.mjs";
 import {createStandaloneBuddy} from "./standalone-buddy.mjs";
 import { createDecisionReview } from "./decision-review.mjs";
@@ -386,6 +387,7 @@ export function createCareerBuddy(ctx) {
           name: doc.name,
           kind: doc.kind,
           generation: doc.generation,
+          category:doc.category,
         });
       }
       return result;
@@ -406,6 +408,7 @@ export function createCareerBuddy(ctx) {
     return [...new Set(value)];
   };
   const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
+  const requests=createBuddyRequests(db);ctx={...ctx,requests};
   const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
   const automation=createOpportunityAutomation(ctx,decisions,parseBuddyOutput);
@@ -632,13 +635,17 @@ export function createCareerBuddy(ctx) {
             400,
             "Choose whether to include other opportunity summaries.",
           );
+        const task=requests.start(requestId,"opportunity:"+opportunity.id,c);
         inFlight.add(opportunity.id);
+        c.signal=task.signal;c.onProgress=task.progress;
+        const disconnected=()=>{if(!res.writableEnded)void requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});};res.on('close',disconnected);
         try {
+          task.check();
           let indexed = await indexDocuments(ids);
           const semantic = await vectors.search(indexed, message.slice(0,1200)+"\n"+opportunity.role.slice(0,300));
           indexed = semantic.documents;
           const evidence = indexed.filter(
-            (d) => d.status === "ready" && !d.generation,
+            (d) => d.status === "ready" && !d.generation && d.category!=="template",
           );
           if (
             ["cv", "cover"].includes(action) &&
@@ -655,7 +662,7 @@ export function createCareerBuddy(ctx) {
               opportunity.role +
               "\n" +
               opportunity.description.slice(0, 12000),
-            semantic.scores,
+            semantic.scores,c.contextCharacters||36000,
           );
           const history = messages(opportunity.id)
             .slice(-12)
@@ -730,6 +737,7 @@ export function createCareerBuddy(ctx) {
             ],
             ctx.buddyFetch,
           );
+          task.check();task.progress("validating");
           const parsed = parseBuddyOutput(raw, [
             opportunity.id,
             ...context.otherOpportunities.map((o) => o.id),
@@ -805,6 +813,7 @@ export function createCareerBuddy(ctx) {
             appliedAt: "",
             savedDocuments: [],
           };
+          task.check();
           db.exec("BEGIN");
           try {
             putRow("buddy_messages", user);
@@ -814,8 +823,10 @@ export function createCareerBuddy(ctx) {
             db.exec("ROLLBACK");
             throw error;
           }
+          task.finish("completed");
           json(res, { messages: messages(opportunity.id).slice(-100) });
-        } finally {
+        } catch(e){task.finish(task.signal.aborted?"cancelled":"failed",String(e.status||500));throw e;} finally {
+          res.off("close",disconnected);
           inFlight.delete(opportunity.id);
         }
         return true;
@@ -911,6 +922,7 @@ export function createCareerBuddy(ctx) {
               notes:
                 "Career Buddy draft. Review factual accuracy and layout before approval.",
               generation: {
+                title,content,
                 messageId: saved.id,
                 provider: saved.provider,
                 model: saved.model,

@@ -3911,3 +3911,6 @@ textarea {
 .buddy-chat-message > strong { font-size:12px; }
 @media(max-width:1000px) { .buddy-workspace-layout { grid-template-columns:200px minmax(0,1fr); gap:12px; } }
 @media(max-width:760px) { .buddy-workspace-layout { grid-template-columns:minmax(0,1fr); } .buddy-history-sidebar { position:static; max-height:240px; } .buddy-chat-messages { max-height:50vh; } }
+
+.document-studio{padding:20px;margin:18px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.document-studio>summary{cursor:pointer;font-weight:600}.document-studio .form-grid{margin-top:18px}.document-studio p{line-height:1.65}.studio-pages{display:grid;gap:20px;margin:20px 0}.studio-pages figure{margin:0}.studio-pages img{display:block;width:100%;height:auto;border:1px solid var(--line);background:white}.studio-pages figcaption{font-size:12px;margin-top:8px;color:var(--muted)}

@@ -17,7 +17,7 @@ export function codexStatus(root = directory()) {
     if (
       !s.ready ||
       (Date.now() / 1000 - s.time > 10 &&
-        !(s.busyUntil > Date.now() / 1000 && s.busyUntil <= s.time + 301))
+        !(s.busyUntil > Date.now() / 1000 && s.busyUntil <= s.time + 901))
     )
       throw Error();
     return true;
@@ -35,6 +35,8 @@ export async function runLocalCodex(
   root = directory(),
   kind = "inference",
 ) {
+  if (config.signal?.aborted)
+    throw failure("Career Buddy request cancelled.", 499);
   codexStatus(root);
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(config.model))
     throw failure("Choose a valid Codex model ID.", 400);
@@ -42,7 +44,11 @@ export async function runLocalCodex(
   const id = randomUUID(),
     request = join(root, id + ".request.json"),
     response = join(root, id + ".response.json"),
-    temp = request + ".tmp";
+    temp = request + ".tmp",
+    cancel = join(root, id + ".cancel.json"),
+    progress = join(root, id + ".progress.json");
+  const timeoutSeconds =
+    kind === "models" ? 20 : config.requestTimeoutSeconds || 300;
   const prompt =
     "You are a text-only Career Buddy adapter. Do not use tools, inspect files, execute commands or modify anything. Return only the requested JSON.\n" +
     system +
@@ -60,20 +66,51 @@ export async function runLocalCodex(
       kind,
       schema,
       model: config.model,
-      expiresAt: Date.now() / 1000 + (kind === "models" ? 20 : 300),
+      expiresAt: Date.now() / 1000 + timeoutSeconds,
     }),
     { mode: 0o600, flag: "wx" },
   );
   renameSync(temp, request);
+  const stop = () => {
+    writeFileSync(
+      cancel,
+      JSON.stringify({ expiresAt: Date.now() / 1000 + timeoutSeconds + 10 }),
+      { mode: 0o600 },
+    );
+    rmSync(request, { force: true });
+  };
+  config.onProgress?.("queued-codex");
+  let lastProgress = "";
   try {
-    const deadline = Date.now() + (kind === "models" ? 25000 : 305000);
+    const deadline = Date.now() + timeoutSeconds * 1000;
+
     while (Date.now() < deadline) {
+      if (config.signal?.aborted) {
+        stop();
+        throw failure("Career Buddy request cancelled.", 499);
+      }
+      try {
+        const value = JSON.parse(readFileSync(progress, "utf8"));
+        if (value.stage !== lastProgress) {
+          lastProgress = value.stage;
+          config.onProgress?.(value.stage);
+        }
+      } catch {}
+
       let value;
       try {
         value = JSON.parse(readFileSync(response, "utf8"));
       } catch {}
       if (value) {
-        if (value.error) throw failure(value.error, 502);
+        if (value.error)
+          throw failure(
+            value.error,
+            value.errorCode === "deadline"
+              ? 504
+              : value.errorCode === "cancelled"
+                ? 499
+                : 502,
+          );
         if (
           typeof value.output !== "string" ||
           value.output.length > 2 * 1024 * 1024
@@ -83,16 +120,18 @@ export async function runLocalCodex(
       }
       await new Promise((r) => setTimeout(r, 250));
     }
+    stop();
     throw failure(
       kind === "models"
         ? "Codex model discovery timed out. Retry when the helper is idle, or enter an ID manually."
-        : "Codex timed out after five minutes. Reduce context or try again.",
+        : `Codex exceeded the ${timeoutSeconds}-second request limit. Increase the timeout in Settings, reduce context or retry.`,
       504,
     );
   } finally {
     rmSync(request, { force: true });
     rmSync(response, { force: true });
     rmSync(temp, { force: true });
+    rmSync(progress, { force: true });
   }
 }
 

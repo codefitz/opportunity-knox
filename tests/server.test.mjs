@@ -2839,3 +2839,148 @@ test('saved Buddy conversations list legacy history and isolate model context an
  assert.equal((await f.request('/api/buddy/workspace?conversationId=bad%2Fpath')).status,400);
  await f.restart();await f.login();assert.equal((await f.request('/api/buddy/workspace?conversationId=conversation-b')).data.messages.length,2);
 });
+
+test('Buddy request status exposes stages and cancellation aborts transport without saving proposals',async t=>{
+ let entered;const started=new Promise(r=>entered=r);let aborted=false,slow=true;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{if(!slow)return buddyResponse(buddyReply({reply:JSON.stringify({intent:'coach',message:'Fictional retry reply.',opportunity:null,tasks:[],star:null})}));entered();return new Promise((resolve,reject)=>{opts.signal.addEventListener('abort',()=>{aborted=true;reject(new DOMException('Aborted','AbortError'));},{once:true});});}});await f.setup();await enableBuddy(f);
+ const body={mode:'auto',message:'Fictional slow request',requestId:'cancel-test',conversationId:'cancellable-chat',documentIds:[]};
+ const pending=f.request('/api/buddy/workspace',{method:'POST',body});await started;
+ const status=await f.request('/api/buddy/requests/cancel-test');assert.equal(status.data.request.stage,'waiting-provider');assert.equal(status.data.request.timeoutSeconds,120);assert.equal(status.data.request.provider,'custom');assert.equal(JSON.stringify(status.data).includes('private-buddy-test-key'),false);
+ assert.equal((await f.request('/api/buddy/requests/cancel-test',{auth:false})).status,401);
+ await f.request('/api/buddy/requests/cancel-test',{method:'POST',body:{cancel:true}});assert.equal((await pending).status,499);assert.equal(aborted,true);assert.equal((await f.request('/api/buddy/requests/cancel-test')).data.request.stage,'cancelled');
+ const history=(await f.request('/api/buddy/workspace?conversationId=cancellable-chat')).data.messages;assert.equal(history.length,1);assert.equal(history[0].status,'cancelled');assert.equal((await f.request('/api/board')).data.opportunities.length,0);
+ slow=false;assert.equal((await f.request('/api/buddy/workspace',{method:'POST',body})).status,200);assert.equal((await f.request('/api/buddy/requests/cancel-test')).data.request.stage,'completed');
+ await f.restart();await f.login();assert.equal((await f.request('/api/buddy/requests/cancel-test')).data.request.stage,'completed');
+});
+
+test('independent directory sources browse safely, stay in place, persist and clear caches when deselected',async t=>{
+ const f=await fixture(t);await f.setup();const source=join(f.root,'fictional-career-source');mkdirSync(source);mkdirSync(join(source,'projects'));writeFileSync(join(source,'projects','achievement.txt'),'Fictional achievement evidence.');writeFileSync(join(source,'.private.txt'),'Hidden fictional text.');symlinkSync(join(f.root,'state'),join(source,'outside-link'));
+ const route='/api/connections/directories';assert.equal((await f.request(route,{auth:false})).status,401);
+ const added=await f.request(route,{method:'POST',body:{revision:1,hostPath:source,name:'Fictional archive'}});assert.equal(added.status,200);const root=added.data.roots[0];assert.equal(root.state,'connected');
+ const browse=await f.request(route+'/'+root.id+'/browse');assert.deepEqual(browse.data.entries.map(e=>e.name),['projects']);assert.equal((await f.request(route+'/'+root.id+'/browse?path=..')).status,400);
+ const chosen=await f.request(route+'/'+root.id+'/selection',{method:'POST',body:{revision:added.data.revision,paths:['projects/achievement.txt']}});assert.equal(chosen.status,200);
+ const vectorStatus=(await f.request('/api/buddy/vector-index')).data;const document=vectorStatus.sources.find(s=>s.name.includes('achievement.txt'));assert.ok(document);assert.equal(document.readOnly,true);
+ const prepared=await f.request('/api/buddy/index',{method:'POST',body:{documentIds:[document.id]}});assert.equal(prepared.status,200);assert.match(JSON.parse(f.app.db.prepare('SELECT data FROM document_text WHERE id=?').get(document.id).data).text,/Fictional achievement/);assert.equal(readFileSync(join(source,'projects','achievement.txt'),'utf8'),'Fictional achievement evidence.');
+ await f.restart();await f.login();assert.equal((await f.request(route)).data.roots[0].selectedCount,1);
+ const current=(await f.request(route)).data;assert.equal((await f.request(route+'/'+root.id+'/selection',{method:'POST',body:{revision:current.revision,paths:[]}})).status,200);assert.equal(f.app.db.prepare('SELECT data FROM document_text WHERE id=?').get(document.id),undefined);
+ const next=(await f.request(route)).data;assert.equal((await f.request(route+'/'+root.id,{method:'DELETE',body:{revision:next.revision}})).status,200);assert.equal(existsSync(join(source,'projects','achievement.txt')),true);
+});
+
+test('Google Docs configuration, session-bound OAuth, refresh, search and snapshot import are private and read-only',async t=>{
+ const requests=[];let refreshes=0;const f=await fixture(t,{googleFetch:async(url,options)=>{requests.push({url:String(url),options});if(String(url).endsWith('/token')){const b=new URLSearchParams(options.body);if(b.get('grant_type')==='refresh_token'){refreshes++;return Response.json({access_token:'fictional-access-new',expires_in:3600});}return Response.json({access_token:'fictional-access',refresh_token:'fictional-refresh-secret',expires_in:1,scope:'https://www.googleapis.com/auth/drive.readonly'});}if(String(url).endsWith('/revoke'))return new Response('');if(String(url).includes('/export?'))return new Response(Buffer.from('fictional docx bytes'));if(String(url).includes('/files/fictionalDoc?'))return Response.json({id:'fictionalDoc',name:'Fictional master CV',mimeType:'application/vnd.google-apps.document',modifiedTime:'2026-10-28T10:00:00Z',version:'1'});return Response.json({files:[{id:'fictionalDoc',name:'Fictional master CV',modifiedTime:'2026-10-28T10:00:00Z'}]});}});await f.setup();const route='/api/connections/google';assert.equal((await f.request(route,{auth:false})).status,401);
+ const c=await f.request(route,{method:'PATCH',body:{revision:1,clientId:'fictional.apps.googleusercontent.com',clientSecret:'fictional-google-client-secret',redirectUri:f.base+route+'/callback'}});assert.equal(c.status,200);assert.equal(c.data.hasSecret,true);assert.equal(c.data.clientSecret,undefined);
+ const started=await f.request(route+'/start',{method:'POST',body:{}});const auth=new URL(started.data.url);assert.equal(auth.hostname,'accounts.google.com');assert.equal(auth.searchParams.get('scope'),'https://www.googleapis.com/auth/drive.readonly');assert.ok(auth.searchParams.get('code_challenge'));const state=auth.searchParams.get('state');
+ assert.equal((await f.request(route+'/callback?state=wrong&code=bad',{auth:false})).status,400);
+ const callback=await fetch(f.base+route+'/callback?'+new URLSearchParams({state,code:'fictional-code'}),{redirect:'manual'});assert.equal(callback.status,303);assert.equal(callback.headers.get('location').includes('fictional-code'),false);
+ const other=await f.request('/api/login',{method:'POST',auth:false,body:{password:'correct horse battery staple'}});assert.equal((await f.request(route+'/finish',{method:'POST',headers:{Cookie:other.response.headers.get('set-cookie').split(';')[0]},body:{state}})).status,400);
+ const finished=await f.request(route+'/finish',{method:'POST',body:{state}});assert.equal(finished.status,200);assert.equal(finished.data.connected,true);assert.equal((await f.request(route+'/finish',{method:'POST',body:{state}})).status,400);
+ const search=await f.request(route+'/search',{method:'POST',body:{query:"Candidate's CV"}});assert.equal(search.status,200);assert.equal(search.data.files[0].name,'Fictional master CV');assert.equal(refreshes,1);
+ const imported=await f.request(route+'/import',{method:'POST',body:{id:'fictionalDoc',kind:'cv'}});assert.equal(imported.status,200);assert.equal(imported.data.unchanged,false);assert.equal(imported.data.document.externalSource.provider,'google-docs');assert.equal(imported.data.document.name,'Fictional master CV.docx');
+ const duplicate=await f.request(route+'/import',{method:'POST',body:{id:'fictionalDoc',kind:'cv'}});assert.equal(duplicate.data.unchanged,true);assert.equal((await f.request('/api/documents')).data.documents.length,1);assert.equal(requests.filter(r=>r.url.includes('/export?')).length,1);
+ assert.ok(requests.filter(r=>r.url.includes('/drive/v3/')).every(r=>!r.options.method||r.options.method==='GET'));
+ const exported=JSON.stringify((await f.request('/api/export')).data);assert.equal(exported.includes('fictional-google-client-secret'),false);assert.equal(exported.includes('fictional-refresh-secret'),false);
+ await f.restart();await f.login();assert.equal((await f.request(route)).data.connected,true);
+ assert.equal((await f.request(route+'/import',{method:'POST',body:{id:'../escape',kind:'cv'}})).status,400);
+ const disconnected=await f.request(route+'/disconnect',{method:'POST',body:{}});assert.equal(disconnected.data.connected,false);assert.equal(disconnected.data.revoked,true);assert.equal((await f.request('/api/documents')).data.documents.length,1);
+});
+
+test('opportunity chat cancellation rejects late responses, persists diagnostics and allows a retry',async t=>{
+ let release,started;const ready=new Promise(r=>started=r);let delayed=true;
+ const f=await fixture(t,{buddyFetch:async()=>{if(delayed){started();await new Promise(r=>release=r);}return buddyResponse(buddyReply());}});await f.setup();await enableBuddy(f);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const base='/api/opportunities/'+op.id+'/buddy';const body={message:'Fictional advice',action:'chat',requestId:'cancel-opportunity',documentIds:[],includeOtherOpportunities:false};
+ const pending=f.request(base+'/chat',{method:'POST',body});await ready;
+ const before=await f.request('/api/buddy/requests/'+body.requestId);assert.equal(before.status,200);assert.equal(before.data.request.conversationId,'opportunity:'+op.id);
+ assert.equal((await f.request('/api/buddy/requests/'+body.requestId,{method:'POST',body:{cancel:true}})).status,200);release();assert.equal((await pending).status,499);
+ assert.equal((await f.request(base)).data.messages.length,0);assert.equal((await f.request('/api/buddy/requests/'+body.requestId)).data.request.stage,'cancelled');
+ delayed=false;assert.equal((await f.request(base+'/chat',{method:'POST',body})).status,200);
+ await f.restart();await f.login();assert.equal((await f.request('/api/buddy/requests/'+body.requestId)).data.request.stage,'completed');assert.equal((await f.request('/api/buddy/requests?scope='+encodeURIComponent('opportunity:'+op.id))).data.request.id,body.requestId);
+});
+
+test('manual decision cancellation prevents saving an assessment',async t=>{
+ let release,started;const ready=new Promise(r=>started=r);
+ const f=await fixture(t,{buddyFetch:async()=>{started();await new Promise(r=>release=r);return buddyResponse(buddyReply());}});await f.setup();
+ await f.request('/api/buddy/decision-settings',{method:'PATCH',body:{revision:1,enabled:true,provider:'custom',baseUrl:'https://fictional.example/v1',model:'fictional',apiKey:'fictional-key'}});
+ await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{revision:1,items:[{id:'pay',description:'Fictional salary criterion',priority:'required'}]}});
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const base='/api/buddy/decisions/'+op.id;const pending=f.request(base,{method:'POST',body:{requestId:'cancel-decision',revision:op.revision,criteriaRevision:2,documentIds:[]}});await ready;
+ await f.request('/api/buddy/requests/cancel-decision',{method:'POST',body:{cancel:true}});release();assert.equal((await pending).status,499);assert.equal((await f.request(base)).data.assessments.length,0);
+});
+
+test('automatic review cancellation stops a running provider and does not save late tags or fit',async t=>{
+ let release,started;const ready=new Promise(r=>started=r);
+ const f=await fixture(t,{automationEnabled:true,buddyFetch:async()=>{started();await new Promise(r=>release=r);return buddyResponse(buddyReply({reply:JSON.stringify({tags:['Late tag']})}));}});await f.setup();await enableBuddy(f);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;await ready;
+ const queued=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Fictional queued employer'}})).data;const queuedRoute='/api/buddy/automation/'+queued.id;await f.request(queuedRoute,{method:'POST',body:{cancel:true}});assert.equal((await f.request(queuedRoute)).data.automation.state,'cancelled');
+ const route='/api/buddy/automation/'+op.id;await f.request(route,{method:'POST',body:{cancel:true}});release();let job;
+ for(let i=0;i<100;i++){job=(await f.request(route)).data.automation;if(job.state==='cancelled')break;await new Promise(r=>setTimeout(r,5));}
+ assert.equal(job.state,'cancelled');assert.equal((await f.request('/api/opportunities/'+op.id)).data.tags.includes('Late tag'),false);
+ assert.equal((await f.request('/api/buddy/requests/'+job.requestId)).data.request.stage,'cancelled');
+});
+
+test('automatic fit cancellation preserves completed tags but saves no late assessment',async t=>{
+ let release,started,calls=0;const ready=new Promise(r=>started=r);
+ const f=await fixture(t,{automationEnabled:true,buddyFetch:async()=>{calls++;if(calls===1)return buddyResponse(buddyReply({reply:JSON.stringify({tags:['Fictional completed tag']})}));started();await new Promise(r=>release=r);return buddyResponse(buddyReply());}});await f.setup();await enableBuddy(f);
+ await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{revision:1,items:[{id:'pay',description:'Fictional salary criterion',priority:'required'}]}});
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;await ready;
+ const route='/api/buddy/automation/'+op.id;await f.request(route,{method:'POST',body:{cancel:true}});release();let job;
+ for(let i=0;i<100;i++){job=(await f.request(route)).data.automation;if(job.state==='cancelled')break;await new Promise(r=>setTimeout(r,5));}
+ assert.equal(job.state,'cancelled');assert.equal(job.tags,'completed');assert.equal(job.fit,'cancelled');assert.equal((await f.request('/api/opportunities/'+op.id)).data.tags.includes('Fictional completed tag'),true);assert.equal((await f.request('/api/buddy/decisions/'+op.id)).data.assessments.length,0);
+});
+
+test('document studio protects previews, records page-target warnings and saves new drafts idempotently',async t=>{
+ const f=await fixture(t,{documentConvert:async(bytes,folder)=>{writeFileSync(join(folder,'page-1.png'),Buffer.from('fictional-page'));return {pages:1,pdf:Buffer.from('%PDF-fictional')};}});await f.setup();
+ const {layoutDraft}=await import('../server/document-layout.mjs');const bytes=await layoutDraft('Fictional CV','# Fictional Candidate\n\n## Experience\n- Fictional verified achievement.','classic');
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.docx',kind:'cv',status:'submitted',contentBase64:bytes.toString('base64')}})).data;
+ assert.equal((await f.request('/api/document-studio',{auth:false})).status,401);assert.ok((await f.request('/api/document-studio')).data.documents.some(d=>d.id===source.id));
+ const rendered=await f.request('/api/document-studio/preview',{method:'POST',body:{documentId:source.id,revision:source.revision,layout:'compact',pageTarget:2,content:'# Fictional Candidate\n\nFictional experience.'}});assert.equal(rendered.status,200);assert.equal(rendered.data.pages,1);
+ assert.equal((await f.request(rendered.data.images[0],{auth:false})).status,401);assert.equal((await f.request(rendered.data.images[0],{binary:true})).data.toString(),'fictional-page');
+ const save='/api/document-studio/'+rendered.data.id+'/save';assert.equal((await f.request(save,{method:'POST',body:{format:'pdf'}})).status,400);
+ const saved=await f.request(save,{method:'POST',body:{confirm:true,format:'pdf'}});assert.equal(saved.status,200);assert.equal(saved.data.document.status,'draft');assert.notEqual(saved.data.document.id,source.id);assert.equal((await f.request(save,{method:'POST',body:{confirm:true,format:'pdf'}})).data.document.id,saved.data.document.id);
+ assert.deepEqual((await f.request('/api/documents/'+source.id+'/content',{binary:true})).data,bytes);
+ await f.request('/api/document-studio/'+rendered.data.id,{method:'DELETE'});assert.equal((await f.request(rendered.data.pdfUrl)).status,404);
+});
+
+test('document studio detects source changes before save and reports renderer failures without creating files',async t=>{
+ const {layoutDraft}=await import('../server/document-layout.mjs');const bytes=await layoutDraft('Fictional CV','Fictional text','classic');let failed=false;
+ const f=await fixture(t,{documentConvert:async()=>{if(failed)throw Object.assign(new Error('Fictional rendering failure'),{status:502});return {pages:3,pdf:Buffer.from('%PDF-fictional')};}});await f.setup();
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.docx',kind:'cv',status:'draft',contentBase64:bytes.toString('base64')}})).data;
+ const body={documentId:source.id,revision:source.revision,layout:'original',pageTarget:2};const p=(await f.request('/api/document-studio/preview',{method:'POST',body})).data;assert.equal(p.overTarget,true);
+ await f.request('/api/documents/'+source.id,{method:'PATCH',body:{revision:source.revision,notes:'Fictional changed note'}});assert.equal((await f.request('/api/document-studio/'+p.id+'/save',{method:'POST',body:{confirm:true,format:'docx'}})).status,409);
+ failed=true;assert.equal((await f.request('/api/document-studio/preview',{method:'POST',body:{...body,revision:source.revision+1}})).status,502);assert.equal((await f.request('/api/documents')).data.documents.length,1);
+});
+
+test('document categories persist independently of kind, file bytes and submitted status',async t=>{
+ const f=await fixture(t);await f.setup();const bytes=Buffer.from('Fictional career evidence.');
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional master.txt',kind:'cv',status:'submitted',category:'master-cv',contentBase64:bytes.toString('base64')}})).data;assert.equal(source.category,'master-cv');
+ const updated=await f.request('/api/documents/'+source.id,{method:'PATCH',body:{revision:source.revision,category:'template'}});assert.equal(updated.status,200);assert.equal(updated.data.kind,'cv');assert.equal(updated.data.status,'submitted');assert.equal(updated.data.category,'template');
+ assert.deepEqual((await f.request('/api/documents/'+source.id+'/content',{binary:true})).data,bytes);
+ assert.equal((await f.request('/api/documents/'+source.id,{method:'PATCH',body:{revision:source.revision,category:'star-story'}})).status,409);
+ assert.equal((await f.request('/api/documents/'+source.id,{method:'PATCH',body:{revision:updated.data.revision,category:'invented-category'}})).status,400);
+ await f.restart();await f.login();assert.equal((await f.request('/api/documents')).data.documents.find(d=>d.id===source.id).category,'template');
+});
+
+test('bulk categorisation validates all revisions before updating any document',async t=>{
+ const f=await fixture(t);await f.setup();const docs=[];
+ for(const name of ['A','B'])docs.push((await f.request('/api/documents',{method:'POST',body:{name:'Fictional '+name+'.txt',kind:'reference',status:'draft',contentBase64:Buffer.from('Fictional story').toString('base64')}})).data);
+ const route='/api/documents/categories';const entries=docs.map(d=>({id:d.id,revision:d.revision}));assert.equal((await f.request(route,{method:'POST',auth:false,body:{category:'star-story',documents:entries}})).status,401);
+ assert.equal((await f.request(route,{method:'POST',body:{category:'star-story',documents:[entries[0],{...entries[1],revision:99}]}})).status,409);
+ assert.ok((await f.request('/api/documents')).data.documents.every(d=>d.category==='reference'));
+ const saved=await f.request(route,{method:'POST',body:{category:'star-story',documents:entries}});assert.equal(saved.status,200);assert.ok(saved.data.documents.every(d=>d.category==='star-story'));
+ assert.equal((await f.request(route,{method:'POST',body:{category:'star-story',documents:[entries[0],entries[0]]}})).status,400);
+});
+
+test('legacy CV categories are derived without rewriting stored rows',async t=>{
+ const f=await fixture(t);await f.setup();const docs=[];for(const kind of ['cv','reference'])docs.push((await f.request('/api/documents',{method:'POST',body:{name:'Fictional '+kind+'.txt',kind,status:'draft',contentBase64:Buffer.from('Fictional evidence').toString('base64')}})).data);
+ for(const doc of docs){const raw=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);delete raw.category;if(raw.kind==='cv')raw.generation={master:true};f.app.db.prepare('UPDATE documents SET data=? WHERE id=?').run(JSON.stringify(raw),doc.id);}
+ const before=f.app.db.prepare('SELECT data FROM documents ORDER BY id').all();const list=(await f.request('/api/documents')).data.documents;assert.equal(list.find(d=>d.kind==='cv').category,'master-cv');assert.equal(list.find(d=>d.kind==='reference').category,'reference');assert.deepEqual(f.app.db.prepare('SELECT data FROM documents ORDER BY id').all(),before);
+});
+
+test('templates stay selectable explicitly but are excluded from automatic Buddy evidence',async t=>{
+ let context;const f=await fixture(t,{buddyFetch:async(_,opts)=>{context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:JSON.stringify({intent:'coach',message:'Fictional coaching',opportunity:null,tasks:[],star:null})}));}});await f.setup();await enableBuddy(f);
+ const template=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional template.txt',kind:'reference',category:'template',status:'approved',contentBase64:Buffer.from('Fictional data engineering template placeholder').toString('base64')}})).data;
+ const state=(await f.request('/api/buddy/workspace')).data;assert.equal(state.documents.find(d=>d.id===template.id).category,'template');
+ const send=(id,extra={})=>f.request('/api/buddy/workspace',{method:'POST',body:{mode:'auto',message:'Help with data engineering skills',requestId:id,documentIds:[],useLibrary:true,...extra}});
+ assert.equal((await send('template-auto')).status,200);assert.ok(!context.excerpts.some(e=>e.sourceId===template.id));
+ assert.equal((await send('template-explicit',{templateId:template.id})).status,200);assert.ok(context.excerpts.some(e=>e.sourceId===template.id));
+});

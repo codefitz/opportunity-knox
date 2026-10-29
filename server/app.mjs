@@ -1,3 +1,7 @@
+import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
+import {createDocumentStudio} from "./document-studio.mjs";
+import {createGoogleDocuments} from "./google-documents.mjs";
+import {createDirectorySources} from "./directory-sources.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -284,6 +288,7 @@ function cleanDocumentTags(raw) {
   }
   return out;
 }
+function validateCategory(v){try{return categoryValue(v);}catch(e){fail(e.status||400,e.message);}}
 const publicDocument = ({
   storageRoot,
   relativePath,
@@ -292,6 +297,7 @@ const publicDocument = ({
   ...rest
 }) => ({
   ...rest,
+  category:documentCategory(rest),
   tags: Array.isArray(tags)
     ? tags
     : inferDocumentTags(rest.name || "", rest.kind || ""),
@@ -436,7 +442,7 @@ export function createApp(options = {}) {
     db
       .prepare("SELECT data FROM documents")
       .all()
-      .map((row) => JSON.parse(row.data));
+      .map((row) => {const d=JSON.parse(row.data);return {...d,category:documentCategory(d)};});
   const getDocument = (id) => {
     const row = db.prepare("SELECT data FROM documents WHERE id=?").get(id);
     if (!row) fail(404, "Document not found.");
@@ -623,7 +629,10 @@ export function createApp(options = {}) {
     tags,
     generation,
     importRequestId,
+    externalSource,
+    category,
   }) => {
+    const resolvedCategory=category===undefined?documentCategory({kind,opportunityId,generation}):validateCategory(category);
     const version =
       1 +
       getDocuments()
@@ -657,11 +666,13 @@ export function createApp(options = {}) {
       version,
       notes: notes,
       tags: resolvedTags,
+      category:resolvedCategory,
       storageRoot: filesDir,
       relativePath,
       sha256: createHash("sha256").update(content).digest("hex"),
       revision: 1,
       ...(generation ? { generation } : {}),
+      ...(externalSource?{externalSource}:{}),
       ...(importRequestId ? { importRequestId } : {}),
     };
     try {
@@ -672,6 +683,9 @@ export function createApp(options = {}) {
     }
     return publicDocument(document);
   };
+  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert});
+  const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
+  const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
   let obsidian;
   const buddy = createCareerBuddy({
     db,
@@ -680,8 +694,8 @@ export function createApp(options = {}) {
     getRecord,
     putRecord,
     fullRecord,
-    getDocuments: () => [...getDocuments(), ...(obsidian?.sourceDocuments() || [])],
-    documentPath: (doc) => doc.readOnlyVaultSource ? obsidian.sourcePath(doc) : documentPath(doc),
+    getDocuments: () => [...getDocuments(), ...(obsidian?.sourceDocuments() || []),...directories.sourceDocuments()],
+    documentPath: (doc) => doc.readOnlyDirectorySource ? directories.sourcePath(doc) : doc.readOnlyVaultSource ? obsidian.sourcePath(doc) : documentPath(doc),
     settings,
     saveDocument,
     buddyFetch: options.buddyFetch,
@@ -851,8 +865,12 @@ export function createApp(options = {}) {
         );
         return json(res, { authenticated: false });
       }
+      if(path==="/api/connections/google/callback") {try{if(await googleDocuments.handle(path,method,req,res,{json,readBody}))return;}catch(e){if(e.status)fail(e.status,e.message);throw e;}}
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
+        try {if(await studio.handle(path,method,req,res,{json,readBody}))return;
+        if(await directories.handle(path,method,req,res,{json,readBody}))return;
+        if(await googleDocuments.handle(path,method,req,res,{json,readBody}))return;}catch(e){if(e.status)fail(e.status,e.message);throw e;}
         if (path === "/api/obsidian" || path.startsWith("/api/obsidian/")) {
           if (await obsidian.handle(path, method, req, res, { json, readBody }))
             return;
@@ -1280,7 +1298,7 @@ export function createApp(options = {}) {
             const existing = getDocuments().find((d) => d.importRequestId === importRequestId);
             if (existing) {
               const hash = createHash("sha256").update(content).digest("hex");
-              if (existing.sha256 !== hash || existing.name !== name || existing.opportunityId !== opportunityId || existing.kind !== kind || existing.status !== status) fail(409, "Import request ID was already used for a different document.");
+              if (existing.sha256 !== hash || existing.name !== name || existing.opportunityId !== opportunityId || existing.kind !== kind || existing.status !== status || existing.category !== (body.category??documentCategory({kind,opportunityId}))) fail(409, "Import request ID was already used for a different document.");
               return json(res, publicDocument(existing), 200);
             }
           }
@@ -1293,8 +1311,16 @@ export function createApp(options = {}) {
             content,
             notes: cleanText(body.notes ?? "", "Notes", 50000),
             tags: body.tags,
+            category:body.category,
           });
           return json(res, document, 201);
+        }
+        if(path==='/api/documents/categories'&&method==='POST'){
+          const b=await readBody(req),category=validateCategory(b.category);
+          if(!Array.isArray(b.documents)||!b.documents.length||b.documents.length>500||new Set(b.documents.map(d=>d?.id)).size!==b.documents.length)fail(400,'Choose 1 to 500 distinct documents.');
+          const all=getDocuments(),changed=b.documents.map(item=>{const doc=all.find(d=>d.id===item?.id);if(!doc)fail(404,'A document is no longer available.');if(item.revision!==(doc.revision??1))fail(409,'A selected document changed. Reload before categorising.');return {...doc,category,revision:(doc.revision??1)+1};});
+          db.exec('BEGIN');try{for(const d of changed)putDocument(d);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+          return json(res,{documents:changed.map(publicDocument)});
         }
         if (path === "/api/documents/move" && method === "POST") {
           const body = await readBody(req);
@@ -1493,7 +1519,7 @@ export function createApp(options = {}) {
               fail(409, "Document changed. Reload before saving.");
             if (
               Object.keys(body).some(
-                (key) => !["status", "tags", "notes", "revision"].includes(key),
+                (key) => !["status", "tags", "notes", "revision", "category"].includes(key),
               )
             )
               fail(
@@ -1511,6 +1537,7 @@ export function createApp(options = {}) {
                 ["draft", "approved", "submitted"],
                 "document status",
               );
+            if(body.category!==undefined)doc.category=validateCategory(body.category);
             if (body.tags !== undefined)
               doc.tags = cleanDocumentTags(body.tags);
             if (body.notes !== undefined)
@@ -1701,7 +1728,7 @@ export function createApp(options = {}) {
             );
             try {
               snapshot.exec(
-                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+                "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_requests (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
               );
               for (const table of [
                 "records",
@@ -1716,6 +1743,7 @@ export function createApp(options = {}) {
                 "standalone_attachments",
                 "standalone_attachment_originals",
                 "opportunity_automation",
+                "buddy_requests",
               ]) {
                 const rows = db.prepare(`SELECT * FROM ${table}`).all();
                 const key = table === "config" ? "key" : "id";
@@ -1893,7 +1921,7 @@ export function createApp(options = {}) {
           ? server.close((err) => (err ? reject(err) : done()))
           : done(),
       );
-      await buddy.close();
+      studio.close();await buddy.close();
       db.close();
     },
   };

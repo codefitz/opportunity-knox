@@ -37,10 +37,11 @@ class CodexWorker:
                 if self.stop.is_set():break
                 if path.is_symlink() or not re.fullmatch(r'[a-f0-9-]{36}\.request\.json',path.name):continue
                 response=path.with_name(path.name.replace('.request.json','.response.json'))
+                cancel=path.with_name(path.name.replace('.request.json','.cancel.json'));progress=path.with_name(path.name.replace('.request.json','.progress.json'))
                 try:
                     if path.stat().st_size>1024*1024:raise ValueError()
                     job=json.loads(path.read_text());path.unlink()
-                    if job['expiresAt']<time.time():continue
+                    if job['expiresAt']<time.time() or cancel.exists():continue
                     if job.get('kind')=='models':
                         if not self.executable or not auth:raise RuntimeError('Sign in to Codex with ChatGPT on the host, then restart the board.')
                         try:
@@ -58,23 +59,38 @@ class CodexWorker:
                         schema=Path(temp)/'schema.json';schema.write_text(json.dumps(job['schema']));output=Path(temp)/'answer.json'
                         env={k:v for k,v in os.environ.items() if k not in ('OPENAI_API_KEY','CODEX_API_KEY','CODEX_ACCESS_TOKEN')}
                         self.process=subprocess.Popen(command(self.executable,temp,schema,output,model),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True,start_new_session=True,env=env)
-                        try:self.process.communicate(job['prompt'],timeout=max(1,min(300,job['expiresAt']-time.time())))
-                        except subprocess.TimeoutExpired:
-                            os.killpg(self.process.pid,signal.SIGKILL);self.process.wait();raise RuntimeError('Codex exceeded the five-minute limit.')
+                        self.write(progress,{'stage':'running-codex'})
+                        first=True
+                        deadline=min(job['expiresAt'],time.time()+900)
+                        while True:
+                            if cancel.exists() or self.stop.is_set() or time.time()>=deadline:
+                                try:os.killpg(self.process.pid,signal.SIGKILL)
+                                except ProcessLookupError:pass
+                                self.process.wait()
+                                raise RuntimeError('Codex request cancelled.' if cancel.exists() or self.stop.is_set() else 'Codex request exceeded its configured deadline.')
+                            try:
+                                self.process.communicate(job['prompt'] if first else None,timeout=.2)
+                                break
+                            except subprocess.TimeoutExpired:first=False
                         if self.process.returncode or not output.exists():raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
                         if output.stat().st_size>2*1024*1024:raise ValueError()
                         answer=output.read_text();json.loads(answer)
                         if job['expiresAt']>=time.time():self.write(response,{'output':answer})
-                except RuntimeError as e:self.write(response,{'error':str(e)})
+                except RuntimeError as e:self.write(response,{'error':str(e),'errorCode':'deadline' if 'exceeded its configured deadline' in str(e) else 'cancelled' if str(e)=='Codex request cancelled.' else 'codex-failed'})
                 except (OSError,ValueError,KeyError,TypeError):self.write(response,{'error':'The Codex request could not be processed.'})
                 finally:
                     path.unlink(missing_ok=True)
+                    cancel.unlink(missing_ok=True);progress.unlink(missing_ok=True)
                     self.process=None
             # Expired response material is never retained indefinitely after a caller exits.
             for path in self.root.glob('*.response.json'):
                 try:
                     if time.time()-path.stat().st_mtime>360:path.unlink()
                 except OSError:pass
+            for marker in self.root.glob('*.cancel.json'):
+                try:
+                    if json.loads(marker.read_text()).get('expiresAt',0)<time.time():marker.unlink()
+                except (OSError,ValueError):pass
             self.stop.wait(0.25)
     def close(self):
         self.stop.set()

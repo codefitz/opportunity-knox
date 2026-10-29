@@ -4,6 +4,9 @@ import { api, json } from "../api";
 import "../career-buddy.css";
 
 export type BuddySettings = {
+  requestTimeoutSeconds?: number;
+  maxOutputTokens?: number;
+  contextCharacters?: number;
   revision: number;
   enabled: boolean;
   provider: string;
@@ -103,6 +106,10 @@ export default function CareerBuddySettings({
       apiKey: key,
       clearKey,
       outputMode: form.outputMode,
+      requestTimeoutSeconds:
+        form.requestTimeoutSeconds || (form.provider === "codex" ? 300 : 120),
+      maxOutputTokens: form.maxOutputTokens || 8000,
+      contextCharacters: form.contextCharacters || 36000,
     };
     const timer = window.setTimeout(async () => {
       setFindingModels(true);
@@ -183,6 +190,11 @@ export default function CareerBuddySettings({
             model: form.model,
             baseUrl: form.baseUrl,
             outputMode: form.outputMode,
+            requestTimeoutSeconds:
+              form.requestTimeoutSeconds ||
+              (form.provider === "codex" ? 300 : 120),
+            maxOutputTokens: form.maxOutputTokens || 8000,
+            contextCharacters: form.contextCharacters || 36000,
             apiKey: key,
             clearKey,
           },
@@ -221,6 +233,11 @@ export default function CareerBuddySettings({
           baseUrl: form.baseUrl,
           model: form.model,
           outputMode: form.outputMode,
+          requestTimeoutSeconds:
+            form.requestTimeoutSeconds ||
+            (form.provider === "codex" ? 300 : 120),
+          maxOutputTokens: form.maxOutputTokens || 8000,
+          contextCharacters: form.contextCharacters || 36000,
           apiKey: key,
           clearKey,
         }),
@@ -483,12 +500,64 @@ export default function CareerBuddySettings({
               </small>
             </label>
           </details>
+          <details>
+            <summary>Request limits</summary>
+            <div className="form-grid">
+              <label className="field">
+                <span>Request timeout (seconds, 30–900)</span>
+                <input
+                  type="number"
+                  min={30}
+                  max={900}
+                  value={
+                    form.requestTimeoutSeconds ||
+                    (form.provider === "codex" ? 300 : 120)
+                  }
+                  onChange={(e) =>
+                    update({ requestTimeoutSeconds: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Maximum response tokens (HTTP providers, 512–8000)</span>
+                <input
+                  type="number"
+                  min={512}
+                  max={8000}
+                  value={form.maxOutputTokens || 8000}
+                  onChange={(e) =>
+                    update({ maxOutputTokens: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Source context characters (4000–36000)</span>
+                <input
+                  type="number"
+                  min={4000}
+                  max={36000}
+                  value={form.contextCharacters || 36000}
+                  onChange={(e) =>
+                    update({ contextCharacters: Number(e.target.value) })
+                  }
+                />
+              </label>
+            </div>
+            <p className="buddy-muted">
+              Requests return complete answers; progress reports stages, not
+              token-by-token generation. Codex output sizing is controlled by
+              the CLI, so the response-token limit applies to HTTP providers.
+            </p>
+          </details>
           {form.provider === "codex" && (
             <p className="buddy-privacy">
               Codex runs through a helper on the board host, using its saved
               sign-in. Messages and selected excerpts are sent to OpenAI and use
               your Codex account limits. Credentials stay outside Docker. The
-              launcher manages the helper. Choose a model from the host CLI catalogue, use Codex’s default, or enter an ID manually. Refresh models updates the list; account/model access is checked when used.
+              launcher manages the helper. Choose a model from the host CLI
+              catalogue, use Codex’s default, or enter an ID manually. Refresh
+              models updates the list; account/model access is checked when
+              used.
             </p>
           )}
           <p className="buddy-privacy">

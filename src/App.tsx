@@ -1,8 +1,13 @@
+import DocumentCategory from "./components/DocumentCategory";
+import documentCategories from "../server/document-categories.json";
+import DocumentStudio from "./components/DocumentStudio";
+import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
 import DecisionReview, { FitCriteria } from "./components/DecisionReview";
 import VectorIndex from "./components/VectorIndex";
 import {
   useState,
+  useMemo,
   useEffect,
   useRef,
   type ReactNode,
@@ -2533,7 +2538,7 @@ function Activities({
   );
 }
 function Documents({
-  documents,
+  documents:allDocuments,
   opportunityId,
   timezone,
   onChanged,
@@ -2592,6 +2597,9 @@ function Documents({
     [moveFolder, setMoveFolder] = useState(""),
     [moveError, setMoveError] = useState(""),
     [moving, setMoving] = useState(false);
+  const [categoryFilter,setCategoryFilter]=useState(''),[uploadCategory,setUploadCategory]=useState(''),[bulkCategory,setBulkCategory]=useState(''),[categorising,setCategorising]=useState(false);
+  const documents=useMemo(()=>allDocuments.filter(d=>!categoryFilter||d.category===categoryFilter),[allDocuments,categoryFilter]);
+  async function categoriseSelected(){if(!bulkCategory||!selectedForMove.length)return;setCategorising(true);try{await api('/documents/categories',json({category:bulkCategory,documents:movableDocuments.filter(d=>selectedForMove.includes(d.id)).map(d=>({id:d.id,revision:d.revision??1}))}));setSelectedForMove([]);onChanged();onNotice?.('Document categories saved. Files stay in their current folders.');}catch(e){onError(e);}finally{setCategorising(false);}}
   const movableDocuments = documents.filter((d) => {
     const ready = extraction?.[d.id]?.status === "ready";
     return (
@@ -2721,6 +2729,7 @@ function Documents({
               kind,
               status,
               notes,
+              ...(uploadCategory?{category:uploadCategory}:{}),
             }),
           );
           succeeded.add(item.path);
@@ -2801,6 +2810,8 @@ function Documents({
           e.target.value = "";
         }}
       />
+      <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>d.category===c.id).length})</option>)}</select></label>
+      <DocumentStudio onError={onError} onChanged={onChanged} opportunityId={opportunityId}/>
       <form className="document-upload" onSubmit={upload}>
         <label
           className={`upload-drop ${files.length ? "has-file" : ""} ${dragOver ? "drag-active" : ""}`}
@@ -2900,6 +2911,7 @@ function Documents({
                   ))}
                 </select>
               </Field>
+              <Field label="Category"><select value={uploadCategory} onChange={e=>setUploadCategory(e.target.value)}><option value="">Automatic from document type</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></Field>
               <Field label="Status">
                 <select
                   value={status}
@@ -2981,6 +2993,7 @@ function Documents({
           </button>
         </div>
       )}
+      {!opportunityId&&selectedForMove.length>0&&<div className="library-tool-actions"><label className="field"><span>Category for selected documents</span><select disabled={categorising} value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Choose a category</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></label><button type="button" className="button secondary small" disabled={categorising||!bulkCategory} onClick={()=>void categoriseSelected()}>{categorising?'Saving…':'Categorise selected ('+selectedForMove.length+')'}</button></div>}
       {moveDocuments && (
         <Modal
           title={
@@ -3216,7 +3229,7 @@ function Documents({
                               <input
                                 className="document-move-select"
                                 type="checkbox"
-                                aria-label={`Select ${doc.name} for moving`}
+                                aria-label={`Select ${doc.name} for library actions`}
                                 checked={selectedForMove.includes(doc.id)}
                                 disabled={
                                   !selectedForMove.includes(doc.id) &&
@@ -3250,6 +3263,7 @@ function Documents({
                                 {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
                                 {formatDate(doc.createdAt, timezone)}
                               </small>
+                              <DocumentCategory document={doc} onChanged={onChanged} onError={onError}/>
                               <div className="document-tags">
                                 {(doc.tags || []).map((tag) => (
                                   <span
@@ -4339,6 +4353,7 @@ function Library({
     [resetting, setResetting] = useState(false),
     [clearing, setClearing] = useState(false),
     [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [connectionRevision,setConnectionRevision]=useState(0);
   const [docs, setDocs] = useState<BoardDocument[]>([]),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
@@ -4511,7 +4526,7 @@ function Library({
           </p>
         </div>
       </div>
-      <VectorIndex onError={onError} />
+      <VectorIndex onError={onError} refreshKey={connectionRevision} />
       <div className="buddy-library-tools">
         <p>
           {docs.filter((doc) => extraction[doc.id]?.status === "ready").length}{" "}
@@ -4595,6 +4610,7 @@ function Library({
             ))}
         </div>
       </div>
+      <DocumentConnections onError={onError} onChanged={()=>{setConnectionRevision(v=>v+1);void load();}} onRestart={onRestart} restarting={restarting} />
       <ObsidianVaultPanel
         obsidian={obsidian}
         totalDocs={docs.length}
@@ -5238,6 +5254,7 @@ function SettingsPage({
           </button>
         </div>
       </section>
+      <DocumentConnections onError={onError} onRestart={onRestart} restarting={restarting} />
       <CareerBuddySettings onError={onError} />
       <EmbeddingSettings onError={onError} />
       <FitCriteria onError={onError} />

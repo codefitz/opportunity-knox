@@ -1,3 +1,4 @@
+import AIRequestProgress from "./AIRequestProgress";
 import { useEffect, useState } from "react";
 import { api, json } from "../api";
 import type { Opportunity } from "../types";
@@ -157,10 +158,12 @@ export default function DecisionReview({
     } | null>(null),
     [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false);
+  const [activeRequest,setActiveRequest]=useState<string|null>(null);
   const [automation, setAutomation] = useState<{
     state: string;
     tags: string;
     fit: string;
+    requestId?:string;
   } | null>(null);
   const base = "/buddy/decisions/" + opportunity.id;
   async function load() {
@@ -178,7 +181,7 @@ export default function DecisionReview({
     void load();
   }, [opportunity.id, opportunity.revision]);
   useEffect(() => {
-    if (!automation || !["queued", "running"].includes(automation.state))
+    if (!automation || !["queued", "running", "cancelling"].includes(automation.state))
       return;
     const timer = window.setInterval(() => void load(), 4000);
     return () => window.clearInterval(timer);
@@ -199,13 +202,15 @@ export default function DecisionReview({
               {automation.fit}
             </p>
           )}
+          <AIRequestProgress id={automation?.requestId||null} cancellable={false} onError={onError}/>
+          {automation&&['queued','running','cancelling'].includes(automation.state)&&<button type="button" className="button secondary small" onClick={()=>void api('/buddy/automation/'+opportunity.id,json({cancel:true})).then(()=>load()).catch(onError)}>Cancel automatic review</button>}
           <button
             type="button"
             className="button secondary small"
             disabled={
               busy ||
               automation?.state === "running" ||
-              automation?.state === "queued"
+              automation?.state === "queued" || automation?.state === "cancelling"
             }
             onClick={() => {
               void api(
@@ -281,21 +286,24 @@ export default function DecisionReview({
               }
               onClick={() => {
                 setBusy(true);
+                const requestId=crypto.randomUUID();setActiveRequest(requestId);
                 void api(
                   base,
                   json({
                     revision: opportunity.revision,
+                    requestId,
                     criteriaRevision: state.criteria.revision,
                     documentIds: selected,
                   }),
                 )
                   .then(() => load())
-                  .catch(onError)
+                  .catch(e=>{setActiveRequest(null);onError(e);})
                   .finally(() => setBusy(false));
               }}
             >
               {busy ? "Assessing…" : "Assess against my criteria"}
             </button>
+            <AIRequestProgress id={activeRequest} scope={"decision:"+opportunity.id} onError={onError}/>
             <button
               type="button"
               className="button secondary"

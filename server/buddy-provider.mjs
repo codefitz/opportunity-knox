@@ -1,11 +1,14 @@
-import {runLocalCodex,listLocalCodexModels} from "./codex-local.mjs";
+import { runLocalCodex, listLocalCodexModels } from "./codex-local.mjs";
 import { isIP } from "node:net";
 import { lookup as systemLookup } from "node:dns";
 import { Agent } from "undici";
 import ipaddr from "ipaddr.js";
 
 export const PROVIDERS = {
-  codex:{name:"Codex · local CLI",baseUrl:"http://host.docker.internal/codex-local"},
+  codex: {
+    name: "Codex · local CLI",
+    baseUrl: "http://host.docker.internal/codex-local",
+  },
   openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1" },
   anthropic: { name: "Claude", baseUrl: "https://api.anthropic.com/v1" },
   gemini: {
@@ -131,6 +134,9 @@ export function updateBuddy(previous, body) {
           "apiKey",
           "clearKey",
           "outputMode",
+          "requestTimeoutSeconds",
+          "maxOutputTokens",
+          "contextCharacters",
         ].includes(key),
     )
   )
@@ -172,13 +178,29 @@ export function updateBuddy(previous, body) {
       throw buddyError(400, "Choose a supported output mode.");
     next.outputMode = body.outputMode;
   }
-  if(next.provider==="codex"){next.apiKey="";next.baseUrl=PROVIDERS.codex.baseUrl;}
+  if (next.provider === "codex") {
+    next.apiKey = "";
+    next.baseUrl = PROVIDERS.codex.baseUrl;
+  }
+  for (const [key, min, max] of [
+    ["requestTimeoutSeconds", 30, 900],
+    ["maxOutputTokens", 512, 8000],
+    ["contextCharacters", 4000, 36000],
+  ])
+    if (body[key] !== undefined) {
+      if (!Number.isInteger(body[key]) || body[key] < min || body[key] > max)
+        throw buddyError(400, `Invalid ${key}: choose ${min}–${max}.`);
+      next[key] = body[key];
+    }
   if (next.enabled) assertConfigured(next);
   next.revision++;
   return next;
 }
 export function assertConfigured(config) {
-  if(config.provider==="codex"){if(!config.model)throw buddyError(400,"Choose a Codex model.");return;}
+  if (config.provider === "codex") {
+    if (!config.model) throw buddyError(400, "Choose a Codex model.");
+    return;
+  }
   if (!config.model || !config.baseUrl)
     throw buddyError(
       400,
@@ -255,7 +277,7 @@ export function providerRequest(config, system, messages) {
     body = {
       model: config.model,
       store: false,
-      max_output_tokens: 8000,
+      max_output_tokens: config.maxOutputTokens || 8000,
       input: all,
       ...(mode !== "prompt"
         ? {
@@ -279,7 +301,7 @@ export function providerRequest(config, system, messages) {
     headers["anthropic-version"] = "2023-06-01";
     body = {
       model: config.model,
-      max_tokens: 8000,
+      max_tokens: config.maxOutputTokens || 8000,
       system,
       messages,
       ...(mode === "schema"
@@ -304,7 +326,7 @@ export function providerRequest(config, system, messages) {
         parts: [{ text: m.content }],
       })),
       generationConfig: {
-        maxOutputTokens: 8000,
+        maxOutputTokens: config.maxOutputTokens || 8000,
         ...(mode !== "prompt"
           ? {
               responseMimeType: "application/json",
@@ -322,7 +344,7 @@ export function providerRequest(config, system, messages) {
       model: config.model,
       stream: false,
       messages: all,
-      options: { num_predict: 8000 },
+      options: { num_predict: config.maxOutputTokens || 8000 },
       ...(mode !== "prompt"
         ? { format: mode === "schema" ? BUDDY_SCHEMA : "json" }
         : {}),
@@ -333,7 +355,7 @@ export function providerRequest(config, system, messages) {
     body = {
       model: config.model,
       stream: false,
-      max_tokens: 8000,
+      max_tokens: config.maxOutputTokens || 8000,
       messages: all,
       ...(mode !== "prompt"
         ? {
@@ -416,6 +438,10 @@ async function providerJSON(
   resolve = systemLookup,
   timeout = 120000,
 ) {
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  const signal = config.signal
+    ? AbortSignal.any([config.signal, timeoutSignal])
+    : timeoutSignal;
   const url = new URL(request.url);
   const dispatcher =
     url.protocol === "http:" && !isIP(url.hostname.replace(/^\[|\]$/g, ""))
@@ -423,6 +449,7 @@ async function providerJSON(
       : null;
   let response;
   try {
+    config.onProgress?.("waiting-provider");
     response = await fetcher(request.url, {
       method: request.method || "POST",
       headers: request.headers,
@@ -430,7 +457,7 @@ async function providerJSON(
         ? {}
         : { body: JSON.stringify(request.body) }),
       redirect: "error",
-      signal: AbortSignal.timeout(timeout),
+      signal,
       ...(dispatcher ? { dispatcher } : {}),
     });
     if (!response.ok) {
@@ -454,6 +481,7 @@ async function providerJSON(
       error.providerStatus = response.status;
       throw error;
     }
+    config.onProgress?.("reading-response");
     const reader = response.body.getReader();
     const chunks = [];
     let size = 0;
@@ -478,6 +506,8 @@ async function providerJSON(
     }
     return result;
   } catch (error) {
+    if (config.signal?.aborted)
+      throw buddyError(499, "Career Buddy request cancelled.");
     if (error.status) throw error;
     if (error.cause?.code === "ERR_BUDDY_NONPRIVATE_DNS")
       throw buddyError(
@@ -492,7 +522,7 @@ async function providerJSON(
     if (error.name === "TimeoutError" || error.name === "AbortError")
       throw buddyError(
         504,
-        "Career Buddy timed out after two minutes. Try a smaller context or a faster model.",
+        `The board stopped waiting after ${Math.round(timeout / 1000)} seconds. Try a smaller context, a faster model or increase the request timeout in Settings.`,
       );
     throw buddyError(
       502,
@@ -510,12 +540,14 @@ export async function callProvider(
   fetcher = fetch,
   resolve = systemLookup,
 ) {
-  if(config.provider==="codex")return runLocalCodex(config,system,messages,BUDDY_SCHEMA);
+  if (config.provider === "codex")
+    return runLocalCodex(config, system, messages, BUDDY_SCHEMA);
   const result = await providerJSON(
     config,
     providerRequest(config, system, messages),
     fetcher,
     resolve,
+    (config.requestTimeoutSeconds || 120) * 1000,
   );
   const output = providerText(config.provider, result);
   if (!output)
@@ -532,7 +564,7 @@ export async function listProviderModels(
   fetcher = fetch,
   resolve = systemLookup,
 ) {
-  if(config.provider==="codex")return listLocalCodexModels();
+  if (config.provider === "codex") return listLocalCodexModels();
   if (!config.baseUrl) throw buddyError(400, "Enter the API base URL first.");
   validateBaseUrl(config.baseUrl);
   if (

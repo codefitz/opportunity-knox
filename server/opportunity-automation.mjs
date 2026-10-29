@@ -1,10 +1,11 @@
+import {randomUUID} from "node:crypto";
 import { defaultBuddy, callProvider, BUDDY_SCHEMA } from "./buddy-provider.mjs";
 export function createOpportunityAutomation(ctx, decisions, parseOutput) {
   const { db, getConfig, getRecord, putRecord, buddyFetch } = ctx;
   db.exec(
     "CREATE TABLE IF NOT EXISTS opportunity_automation(id TEXT PRIMARY KEY,data TEXT NOT NULL)",
   );
-  const jobs = new Map();
+  const jobs = new Map(), cancelled=new Set(), activeRequests=new Map();
   let running = null,
     stopping = false;
   const read = (id) => {
@@ -34,7 +35,8 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
       while (jobs.size && !stopping) {
         const [id, options] = jobs.entries().next().value;
         jobs.delete(id);
-        let state = { state: "running", tags: "pending", fit: "pending" };
+        cancelled.delete(id);
+        let state = { state: "running", tags: "pending", fit: "pending",startedAt:new Date().toISOString() };
         save(id, state);
         try {
           let record = getRecord(id),
@@ -44,6 +46,9 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
           if (c.enabled) {
             try {
               const revision = record.revision;
+              state.requestId=randomUUID();activeRequests.set(id,state.requestId);save(id,state);
+              const task=ctx.requests.start(state.requestId,'automation:'+id,c);c={...c,signal:task.signal,onProgress:task.progress};
+              try {
               const raw = await callProvider(
                 c,
                 "Return only JSON matching " +
@@ -61,6 +66,7 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
                 ],
                 buddyFetch,
               );
+              task.check();
               const parsed = parseOutput(raw, []),
                 tags = JSON.parse(parsed.reply).tags;
               if (
@@ -94,11 +100,15 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
                 }
                 state.tags = "completed";
               }
+              task.finish("completed");
+              }catch(e){task.finish(task.signal.aborted?"cancelled":"failed",String(e.status||500));throw e;}
             } catch {
+              if(ctx.requests.read(state.requestId)?.stage==='cancelled')cancelled.add(id);
               state.tags = "failed";
             }
           } else state.tags = "skipped — no enabled chat model";
           if (stopping) break;
+          if(cancelled.has(id))throw Error("Cancelled");
           const profile = getConfig("fitCriteria");
           if (!profile?.items?.length)
             state.fit = "skipped — save criteria in Settings";
@@ -107,6 +117,7 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
           else {
             try {
               record = getRecord(id);
+              state.requestId=randomUUID();activeRequests.set(id,state.requestId);save(id,state);
               await decisions.handle(
                 "/api/buddy/decisions/" + id,
                 "POST",
@@ -115,6 +126,7 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
                 {
                   automatic: true,
                   readBody: async () => ({
+                    requestId:state.requestId,
                     revision: record.revision,
                     criteriaRevision: profile.revision,
                     documentIds: [],
@@ -125,9 +137,12 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
               );
               state.fit = "completed";
             } catch {
+              if(ctx.requests.read(state.requestId)?.stage==='cancelled')cancelled.add(id);
               state.fit = "failed — retry or check model/settings";
             }
           }
+          if(cancelled.has(id))throw Error("Cancelled");
+          state.finishedAt=new Date().toISOString();
           state.state = [state.tags, state.fit].some((x) =>
             x.startsWith("failed"),
           )
@@ -135,8 +150,8 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
             : "completed";
           save(id, state);
         } catch {
-          save(id, { ...state, state: "failed" });
-        }
+          save(id, { ...state,...(cancelled.has(id)?{tags:state.tags==="completed"?"completed":"cancelled",fit:state.fit==="completed"?"completed":"cancelled"}:{}), state: cancelled.has(id)?"cancelled":"failed",finishedAt:new Date().toISOString() });
+        }finally{activeRequests.delete(id);}
       }
     } finally {
       running = null;
@@ -156,6 +171,7 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
     schedule,
     async close() {
       stopping = true;
+      for(const [id,requestId] of activeRequests){cancelled.add(id);await ctx.requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});}
       if (running) await running;
     },
     async handle(path, method, req, res, { json, readBody }) {
@@ -164,7 +180,12 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
       getRecord(m[1]);
       if (method === "POST") {
         const b = await readBody(req);
-        schedule(m[1], { useLibrary: b.useLibrary === true });
+        if(b.cancel===true){
+          const current=read(m[1]);jobs.delete(m[1]);cancelled.add(m[1]);
+          if(current&&['queued','running','cancelling'].includes(current.state))save(m[1],{...current,state:activeRequests.has(m[1])?'cancelling':'cancelled',...(!activeRequests.has(m[1])?{finishedAt:new Date().toISOString()}:{})});
+          const requestId=activeRequests.get(m[1]);
+          if(requestId)await ctx.requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});
+        }else schedule(m[1], { useLibrary: b.useLibrary === true });
       } else if (method !== "GET")
         throw Object.assign(new Error("Method not supported."), {
           status: 405,

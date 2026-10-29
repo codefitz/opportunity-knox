@@ -135,7 +135,7 @@ export function createDecisionReview(ctx) {
           const doc = docs.get(id);
           if (!doc) throw Error();
           const st = statSync(ctx.documentPath(doc));
-          return [id, `${st.size}:${st.mtimeMs}:${st.ctimeMs}`];
+          return [id, `${st.size}:${st.mtimeMs}:${st.ctimeMs}${doc.category==="template"?":template":""}`];
         } catch {
           return [id, "unavailable"];
         }
@@ -274,14 +274,19 @@ export function createDecisionReview(ctx) {
         throw buddyError(400, "Choose up to 20 available evidence sources.");
       if (active.has(opportunity.id) || active.size >= 2)
         throw buddyError(429, "A decision assessment is already running.");
+      const requestId=typeof body.requestId==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(body.requestId)?body.requestId:randomUUID();
+      const task=ctx.requests.start(requestId,'decision:'+opportunity.id,c);
       active.add(opportunity.id);
+      c.signal=task.signal;c.onProgress=task.progress;
+      const disconnected=()=>{if(res&&!res.writableEnded)void ctx.requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});};res?.on?.('close',disconnected);
       try {
+        task.check();
         if (body.useLibrary === true)
           body.documentIds = await vectors.selectSources(
             profile.items.map((i) => i.description).join(" ") +
               " " +
               opportunity.role,
-            getDocuments().filter((d) => !d.opportunityId && !d.generation),
+            getDocuments().filter((d) => !d.opportunityId && !d.generation && d.category!=="template"),
           );
         const docs = await indexDocuments([...new Set(body.documentIds)]),
           query = profile.items.map((i) => i.description).join("\n");
@@ -289,7 +294,7 @@ export function createDecisionReview(ctx) {
           retrieval = retrieveHybridChunks(
             semantic.documents,
             query + "\n" + opportunity.role,
-            semantic.scores,
+            semantic.scores,c.contextCharacters||36000,
           );
         const sourceSnapshot = sourceSignatures(body.documentIds);
         const context = {
@@ -315,6 +320,7 @@ export function createDecisionReview(ctx) {
           [{ role: "user", content: JSON.stringify(context) }],
           buddyFetch,
         );
+        task.check();task.progress("validating");
         const ids = new Set([
             opportunity.id,
             ...retrieval.chunks.map((x) => x.sourceId),
@@ -368,17 +374,20 @@ export function createDecisionReview(ctx) {
         };
         // Keep criteria snapshots separate from per-criterion results.
         assessment.results = validateAssessment(report, profile, ids).criteria;
+        task.check();
         db.prepare("INSERT INTO decision_assessments VALUES (?,?)").run(
           assessment.id,
           JSON.stringify(assessment),
         );
+        task.finish("completed");
         json(res, {
           assessment: {
             ...assessment,
             stale: stale(assessment, getRecord(opportunity.id)),
           },
         });
-      } finally {
+      } catch(e){task.finish(task.signal.aborted?"cancelled":"failed",String(e.status||500));throw e;} finally {
+        res?.off?.("close",disconnected);
         active.delete(opportunity.id);
       }
       return true;

@@ -13,8 +13,8 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 - [ ] External embedding endpoint indexing and optional custom vector database integration. The initial built-in vector store needs no additional service.
 - [x] Connect an existing Obsidian vault, including a read-only host mount; explicitly sync eligible files into the Career Library when desired. Connecting alone does not automatically import files or make the vault searchable by Career Buddy.
 - [x] Select files from a read-only vault for in-place Career Buddy use; selected file text is cached in the board and refreshed when changed. Removing a selection clears its text cache.
-- [ ] Extend in-place read-only sources to independently mounted general directories and multiple roots.
-- [ ] Attach a host directory as a persistent in-place source. Folder uploads copy selected files into managed library storage instead.
+- [x] Independently mounted read-only general directories/multiple roots, folder browsing, explicit selections and cache cleanup.
+- [x] Attach host directories as persistent in-place sources through the app and launcher; uploads remain separate managed copies.
 - [x] Drag and drop files and directories to the Career Library, with a warning above 500 files and optional manually continued batches of 500.
 - [x] Standalone Career Buddy sidebar workspace: realistic encouragement coaching, multi-turn STAR stories and CV/cover highlights, reviewed recruiter intake with linked tasks, and explicit-target opportunity updates. Conversations/proposals persist; changes need confirmation.
 
@@ -23,7 +23,9 @@ Product plan agreed 22 October 2026. Implementation has started; see `ROADMAP.md
 - [x] Optional Codex CLI provider using the host’s ChatGPT sign-in, with a launcher-managed private queue, read-only ephemeral execution, bounded requests and existing review controls. Messages/selected excerpts go to OpenAI under Codex account limits; credentials remain outside Docker. User explicitly authorized this destination. Host CLI catalogue discovery is implemented; richer progress/cancellation remain future work. See `CODEX_BUDDY_DESIGN.md`.
 
 - [x] Standalone chat attachments with extraction preview, original download/reuse/deletion and documented limits. Stored separately from the career library; no silent indexing. Optional attachment-to-library copying remains future work.
-- [ ] Improve local AI timeout handling: configurable bounded request timeouts, clear progress/cancel controls, smaller bounded context and response budgets, and secret-safe duration/error diagnostics distinguishing board deadline, connectivity and provider errors. Current inference transport has a fixed 120-second server deadline and waits for a complete non-streaming response; browser fetch has no application timeout. Verify with the configured local provider, including cold model loading; do not silently retry record-changing work.
+- [x] P1 standalone Buddy request controls: polled stage/elapsed progress, Cancel/retry, HTTP abort and owned Codex process termination, persisted secret-safe request diagnostics, restart interruption state, configurable AI response timeouts (30–900 seconds), HTTP response-token and source-context budgets. Existing defaults retained; no silent retries. Responses remain non-streaming.
+- [x] Extend interactive progress/elapsed time, cancellation and explicit retry to opportunity-specific Buddy, manual decision assessments and automatic review jobs; recover persisted request status when reopening views and reject late cancelled results before saving.
+- [ ] Full token streaming, cold-load timing diagnostics and provider-side cancellation acknowledgement. Cancelling local work cannot guarantee that remote providers stop computation/billing.
 
 ## Confirmed direction
 
@@ -50,7 +52,7 @@ One card represents one application opportunity, including a stable ID so repeat
 | --- | --- |
 | 1. Identification | [x] Add a URL, upload a PDF/DOCX, or paste JD text. Capture role, employer, job reference, source, location, working arrangement, salary/rate/currency, employment type, contact, closing date, requirements, and source documents. Unknown fields remain visibly unknown.<br>[ ] Dedicated `applicationRoute` field (currently captured in notes/description). |
 | 2. Review | [x] Optional AI-assisted comparison against selected career evidence (via Career Buddy "Am I a good fit?" prompt) and manual proceed/ignore/defer transitions with notes.<br>[ ] Dedicated structured fields for strengths, gaps, questions, recommendation, user-defined fit criteria, and proceed/ignore/defer decision reason outside chat/notes. |
-| 3. Generate CV and cover letter | [x] Select reference material in Career Buddy and generate versioned editable `.docx` and `.md` drafts; allow existing documents to be uploaded/attached instead.<br>[ ] Template selection preserving custom layout/page targets, PDF generation, and an explicit "cover letter not required" toggle. |
+| 3. Generate CV and cover letter | [x] Select reference material in Career Buddy and generate versioned editable `.docx` and `.md` drafts; allow existing documents to be uploaded/attached instead.<br>[x] Built-in and marked DOCX template layouts, measured page targets, previews and reviewed PDF/Word exports.<br>[ ] Full arbitrary-template fidelity and an explicit "cover letter not required" toggle. |
 | 4. Application review | [x] Read and revise drafts in Career Buddy or upload revised versions; mark individual document versions as `draft`, `approved`, or `submitted`.<br>[ ] Dedicated fields for supporting statements / application answers and formal application-pack approval grouping. |
 | 5. Application submitted | [x] Reaching this stage is a user action; moving a card does not submit an application externally. Submitted documents are preserved as immutable snapshots.<br>[ ] Dedicated submission receipt/reference and application route fields on the submission record, and explicit linking of a multi-document submitted pack to the submission event. |
 | 6. Communications and interviews | [x] Record communications and any number of interview/assessment entries with type, scheduled date, status, contacts, preparation/notes, and revision history.<br>[ ] Per-activity document attachments, dedicated follow-up field on activities, explicit `incoming`/`outgoing` direction and channel on communications, custom interview types, and `rescheduled` as a distinct status value. |
@@ -79,7 +81,7 @@ One card represents one application opportunity, including a stable ID so repeat
 2. [x] **Opportunity detail:** overview; stages/timeline; documents; communications/interviews; summary; Career Buddy. Keeps job source and employer/role identity easy to find.
 3. [x] **Reference library (`Career library`):** store CVs, prior JDs, certificates, project notes, and other career material; prepare local text chunks and select material for individual Career Buddy tasks.
    - [x] Automatic/editable tags and tag filters; independently collapsible prepared and unprepared views and folder groups.
-   - [ ] Dedicated structured categories for master CVs, role-specific CVs, templates, supporting statements, and interview stories.
+   - [x] Structured categories for master/tailored/general CVs, templates, supporting statements and STAR/interview stories; upload/individual/bulk categorisation and category filtering.
 4. [x] **Settings:** profile name/photo, light/dark and contrasting themes, automatically saved custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
    - [ ] Record import / backup restore UI and per-stage AI enablement controls.
 
@@ -134,7 +136,8 @@ Proposed managed layout:
 - [x] Stage 2 fit, salary, and skills evaluation in Career Buddy against selected reference evidence, separating supported matches from gaps and questions while leaving decisions to the user.
 - [x] User-defined persistent fit criteria profile for Stage 2 reviews, with revision conflicts and assessment snapshots.
 - [x] Stage 3 CV and cover letter drafting in Career Buddy using selected career evidence, saving editable `.docx` and `.md` versions without overwriting submitted files.
-- [ ] Stage 3 template layout/font/table preservation, page-target fit review inside the app, and direct PDF generation.
+- [x] Stage 3 built-in/marked-template layout preservation, page-target review and PDF generation in Document Studio.
+- [ ] Exact fidelity for arbitrary unmarked templates and Google Docs/Word pagination across rendering engines.
 - [x] Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.
 - [ ] Background AI task queue recording prompt version, token/cost usage, and `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted` states across restarts.
 - [ ] External-assistant task-pack export and result import.
@@ -233,7 +236,8 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Expanded recruiter intake fields include contact names/email/phone, reference, work arrangement, employment type, deadline and action dates. Preserve submitted notes/extracted text in the description within documented limits; uploaded originals remain retrievable in chat storage.
 - [x] Master CV creation from scratch or uploaded/library template structure, with follow-up questions, reviewed editable Word draft saves/downloads and explicit layout limitations. Exact template fonts/tables/page layout remain pending.
 - [x] Template lookup by filename/configured folder among tracked library and selected vault sources; uploaded templates supported.
-- [ ] General directory browsing/multiple roots and authenticated Google Docs search/import. Google OAuth client/consent configuration and app-side authorization are prerequisites; connected Codex tools must not be treated as the board’s Google login.
+- [x] General directory browsing/multiple roots and Google Docs OAuth configuration, setup instructions, read-only search and explicit versioned snapshot imports.
+- [ ] Validate Google Docs with the user’s own OAuth client and account after setup; currently verified with simulated Google responses. Connected Codex tools are not the board’s Google login.
 - [x] Chat file upload with extraction preview, retained original downloads, reuse/exclusion/deletion and limits (five files per message, 5 MB each, 100 stored). Conversation files live in separate SQLite tables/full backups; no automatic library import/indexing.
 - [x] Replace Buddy’s supporting-document picker with Use career library and automatic relevance selection across available cached vectors/text/metadata, bounded to 20 sources plus an explicit template. Show source coverage; uploads work independently of the checkbox.
 - [x] Infer coach/STAR/recruiter/update/master-CV intent conversationally. Keep explicit target confirmation for opportunity updates and reviewed action saves.
@@ -245,3 +249,11 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Accessible chat-history sidebar with title search, active-conversation indication, dates/message counts and New conversation. Active messages stay in a bounded scroll panel; source/upload controls fold away.
 - [x] Separate persisted conversation IDs and model contexts. Existing ungrouped messages remain available as Earlier chat history without rewriting original rows. Scoped older-message pagination and restart persistence.
 - [x] Preserve unsent text while switching chats in the current page; clear source/template/target selections to avoid accidental carry-over. Responsive sidebar stacks on narrow screens and can be collapsed.
+
+
+## P2 CV and cover-letter layouts — 29 October 2026
+
+- [x] Classic, Compact, Executive and Cover letter presets with downloadable blank Word templates.
+- [x] Keep-existing-layout rendering, explicit marked-template insertion, editable draft text, actual page count/target warnings, page images, PDF/Word downloads and reviewed new-draft saves.
+- [x] Bundled local renderer/fonts, bounded private previews, source revision checks and unchanged submitted originals.
+- [ ] Native Google Docs editing, arbitrary unmarked template reconstruction and guaranteed cross-engine pagination. Preserve source-system PDF copies where fidelity matters.

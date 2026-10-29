@@ -97,3 +97,8 @@ test("Codex catalogue requests use the metadata queue and expose sanitized choic
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Codex cancellation signals the host worker and removes queued prompt material',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'knox-cancel-'));const controller=new AbortController();
+ try{writeFileSync(join(root,'status.json'),JSON.stringify({ready:true,time:Date.now()/1000}));const pending=runLocalCodex({model:'default',signal:controller.signal},'Fictional test',[],{},root);controller.abort();await assert.rejects(pending,{status:499});assert.equal(readdirSync(root).some(n=>n.endsWith('.request.json')),false);assert.equal(readdirSync(root).some(n=>n.endsWith('.cancel.json')),true);}finally{rmSync(root,{recursive:true,force:true});}
+});

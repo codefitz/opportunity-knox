@@ -30,6 +30,7 @@ export type Activity = {
   history?: unknown[];
 };
 export type BoardDocument = {
+  category?:string;
   id: string;
   name: string;
   kind: string;

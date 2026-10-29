@@ -5,10 +5,14 @@ RUN npm ci
 COPY scripts/bundle-embedding.mjs scripts/embedding-model.json ./scripts/
 RUN node scripts/bundle-embedding.mjs
 COPY index.html vite.config.ts tsconfig*.json ./
+COPY server/document-categories.json ./server/
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer poppler-utils fonts-liberation2 fonts-crosextra-carlito fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+ADD --checksum=sha256:a81478bf74ed431d488f5954ba8bece10b17bdfafc24590a7048b283dcbd40f1 https://deb.debian.org/debian/pool/main/f/fonts-montserrat/fonts-montserrat_7.222-3_all.deb /tmp/montserrat.deb
+RUN dpkg -i /tmp/montserrat.deb && rm /tmp/montserrat.deb
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4318 BOARD_DATA_DIR=/data BOARD_FILES_DIR=/files/default
 WORKDIR /app
 COPY package.json ./

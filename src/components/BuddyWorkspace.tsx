@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { api, json, readFile } from "../api";
+import { api, json, readFile, ApiError } from "../api";
 type Message = {
   id: string;
   role: string;
@@ -39,7 +39,7 @@ type State = {
     warnings: string[];
   }[];
   settings: { enabled: boolean };
-  documents: { id: string; name: string; folder?: string }[];
+  documents: { id: string; name: string; folder?: string;category?:string }[];
   opportunities: { id: string; company: string; role: string }[];
 };
 export default function BuddyWorkspace({
@@ -53,6 +53,13 @@ export default function BuddyWorkspace({
     () => localStorage.getItem("knox-buddy-conversation") || "legacy",
   );
   const [historySearch, setHistorySearch] = useState("");
+  const [request, setRequest] = useState<{
+    stage: string;
+    startedAt: string;
+    timeoutSeconds: number;
+    errorCode?: string;
+  } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const drafts = useRef<Record<string, string>>({});
   const [state, setState] = useState<State | null>(null),
@@ -68,6 +75,22 @@ export default function BuddyWorkspace({
       message: string;
       requestId: string;
     } | null>(null);
+  useEffect(() => {
+    if (!busy || !pending?.requestId) return;
+    const timer = window.setInterval(() => {
+      void api<{ request: NonNullable<typeof request> }>(
+        "/buddy/requests/" + pending.requestId,
+      )
+        .then((r) => {
+          setRequest(r.request);
+          setElapsed(
+            Math.floor((Date.now() - Date.parse(r.request.startedAt)) / 1000),
+          );
+        })
+        .catch(() => {});
+    }, 750);
+    return () => window.clearInterval(timer);
+  }, [busy, pending?.requestId]);
   async function load(id = conversationId) {
     const result = await api<State>(
       "/buddy/workspace?conversationId=" + encodeURIComponent(id),
@@ -97,6 +120,8 @@ export default function BuddyWorkspace({
   async function send() {
     if (!input.trim() && !attached.length) return;
     setBusy(true);
+    setRequest(null);
+    setElapsed(0);
     const draft =
       pending?.message === (input || "Please review the attached material.")
         ? pending
@@ -124,9 +149,15 @@ export default function BuddyWorkspace({
 
       await load();
     } catch (e) {
-      onError(e);
+      if (!(e instanceof ApiError && e.status === 499)) onError(e);
       await load().catch(onError);
     } finally {
+      try {
+        const r = await api<{ request: NonNullable<typeof request> }>(
+          "/buddy/requests/" + draft.requestId,
+        );
+        setRequest(r.request);
+      } catch {}
       setBusy(false);
     }
   }
@@ -242,7 +273,7 @@ export default function BuddyWorkspace({
               Use career library — automatically find relevant evidence
             </label>
             <p className="buddy-muted">
-              When checked, Buddy chooses relevant library/vault sources and
+              When checked, Buddy chooses relevant library/folder/vault sources and
               sends bounded excerpts to your configured provider. Attachments
               and an explicitly chosen template are included independently.
               Originals stay unchanged.
@@ -280,7 +311,7 @@ export default function BuddyWorkspace({
                     .map((d) => (
                       <option value={d.id} key={d.id}>
                         {d.folder ? d.folder + " / " : ""}
-                        {d.name}
+                        {d.category==="template"?"Template · ":""}{d.name}
                       </option>
                     ))}
                 </select>
@@ -288,8 +319,7 @@ export default function BuddyWorkspace({
               <p className="buddy-muted">
                 Upload a template below or choose a document already in your
                 configured folders. Ask Buddy to use its headings/structure.
-                Exact fonts, tables and page layout are not preserved. Google
-                Docs authentication and general folder browsing are planned.
+                Use Document Studio after saving a Word draft to apply layouts and export PDFs. Mark reusable templates in the library to keep them out of automatic career-evidence selection.
               </p>
             </details>
             <label className="field">
@@ -619,8 +649,34 @@ export default function BuddyWorkspace({
               >
                 Refresh history
               </button>
+              {busy && pending && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={!request || request.stage === "cancelling"}
+                  onClick={() => {
+                    void api<{ request: NonNullable<typeof request> }>(
+                      "/buddy/requests/" + pending.requestId,
+                      json({ cancel: true }),
+                    )
+                      .then((r) => setRequest(r.request))
+                      .catch(onError);
+                  }}
+                >
+                  Cancel request
+                </button>
+              )}
             </div>
           </form>
+          <p role="status" aria-live="polite">
+            {busy && pending
+              ? request
+                ? `${({ preparing: "Preparing sources", "waiting-provider": "Waiting for AI response (not streamed)", "reading-response": "Reading AI response", "queued-codex": "Waiting for the Codex helper", "running-codex": "Codex is running (not streamed)", validating: "Checking the response", cancelling: "Cancelling request" } as Record<string, string>)[request.stage] || request.stage} · ${elapsed}s elapsed · ${request.timeoutSeconds}s AI response limit`
+                : "Starting request…"
+              : request
+                ? `Last request: ${request.stage}${request.errorCode && request.errorCode !== request.stage ? " · " + request.errorCode : ""}`
+                : ""}
+          </p>
           <p className="buddy-muted">
             Each conversation keeps its own context; earlier history is
             accessible in the sidebar. Opportunity chats remain with their

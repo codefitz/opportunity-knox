@@ -210,6 +210,16 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(service["volumes"][-1]["target"], "/vault")
         self.assertFalse(service["volumes"][-1]["read_only"])
 
+    def test_independent_sources_generate_readonly_mounts_without_modifying_originals(self):
+        archive=self.root/'Career archive';archive.mkdir();original=archive/'fictional.txt';original.write_text('Fictional evidence')
+        launcher.atomic_json(self.state/'pending-sources.json',{'roots':[{'id':'fictional-source','name':'Career archive','hostPath':str(archive)}]})
+        config,_=launcher.make_config(self.args(),self.state);override=launcher.compose_override(config,self.state,'fictional-token');service=override['services']['board'];mounts=[m for m in service['volumes'] if m['target'].startswith('/sources/')]
+        self.assertEqual(len(mounts),1);self.assertTrue(mounts[0]['read_only']);self.assertEqual(original.read_text(),'Fictional evidence');self.assertIn('BOARD_SOURCE_ROOTS',service['environment'])
+
+    def test_source_overlap_with_application_data_is_refused(self):
+        launcher.atomic_json(self.state/'pending-sources.json',{'roots':[{'id':'bad','name':'bad','hostPath':str(self.root)}]})
+        with self.assertRaises(launcher.LauncherError):launcher.make_config(self.args(),self.state)
+
 
 if __name__ == "__main__":
     unittest.main()

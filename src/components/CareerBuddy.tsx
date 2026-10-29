@@ -1,3 +1,4 @@
+import AIRequestProgress from "./AIRequestProgress";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Bot,
@@ -158,6 +159,7 @@ export default function CareerBuddy({
           .map((doc) => doc.id),
       );
     } catch (error) {
+      setActiveRequest(null);
       setError(errorText(error));
       onError(error);
     }
@@ -177,6 +179,7 @@ export default function CareerBuddy({
       current ? { ...current, messages: result.messages } : current,
     );
   };
+  const [activeRequest,setActiveRequest]=useState<string|null>(null);
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!input.trim() || busy) return;
@@ -190,6 +193,7 @@ export default function CareerBuddy({
     });
     if (retry.current?.payload !== payload)
       retry.current = { payload, id: crypto.randomUUID() };
+    setActiveRequest(retry.current!.id);
     try {
       const result = await api<{ messages: BuddyMessage[] }>(
         base + "/chat",
@@ -348,6 +352,7 @@ export default function CareerBuddy({
             />
           ),
         )}
+        <AIRequestProgress id={activeRequest} scope={"opportunity:"+o.id} onError={onError}/>
         {busy && (
           <div className="buddy-working" role="status">
             <LoaderCircle size={16} className="spin" />

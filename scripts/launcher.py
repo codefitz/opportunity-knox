@@ -169,6 +169,21 @@ def make_config(args, state_dir: Path) -> tuple[dict, bool]:
         config["vault"] = host_folder(config["vault"], writable=not config.get("vaultReadOnly", False))
         if config.get("vaultReadOnly") and (Path(config["vault"]) == Path(config["files"]) or Path(config["files"]) in Path(config["vault"]).parents or Path(config["vault"]) in Path(config["files"]).parents):
             raise LauncherError("A read-only vault must be outside the writable document folder.")
+    sources_path=state_dir / "pending-sources.json"
+    if sources_path.exists():
+        requested_sources=read_json(sources_path).get("roots")
+        if not isinstance(requested_sources,list) or len(requested_sources)>20:raise LauncherError("Invalid read-only source-folder request.")
+        config["sourceRoots"]=requested_sources
+    checked=[]
+    for source in config.get("sourceRoots",[]):
+        if not isinstance(source,dict) or not isinstance(source.get("id"),str) or not source["id"] or not isinstance(source.get("name"),str):raise LauncherError("Invalid source-folder identity.")
+        location=host_folder(source.get("hostPath",""),writable=False)
+        candidate=Path(location)
+        for protected in [state_dir,*map(Path,config["roots"])]:
+            protected=protected.resolve()
+            if candidate==protected or candidate in protected.parents or protected in candidate.parents:raise LauncherError("Read-only sources must be separate from application data and managed documents.")
+        checked.append({"id":source["id"],"name":source["name"],"hostPath":location})
+    config["sourceRoots"]=checked
     if args.port is not None:
         config["port"] = args.port
     if args.bind:
@@ -179,7 +194,7 @@ def make_config(args, state_dir: Path) -> tuple[dict, bool]:
             raise ValueError("invalid port")
     except (ValueError, argparse.ArgumentTypeError, KeyError) as exc:
         raise LauncherError("Saved port or bind address is invalid. Use --port and --bind to set them.") from exc
-    return config, (pending_path.exists() or pending_vault_path.exists())
+    return config, (pending_path.exists() or pending_vault_path.exists() or sources_path.exists())
 
 
 def setup_token(state_dir: Path) -> str:
@@ -208,6 +223,12 @@ def compose_override(config: dict, state_dir: Path, token: str) -> dict:
         env["BOARD_VAULT_DIR"] = vault_target
         env["BOARD_HOST_VAULT_DIR"] = vault_host
         env["BOARD_VAULT_READ_ONLY"] = "1" if config.get("vaultReadOnly", False) else "0"
+    source_mounts=[]
+    for source in config.get("sourceRoots",[]):
+        target="/sources/"+hashlib.sha256(source["hostPath"].encode()).hexdigest()[:16]
+        mounts.append({"type":"bind","source":source["hostPath"],"target":target,"read_only":True,"bind":{"create_host_path":False}})
+        source_mounts.append({**source,"path":target})
+    env["BOARD_SOURCE_ROOTS"]=json.dumps(source_mounts)
     override = {"services": {"board": {
         "ports": [{"target": 4318, "published": str(config["port"]), "host_ip": config["bind"], "protocol": "tcp"}],
         "environment": env,
@@ -404,6 +425,7 @@ def main(argv=None) -> int:
         (state_dir / "pending-storage.json").unlink(missing_ok=True)
         (state_dir / "pending-vault.json").unlink(missing_ok=True)
     (state_dir / "pending-restart.json").unlink(missing_ok=True)
+    (state_dir / "pending-sources.json").unlink(missing_ok=True)
     if not args.no_watch:
         start_watcher(state_dir)
     session = fetch_json(url + "/api/session")

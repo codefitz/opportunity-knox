@@ -115,3 +115,29 @@ New/edited opportunities queue automatic tags and saved-criteria assessment when
 ## Buddy history sidebar
 
 Saved standalone conversations are now listed beside the active chat, with title search, dates/counts and a new-conversation control. Current messages scroll within their own panel, and attachment/source controls are folded away by default. New conversations have independent persistent IDs and model context; legacy messages are retained under Earlier chat history. Conversation selection is remembered in the browser. Older-message paging is scoped to the chosen conversation; unsent text survives switches in the current page, while source/target choices reset. The sidebar can collapse and stacks above the chat on narrower layouts. No existing message rows are rewritten by upgrade.
+
+
+## P1 — standalone Buddy request controls
+
+Standalone chat reports preparing sources, waiting for provider, reading response, Codex queued/running, response validation and final states, with elapsed time and the configured AI response deadline. Progress is stage-based, not a fabricated token stream/percentage. Cancel aborts the HTTP transport or writes a cancellation marker that the host worker polls, terminating only its owned Codex process group. A cancellation check before response validation prevents a late provider result from creating an assistant proposal. Browser disconnection also requests cancellation. Submitted user text remains available for explicit retry; no automatic retries are introduced.
+
+Settings exposes timeout 30–900 seconds, HTTP response budget 512–8000 tokens and source budget 4000–36000 characters. Defaults remain 120 seconds for HTTP and 300 for Codex unless explicitly saved. Response timeout applies to the provider/queue wait, not preceding document extraction. Codex output length remains CLI-controlled. Request metadata (provider/model/stage/timestamps/duration/error category) is stored in SQLite/full backups without prompts or keys. Unfinished requests/messages are marked interrupted after restart. HTTP cancellation closes the client connection; providers may continue remote work and usage may still accrue. Other Buddy/decision provider calls share timeout/output settings, and now also have interactive progress/cancel controls.
+
+
+## Document connections — 29 October 2026
+
+Career Library and Settings now offer multiple independently mounted read-only folders, paged browsing, explicit source selection and detach/cache cleanup. The launcher applies mounts and restarts without manual Docker changes. Folder originals stay in place. Google Docs has app-owned OAuth setup fields/instructions, session-bound PKCE sign-in, server-side tokens/refresh, paged native-document search, explicit DOCX draft snapshot imports and version-based duplicate detection. Originals are never edited. Live Google authorization remains pending the user’s OAuth client and consent; tests simulate Google responses. See [Document connections](DOCUMENT_CONNECTIONS.md).
+
+
+## P1 request controls across opportunity workflows — 29 October 2026
+
+Opportunity chat and manual assessments share the standalone request registry, provider abort signal, progress stages, elapsed time and persisted terminal diagnostics. Views recover the latest scoped status after reopening; explicit retries use the existing send/assess controls. Cancelling prevents late provider replies/assessments from being saved. Automatic review supports cancelling queued or running work, aborting current tag/fit calls and skipping subsequent steps. Already completed tags/assessments remain; cancellation is not a rollback. Queued requests are not automatically retried after restart. Token streaming and provider-side cancellation acknowledgement remain pending.
+
+
+## P2 document layouts and PDF export — 29 October 2026
+
+Document Studio is available in Career Library and opportunity Documents. It supplies four built-in layouts/blank templates, keep-original rendering and a single marked-paragraph custom template workflow. New Buddy drafts retain reviewed text for layout reuse. Actual PDF page counts, target warnings, page images and source revision checks precede explicitly reviewed Word/PDF draft saves. LibreOffice/Poppler/fonts are bundled; no AI is called. Originals/submitted files remain unchanged. Temporary previews expire; saved drafts use existing storage/backups. Exact cross-engine pagination and arbitrary unmarked template reconstruction remain pending; use source-system PDFs as faithful visual copies. See [Document Studio](DOCUMENT_STUDIO.md).
+
+## P3 career document categories — 29 October 2026
+
+Structured categories distinguish master/tailored/general CVs, cover letters, templates, supporting statements, STAR/interview stories, job descriptions, references and other documents. Categories are independent of file kind, tags, approval status and physical folders. Uploads accept categories; document rows allow individual edits; library selections support atomic batches up to 500 with revision conflicts checked before any write. Category filtering combines with the existing folder/preparation/tag views. Legacy defaults are derived without rewriting stored rows; known master/tailored generation context supplies reliable defaults. Templates remain selectable explicitly but are excluded from automatic standalone Buddy/fit evidence. Reclassifying a source as a template makes its prior fit assessment stale. Studio copies inherit source category. Files and submitted bytes are preserved.

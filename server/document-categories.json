@@ -1,0 +1,12 @@
+[
+ {"id":"master-cv","label":"Master CV"},
+ {"id":"tailored-cv","label":"Tailored CV"},
+ {"id":"cv","label":"General CV"},
+ {"id":"cover-letter","label":"Cover letter"},
+ {"id":"template","label":"Template"},
+ {"id":"supporting-statement","label":"Supporting statement"},
+ {"id":"star-story","label":"STAR / interview story"},
+ {"id":"job-description","label":"Job description"},
+ {"id":"reference","label":"Career reference"},
+ {"id":"other","label":"Other"}
+]

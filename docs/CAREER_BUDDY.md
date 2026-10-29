@@ -49,7 +49,7 @@ Proposals are tied to the opportunity revision they used. A later edit makes an 
 
 Select a readable source CV or candidate evidence before drafting. A JD alone is insufficient. Career Buddy returns an editable Markdown draft; review wording and factual support in the chat editor. **Save Word draft to Documents** creates a separate `.docx` version with draft status and generation/source metadata. Re-saving identical content returns the existing version; saving edited content creates another version. Existing submitted files remain immutable. **Download text** exports the editable Markdown.
 
-Word export uses a simple A4 layout with a title, headings and bullets. It does not reproduce a source template's tables, fonts or two-page layout automatically. PDF export, approved template fidelity and native Google Docs editing remain future work. Render/check the actual file before application use. The app does not automatically approve a document.
+Word export uses a simple A4 layout with a title, headings and bullets. It does not reproduce a source template's tables, fonts or two-page layout automatically. PDF export, built-in layouts and marked-template preservation are available in [Document Studio](DOCUMENT_STUDIO.md) after saving a Word draft. Arbitrary template fidelity and native Google Docs editing remain future work. Render/check the actual file before application use. The app does not automatically approve a document.
 
 ## Salary and data boundaries
 
@@ -94,7 +94,7 @@ Use the standalone Buddy page naturally; manual modes have been removed from the
 
 Check Use career library to automatically retrieve relevant library/vault excerpts, or leave it off and work from your message/uploads. Upload supported documents or a CV template (five per message, 5 MB each), inspect extraction previews and warnings, and exclude files before sending if needed. Files remain selected for follow-ups until excluded. Stored chat attachments can be downloaded, reused or deleted; deletion removes originals/extraction, not text already present in chat history or prior backups. Files are never automatically indexed as career evidence.
 
-Ask for a master CV from scratch or based on an uploaded/selected template. Buddy should ask about missing facts. Review the proposal, save it as a draft, and download its Word document. Only template text/headings/structure are reused; visual layout fidelity requires future work. The template picker searches tracked documents by name/configured folder; it is not a general host-file browser. Google Docs account authorization/search/import remain future work.
+Ask for a master CV from scratch or based on an uploaded/selected template. Buddy should ask about missing facts. Review the proposal, save it as a draft, and download its Word document. Only template text/headings/structure are reused; visual layout fidelity requires future work. The template picker searches tracked documents by name/configured folder; it is not a general host-file browser. Document connections now supports read-only server-folder browsing and Google Docs OAuth/search/import; see [setup instructions](DOCUMENT_CONNECTIONS.md). Selected folder files become available in-place; imported Google Docs become local draft Word snapshots.
 
 New or changed opportunities are automatically tagged/reviewed when a model is enabled; the saved criteria profile is reused without choosing criteria per opportunity. Missing criteria/model results in a visible skipped state. Review progress or retry in Fit assessment. Automatic tags may add a revision, so stale editors must reload rather than overwrite newer data. Automatic reviews do not proceed/ignore/reject opportunities.
 
@@ -102,3 +102,17 @@ New or changed opportunities are automatically tagged/reviewed when a model is e
 ### Finding and starting conversations
 
 Use Chat history beside the active conversation to search saved titles or choose an earlier chat. New conversation starts a separate model context; its title comes from the first submitted message. Existing messages from before this feature remain under Earlier chat history. The current chat has a scrollable message panel and scoped Load earlier history. Expand Sources, attachments and related opportunity when needed. Switching chats preserves unsent text within the current page, and resets library/template/attachment/target selections; browser reload does not preserve unsent drafts. On narrow screens, the collapsible history panel stacks above the chat. Opportunity-specific chats remain with their opportunities.
+
+
+### Progress, cancellation and request limits
+
+While standalone Buddy is working, the status line shows source preparation, provider waiting/response reading or Codex queued/running, plus elapsed time. These are stages: answers are still returned in full. Cancel request stops waiting and signals the transport/helper; a cancelled result cannot be saved as a new proposal. Your submitted text remains in history and the composer for explicit Retry. Closing the browser connection requests cancellation as well. Provider-side compute/usage is not guaranteed to stop when an HTTP connection closes.
+
+Expand Request limits under the chat or decision model settings to configure AI response timeout (30–900 seconds), HTTP output tokens (512–8000) and source context characters (4000–36000). Save to persist changes. Connection testing uses the shown values. Existing unsaved defaults remain 120 seconds for HTTP or 300 for Codex. Context preparation may precede the provider timeout; reducing source/output budgets can help local models. The response-token setting does not control Codex CLI output. Manual opportunity/decision and background-review cancellation controls remain a separate follow-up.
+
+
+### Career document categories
+
+Use **Filter document category** in Career Library or an opportunity’s Documents tab. Categorise on upload, use the per-document Category selector, or select library files and apply a category to the batch (up to 500). This labels the purpose of a file; it does not move it, change its type/status, alter its contents or approve it. Bulk changes require all selected revisions to match; reload after a conflict. Submitted bytes remain preserved even when their category metadata changes.
+
+Old documents get conservative defaults: known generated master CVs use Master CV, CVs linked to opportunities use Tailored CV, and other CVs use General CV. Filename guesses are not applied. Templates are excluded from automatic Buddy/fit evidence selection; choose them explicitly in the template picker for structure. Reclassifying does not delete extracted text/vectors. Custom category creation and category-driven background indexing are not implemented.

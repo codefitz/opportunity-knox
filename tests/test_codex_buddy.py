@@ -20,3 +20,18 @@ class CodexBridgeTests(unittest.TestCase):
  def test_model_catalogue_is_filtered_and_deduplicated(self):
   result=bridge.normalize_models({'models':[{'slug':'fictional-a','display_name':'Fictional A','visibility':'list','base_instructions':'Do not copy instructions'},{'slug':'private-model','visibility':'hide'},{'slug':'fictional-a','visibility':'list'},{'slug':'--bad','visibility':'list'}]})
   self.assertEqual(result['models'],[{'id':'default','name':'Codex default model'},{'id':'fictional-a','name':'Fictional A'}]);self.assertNotIn('base_instructions',str(result));self.assertFalse(result['truncated'])
+ def test_cancellation_kills_only_the_owned_cli_process(self):
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d);fake=p/'fake-slow-codex';fake.write_text('#!'+sys.executable+'\nimport sys,time\nif sys.argv[1:]==["login","status"]:print("Logged in using ChatGPT");sys.exit(0)\nsys.stdin.read()\ntime.sleep(30)\n');fake.chmod(0o700);worker=bridge.CodexWorker(p,str(fake));root=p/'codex-buddy';jobid='22222222-2222-4222-8222-222222222222'
+   try:
+    (root/(jobid+'.request.json')).write_text(json.dumps({'prompt':'Fictional slow test','schema':{'type':'object'},'model':'default','expiresAt':time.time()+60}))
+    for _ in range(100):
+     if (root/(jobid+'.progress.json')).exists():break
+     time.sleep(.05)
+    process=worker.process;self.assertIsNotNone(process)
+    (root/(jobid+'.cancel.json')).write_text(json.dumps({'expiresAt':time.time()+60}))
+    for _ in range(100):
+     if process.poll() is not None:break
+     time.sleep(.05)
+    self.assertIsNotNone(process.poll());self.assertNotEqual(process.returncode,0)
+   finally:worker.close()

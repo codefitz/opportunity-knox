@@ -28,8 +28,10 @@ type Status = {
 };
 export default function VectorIndex({
   onError,
+  refreshKey=0,
 }: {
   onError: (error: unknown) => void;
+  refreshKey?: number;
 }) {
   const [data, setData] = useState<Status | null>(null),
     [selected, setSelected] = useState<string[]>([]),
@@ -47,7 +49,7 @@ export default function VectorIndex({
   }
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refreshKey]);
   const active =
     data?.job?.status === "running" || data?.job?.status === "cancelling";
   useEffect(() => {
@@ -163,7 +165,7 @@ export default function VectorIndex({
           ))}
         </div>
         {!sources.length && (
-          <p>Add library files or select read-only vault sources first.</p>
+          <p>Add library files or select read-only folder/vault sources first.</p>
         )}
       </details>
       <div className="library-tool-actions">
@@ -246,7 +248,7 @@ export default function VectorIndex({
         providers will follow separately. Re-run indexing after changing files.
         Completed sources are reused when unchanged; cancelled or interrupted
         work waits for you to retry. Removing sources from this job selection
-        does not delete their vectors; deselect vault sources in the vault
+        does not delete their vectors; deselect connected sources in their folder or vault
         source settings, or use Clear vectors above.
       </p>
     </section>
