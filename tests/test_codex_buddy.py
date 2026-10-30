@@ -14,7 +14,7 @@ class CodexBridgeTests(unittest.TestCase):
     for _ in range(100):
      if response.exists():break
      time.sleep(.05)
-    self.assertTrue(response.exists());self.assertEqual(json.loads(json.loads(response.read_text())['output']),{'ready':True});self.assertFalse(request.exists())
+    self.assertTrue(response.exists());self.assertEqual(json.loads(json.loads(response.read_text())['output']),{'ready':True});self.assertFalse(request.exists());self.assertGreaterEqual(json.loads(response.read_text())['timings']['executionMs'],0)
    finally:worker.close()
    self.assertFalse((root/'status.json').exists())
  def test_model_catalogue_is_filtered_and_deduplicated(self):
@@ -34,4 +34,9 @@ class CodexBridgeTests(unittest.TestCase):
      if process.poll() is not None:break
      time.sleep(.05)
     self.assertIsNotNone(process.poll());self.assertNotEqual(process.returncode,0)
+    response=root/(jobid+'.response.json')
+    for _ in range(100):
+     if response.exists():break
+     time.sleep(.01)
+    self.assertEqual(json.loads(response.read_text())['errorCode'],'cancelled')
    finally:worker.close()

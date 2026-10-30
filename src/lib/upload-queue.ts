@@ -124,6 +124,7 @@ export const uploadQueue = {
         requested(f.index("scope").getAll(scope), (existing) => {
           const paths = new Set(existing.map((i) => i.path));
           let count = 0;
+          let latest=existing.reduce((last,item)=>Math.max(last,item.createdAt),0);
           for (const item of incoming)
             if (!paths.has(item.path)) {
               paths.add(item.path);
@@ -131,8 +132,9 @@ export const uploadQueue = {
                 ...item,
                 id: uploadId(),
                 scope,
-                createdAt: Date.now() + count++ / 1000,
+                createdAt: (latest=Math.max(Date.now(),latest+1/1000)),
               });
+              count++;
             }
           done(count);
         });

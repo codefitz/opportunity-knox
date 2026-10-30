@@ -79,6 +79,8 @@ export async function runLocalCodex(
     );
     rmSync(request, { force: true });
   };
+  const began=Date.now();
+  config.onDiagnostics?.({responseMode:"codex"});
   config.onProgress?.("queued-codex");
   let lastProgress = "";
   try {
@@ -87,6 +89,14 @@ export async function runLocalCodex(
     while (Date.now() < deadline) {
       if (config.signal?.aborted) {
         stop();
+        config.onDiagnostics?.({cancellation:"unconfirmed"});
+        // Wait briefly for our owned helper process to acknowledge termination.
+        // This confirms local termination only, never remote compute/billing.
+        const until=Date.now()+1500;
+        while(Date.now()<until){
+          try { const ack=JSON.parse(readFileSync(response,"utf8"));if(ack.errorCode==="cancelled"||typeof ack.output==="string"){config.onDiagnostics?.({cancellation:"codex-process-stopped"});break;} }catch{}
+          await new Promise(r=>setTimeout(r,100));
+        }
         throw failure("Career Buddy request cancelled.", 499);
       }
       try {
@@ -94,6 +104,7 @@ export async function runLocalCodex(
         if (value.stage !== lastProgress) {
           lastProgress = value.stage;
           config.onProgress?.(value.stage);
+          if(value.stage==="running-codex")config.onDiagnostics?.({queueMs:Date.now()-began});
         }
       } catch {}
 
@@ -116,6 +127,7 @@ export async function runLocalCodex(
           value.output.length > 2 * 1024 * 1024
         )
           throw failure("Codex returned an invalid response.", 502);
+        if(value.timings)config.onDiagnostics?.(value.timings);
         return value.output;
       }
       await new Promise((r) => setTimeout(r, 250));

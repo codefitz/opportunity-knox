@@ -3980,3 +3980,16 @@ textarea {
 .opportunity-filter-chips>span { max-width:100%; }
 
 .reliability-card{padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--surface);margin-top:18px;display:grid;gap:14px}.reliability-card p{font-size:13px;line-height:1.65;overflow-wrap:anywhere}.reliability-card form{display:grid;gap:14px}.reliability-result{padding:14px;background:var(--panel-soft);border-radius:10px;display:grid;gap:10px}
+
+.job-intake { margin:22px 0; padding:20px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
+.job-intake h3 { display:flex; align-items:center; gap:8px; }
+.job-intake .form-grid { margin:14px 0; }
+.intake-fields { display:grid; gap:12px; margin:16px 0; }
+.intake-field { padding:12px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+.intake-field p { white-space:pre-wrap; line-height:1.55; margin:8px 0; }
+.intake-field blockquote { margin:8px 0; padding:8px 12px; border-left:3px solid var(--green); color:var(--muted); font-size:12px; white-space:pre-wrap; }
+.intake-field blockquote small { display:block; margin-top:6px; }
+.intake-notices { padding:12px; border:1px solid var(--line); border-radius:8px; }
+.intake-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:14px; }
+
+.job-intake .intake-actions .button.primary:hover { background:var(--green); color:var(--on-accent); }

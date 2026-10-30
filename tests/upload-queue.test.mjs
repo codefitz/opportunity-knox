@@ -20,3 +20,7 @@ test('aborted queue transaction leaves original bytes recoverable; oversized bat
 test('recovered queues try unattempted files before earlier failures',async()=>{
  const scope='fictional-batches';await uploadQueue.add(scope,[item('first.txt'),item('second.txt')]);const first=(await uploadQueue.load(scope)).files[0];await uploadQueue.failed(scope,first.id,'Fictional failure');assert.equal((await uploadQueue.load(scope)).files.at(-1).id,first.id);await uploadQueue.add(scope,[item('third.txt')]);assert.deepEqual((await uploadQueue.load(scope)).files.map(v=>v.path),['second.txt','third.txt','first.txt']);
 });
+test('separate batches selected in the same millisecond retain their selection order',async()=>{
+ const clock=Date.now;Date.now=()=>1761753600000;
+ try{const scope='fictional-same-millisecond';await uploadQueue.add(scope,[item('one.txt'),item('two.txt')]);await uploadQueue.add(scope,[item('three.txt'),item('four.txt')]);assert.deepEqual((await uploadQueue.load(scope)).files.map(v=>v.path),['one.txt','two.txt','three.txt','four.txt']);}finally{Date.now=clock;}
+});

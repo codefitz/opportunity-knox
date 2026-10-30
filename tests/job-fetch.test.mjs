@@ -507,3 +507,8 @@ test("DNS, connection, certificate and truncated-response errors are controlled"
     hasCode("NETWORK_ERROR"),
   );
 });
+
+test('intake can retain exact decoded source bytes and opt into public PDF downloads without loosening URL guards',async()=>{
+ const bytes=Buffer.from('%PDF-fictional-original\n');const result=await fetchJobPage('https://jobs.example.com/role.pdf',{lookup:publicLookup,request:transport([{headers:{'content-type':'application/pdf'},body:bytes}]),includeBytes:true,allowPdf:true});assert.equal(result.contentType,'application/pdf');assert.deepEqual(result.bytes,bytes);
+ await assert.rejects(fetchJobPage('http://127.0.0.1/internal.pdf',{allowPdf:true,includeBytes:true}),e=>e.code==='UNSAFE_ADDRESS');
+});

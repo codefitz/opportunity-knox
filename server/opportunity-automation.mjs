@@ -1,3 +1,4 @@
+import {workflowSettings} from "./ai-workflow.mjs";
 import {randomUUID} from "node:crypto";
 import { defaultBuddy, callProvider, BUDDY_SCHEMA } from "./buddy-provider.mjs";
 export function createOpportunityAutomation(ctx, decisions, parseOutput) {
@@ -43,11 +44,11 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
             c = getConfig("careerBuddy") || defaultBuddy();
           state.provider = c.provider;
           state.model = c.model;
-          if (c.enabled) {
+          if (c.enabled&&workflowSettings(getConfig).autoTags) {
             try {
               const revision = record.revision;
               state.requestId=randomUUID();activeRequests.set(id,state.requestId);save(id,state);
-              const task=ctx.requests.start(state.requestId,'automation:'+id,c);c={...c,signal:task.signal,onProgress:task.progress};
+              const task=ctx.requests.start(state.requestId,'automation:'+id,c,{kind:'tags',promptVersion:'automatic-tags-v1'});c={...c,signal:task.signal,onProgress:task.progress,onDiagnostics:task.diagnostics};
               try {
               const raw = await callProvider(
                 c,
@@ -66,7 +67,7 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
                 ],
                 buddyFetch,
               );
-              task.check();
+              task.check();if(!workflowSettings(getConfig).autoTags)throw Error("Automatic tags disabled");
               const parsed = parseOutput(raw, []),
                 tags = JSON.parse(parsed.reply).tags;
               if (
@@ -100,17 +101,18 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
                 }
                 state.tags = "completed";
               }
-              task.finish("completed");
+              task.finish(state.tags==="stale"?"stale":"completed");
               }catch(e){task.finish(task.signal.aborted?"cancelled":"failed",String(e.status||500));throw e;}
             } catch {
               if(ctx.requests.read(state.requestId)?.stage==='cancelled')cancelled.add(id);
               state.tags = "failed";
             }
-          } else state.tags = "skipped — no enabled chat model";
+          } else state.tags = "skipped — disabled or no enabled chat model";
           if (stopping) break;
           if(cancelled.has(id))throw Error("Cancelled");
           const profile = getConfig("fitCriteria");
-          if (!profile?.items?.length)
+          if(!workflowSettings(getConfig).fit||!workflowSettings(getConfig).autoFit)state.fit="skipped — disabled in AI workflow";
+          else if (!profile?.items?.length)
             state.fit = "skipped — save criteria in Settings";
           else if (!(getConfig("decisionModel")?.enabled || c.enabled))
             state.fit = "skipped — no enabled model";

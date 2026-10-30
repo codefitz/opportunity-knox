@@ -4,6 +4,7 @@ import { api, json } from "../api";
 import "../career-buddy.css";
 
 export type BuddySettings = {
+  streamResponses?:boolean;
   requestTimeoutSeconds?: number;
   maxOutputTokens?: number;
   contextCharacters?: number;
@@ -195,6 +196,7 @@ export default function CareerBuddySettings({
               (form.provider === "codex" ? 300 : 120),
             maxOutputTokens: form.maxOutputTokens || 8000,
             contextCharacters: form.contextCharacters || 36000,
+            streamResponses:form.streamResponses!==false,
             apiKey: key,
             clearKey,
           },
@@ -502,6 +504,7 @@ export default function CareerBuddySettings({
           </details>
           <details>
             <summary>Request limits</summary>
+            {!decision&&form.provider!=="codex"&&<label className="buddy-toggle"><input type="checkbox" checked={form.streamResponses!==false} onChange={e=>update({streamResponses:e.target.checked})}/>Show live answer previews</label>}
             <div className="form-grid">
               <label className="field">
                 <span>Request timeout (seconds, 30–900)</span>
@@ -544,9 +547,7 @@ export default function CareerBuddySettings({
               </label>
             </div>
             <p className="buddy-muted">
-              Requests return complete answers; progress reports stages, not
-              token-by-token generation. Codex output sizing is controlled by
-              the CLI, so the response-token limit applies to HTTP providers.
+              Supported chat connections show a live preview while generating. Only complete, checked answers become saved messages or proposals. Turn previews off for APIs that reject streaming. Codex returns complete answers and controls its own output size; the token limit applies to HTTP providers.
             </p>
           </details>
           {form.provider === "codex" && (

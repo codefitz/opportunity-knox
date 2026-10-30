@@ -1,0 +1,126 @@
+.ai-activity .settings-section > p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+  margin: 0.75rem 0;
+}
+.activity-filters,
+.activity-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 1rem 0;
+}
+.activity-filters label,
+.activity-rate-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.activity-filters select,
+.activity-rate-grid input,
+.activity-rate-grid select {
+  min-width: 0;
+  width: 100%;
+}
+.activity-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 1rem 0;
+}
+.activity-stats > div {
+  padding: 14px;
+  background: var(--surface-muted, var(--surface));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.activity-stats strong {
+  display: block;
+  font-size: 21px;
+}
+.activity-stats span {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  margin-top: 5px;
+}
+.activity-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.activity-table-wrap table {
+  width: 100%;
+  min-width: 850px;
+  border-collapse: collapse;
+}
+.activity-table-wrap td,
+.activity-table-wrap th {
+  text-align: left;
+  padding: 13px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.activity-table-wrap td > span {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.activity-table-wrap td:nth-child(1) {
+  max-width: 230px;
+}
+.activity-table-wrap td:nth-child(2) {
+  max-width: 180px;
+  overflow-wrap: anywhere;
+}
+.activity-table-wrap details {
+  margin-top: 10px;
+  max-width: 240px;
+}
+.activity-table-wrap summary,
+.ai-activity summary {
+  cursor: pointer;
+}
+.activity-table-wrap dl {
+  font-size: 11px;
+}
+.activity-table-wrap dt {
+  font-weight: 600;
+  margin-top: 8px;
+}
+.activity-table-wrap dd {
+  margin: 2px 0 0;
+}
+.activity-hash {
+  overflow-wrap: anywhere;
+}
+.activity-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 1rem 0;
+  font-size: 12px;
+}
+.activity-pagination > span {
+  margin-right: auto;
+}
+.activity-rates {
+  padding-left: 18px;
+}
+.activity-rates li {
+  margin: 12px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-rates button {
+  margin: 4px;
+}
+.ai-activity .page-heading {
+  gap: 12px;
+  flex-wrap: wrap;
+}

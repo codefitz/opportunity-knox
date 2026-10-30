@@ -27,7 +27,9 @@ Product plan agreed 22 October 2026; reconciled against the repository on 29 Oct
 - [x] Standalone chat attachments with extraction preview, original download/reuse/deletion and documented limits. Stored separately from the career library; no silent indexing. Optional attachment-to-library copying remains future work.
 - [x] P1 standalone Buddy request controls: polled stage/elapsed progress, Cancel/retry, HTTP abort and owned Codex process termination, persisted secret-safe request diagnostics, restart interruption state, configurable AI response timeouts (30–900 seconds), HTTP response-token and source-context budgets. Existing defaults retained; no silent retries. Responses remain non-streaming.
 - [x] Extend interactive progress/elapsed time, cancellation and explicit retry to opportunity-specific Buddy, manual decision assessments and automatic review jobs; recover persisted request status when reopening views and reject late cancelled results before saving.
-- [ ] Full token streaming, cold-load timing diagnostics and provider-side cancellation acknowledgement. Cancelling local work cannot guarantee that remote providers stop computation/billing.
+- [x] HTTP-provider streaming with polled live answer previews in standalone/opportunity chat; incremental SSE/NDJSON parsing, bounded responses, explicit compatibility opt-out and complete-response validation before saving. Preview text remains memory-only and is cleared on cancellation/failure/completion.
+- [x] Persisted source preparation/provider/first-output diagnostics and provider-reported Ollama loading/prefill/generation timings; Codex queue/execution timing and local process-termination acknowledgement. No prompts, keys or preview text enter these diagnostics.
+- [ ] Codex live token output and genuine remote-provider cancellation acknowledgement. The CLI bridge still returns complete answers; transport/local-process termination cannot guarantee remote compute/billing stops.
 
 ## Confirmed direction
 
@@ -35,7 +37,7 @@ Product plan agreed 22 October 2026; reconciled against the repository on 29 Oct
 - [x] Browser/API capability for private multi-device access, configurable host binding and conflict handling. Production remote HTTPS/VPN deployment remains unchecked below.
 - [x] Easy to start and stop, with records and documents surviving shutdowns and upgrades.
 - [x] Docker is an implementation detail: routine operation uses a single launcher command or host shortcut, with no manual Compose, mount, or environment-file editing.
-- [x] Optional, pluggable AI support for identification, fit review, and document generation. Choose the provider later. *(Career Buddy supports OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs; Stage 1 AI extraction and per-stage toggles remain open.)*
+- [x] Optional, pluggable AI support for identification, fit review, and document generation. Choose the provider later. *(Career Buddy supports OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs; Per-stage toggles are implemented; reviewed Stage 1 extraction is implemented.)*
 - [x] Automatically dated stages with editable dates, optional notes, and a combined opportunity summary.
 - [x] Configurable document storage and a reusable library of previous JDs, CVs, and other evidence.
 
@@ -73,7 +75,7 @@ One card represents one application opportunity, including a stable ID so repeat
 - [x] Keep a separate event for each visit to a stage, with entry dates and optional notes. Never overwrite an earlier visit when a card moves backwards.
 - [x] Separate scheduled interviews, deadlines, and next actions from completed events. Store timestamps consistently and display them in the configured timezone, initially Europe/London; retain date-only values as dates.
 - [x] Save notes on the relevant stage or event. The Summary tab assembles all notes, decisions, communications, interviews, and document links chronologically, with source dates. This works without AI.
-- [ ] Optional AI summaries as derived views linked to their source events that show when they were generated and visibly mark themselves out of date when new events arrive. *(Currently Career Buddy provides interactive chat rather than a cached derived summary view.)*
+- [x] Optional saved Buddy briefings in Summary: dated sections with supporting source references, explicit refresh, stale markers for changed opportunity/events/activities/tasks/document metadata, cancellation and conflict protection. Chronological summaries remain available. Live-provider wording quality remains for user evaluation.
 - [x] Provide overdue/deadline indicators and next-action dates (plus a dedicated To-do list and Dashboard queues).
 - [ ] Email/calendar reminders (later integration; the stopped service does not process background reminders or AI work).
 
@@ -87,8 +89,8 @@ One card represents one application opportunity, including a stable ID so repeat
 4. [x] **Settings:** profile name/photo, light/dark and contrasting themes, automatically saved custom colours, document subfolder locations, pending host path, Career Buddy AI provider/model connection, timezone, backups, and record export.
    - [x] Backup listing, inspection/validation and confirmed isolated restore UI in Settings. The restored workspace is not automatically started or made live.
    - [x] Confirmed restore activation/replacement UI with hash-verified managed files, pre-change backup, rollback and fresh sign-in.
-   - [ ] Record JSON import/merge UI.
-   - [ ] Per-stage AI enablement controls (see Pluggable AI design).
+   - [x] Reviewed historical JSON import/merge UI in Settings; see HISTORICAL_IMPORTS.md.
+   - [x] Per-stage AI enablement and separate automatic fit/tag controls in Settings → AI workflow.
 
 ## Document storage and existing material
 
@@ -132,16 +134,16 @@ Proposed managed layout:
 - [ ] Use `<stable-id>-<company>-<role>/` folder naming with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories.
 - [x] Report unavailable source roots/files and reject missing configured drives rather than replacing them with empty defaults. Retain previous managed roots when changing storage.
 - [x] Dedicated relinking and guided copy-and-validate migration between managed storage roots: preview/hash checks, explicit confirmation, originals retained, stale-plan rejection, full pre-change backup and rollback/restart recovery.
-- [ ] Previewed historical opportunity/record import with content-hash and job reference/URL/employer-role duplicate matching. Existing folder uploads, explicit Obsidian sync, retry IDs and Google source-version deduplication do not implement this workflow.
+- [x] Previewed historical JSON opportunity import with record-content hash, manifest JD hash, source ID, job reference/URL/employer-role and within-file duplicate suggestions. Explicit skip/separate/selected-field/history/stage choices, full pre-import backup, conflict checks, atomic writes, durable replay protection and source archive/report. File bytes, tasks and native offers/reviews/packs are not activated by record import; use full restore for an entire workspace.
 - [x] Durable library/opportunity Documents upload queues, retained bytes/options, explicit resume/pause, per-file retry idempotence, failure recovery and cross-tab leases.
 
 ## Pluggable AI design
 
 - [x] Keep the core board fully usable with AI disabled.
 - [x] Provide a clean provider adapter boundary (OpenAI, Claude, Gemini, Ollama, and custom OpenAI-compatible APIs) with automatic model discovery and connection testing.
-- [ ] Independent per-stage enablement toggles for Stages 1–3.
+- [x] Independent stage 1–3 AI switches, separate automatic fit/tag controls, conflict-safe saved settings and server enforcement; local tools remain available.
 - [x] Stage 1 deterministic public URL lookup (`JobPosting` structured data + visible HTML) with source provenance and fallback to pasted text or uploaded document.
-- [ ] Stage 1 AI-assisted extraction returning structured fields with source passages, missing information, uncertainties, full original HTML/PDF page snapshots, and OCR for scanned PDFs.
+- [x] Stage 1 reviewed intake for public links (HTML/PDF), pasted text and PDF/DOCX/text/HTML uploads: optional grounded AI fields, supporting passage/page quotes, missing information/uncertainties, full original-source snapshots and bounded local English OCR for scanned PDF pages. Saving creates the opportunity and source/text/report documents atomically; typed fields are preserved. See JOB_INTAKE.md.
 - [x] Stage 2 fit, salary, and skills evaluation in Career Buddy against selected reference evidence, separating supported matches from gaps and questions while leaving decisions to the user.
 - [x] User-defined persistent fit criteria profile for Stage 2 reviews, with revision conflicts and assessment snapshots.
 - [x] Stage 3 CV and cover letter drafting in Career Buddy using selected career evidence, saving editable `.docx` and `.md` versions without overwriting submitted files.
@@ -149,7 +151,8 @@ Proposed managed layout:
 - [ ] Exact fidelity for arbitrary unmarked templates and Google Docs/Word pagination across rendering engines.
 - [x] Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.
 - [x] Persist Buddy request lifecycle/diagnostics, automatic review queue/state and host Codex queue; progress/cancel/retry controls and interrupted-on-restart handling. These are workflow-specific mechanisms.
-- [ ] Unified persisted scheduler for all AI task types, prompt-version tracking and token/cost accounting. The current request registry is not that full scheduler.
+- [x] Unified AI request activity page, per-attempt history, explicit workflow review/retry links, prompt versions/system fingerprints, provider-reported token counters and optional saved-rate cost estimates. Covers Buddy chat/drafting, fit assessments, tags, summaries, intake, feedback reviews and inference connection tests. See AI_ACTIVITY.md.
+- [ ] Unified persisted scheduler for all AI task types, including embedding jobs and deferred runnable work. The activity/request registry does not implement that scheduler.
 - [ ] External-assistant task-pack export and result import.
 
 ## Launcher and first-run experience
@@ -184,7 +187,7 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Backup inspection and verified isolated restore, with copied managed files, remapped document roots and a restore report; offline command and browser confirmation are available.
 - [x] Opt-in daily/weekly full backups while running, one overdue catch-up, failure backoff/status and manual run; verified pre-upgrade full backups in the launcher, with build/start refusal on verification failure and previous-image recovery.
 - [x] Portable restore activation on a clean installation, confirmed live-workspace replacement, managed-document path/hash reconciliation and crash-recoverable rollback. Existing host read-only connections are retained without expanding access.
-- [ ] Historical record merge/import with duplicate reconciliation (separate from full-workspace replacement).
+- [x] Historical JSON record merge/import with reviewed duplicate reconciliation (separate from full-workspace replacement).
 - [ ] Production remote host selection and authenticated HTTPS reverse proxy or VPN deployment configuration.
 
 ## Initial data model
@@ -197,21 +200,22 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] **Career Buddy chat & prepared chunks (added in v0.4):** provider configuration, locally extracted document text chunks, conversation messages, reviewed change proposals, and saved draft references.
 - [x] **Persisted AI request/review state:** `buddy_requests`, `opportunity_automation` and host Codex queue metadata; lifecycle diagnostics are retained.
 - [x] **Criteria and templates:** saved required/preferred criteria profile, document categories, reusable marked DOCX templates and built-in layouts.
-- [ ] **Remaining model extensions:** named reusable reference profiles and task usage/cost/prompt-version records; see the unified scheduler item above.
+- [ ] **Remaining model extensions:** named reusable reference profiles and universal scheduled-job records. Request-level prompt/usage/cost records are implemented; see the unified scheduler item above.
 
 ## Delivery sequence
 
 1. [x] **Core workflow:** board/list, opportunity detail, all stages/outcomes, date history, notes/summary, interviews/comms, uploads/reference library, document version labels, local backup, and JSON export, with private local hosting, persistent storage, and launcher start/stop.
-2. [ ] **Existing-workflow integration:**
+2. [x] **Existing-workflow integration:**
    - [x] Concurrent-device editing checks (`409` revision handling), host-folder retention across restarts, and read-only Obsidian mounting with explicit optional sync.
    - [x] Organise uploaded library documents into folders and upload selections over 500 with optional batches.
    - [x] Attach-existing read-only folder/vault files, backup inspection and isolated restore with document verification.
    - [x] Portable restore activation and managed-document reconciliation, verified on an empty isolated installation.
-   - [ ] Historical record import and duplicate matching (scope described above).
+   - [x] Historical JSON record import and duplicate matching (scope described above).
 3. [ ] **AI integration:**
    - [x] Multi-provider adapter, model discovery, local PDF/DOCX/text chunk retrieval, grounded opportunity chat, reviewed record updates, fit/salary/skills prompts, and versioned Word/Markdown draft generation.
    - [x] Saved fit criteria, automatic reviews, standalone Buddy, request controls, built-in/marked-template layouts and PDF export.
-   - [ ] Stage 1 JD extraction with source passages/OCR/snapshots, per-stage controls, arbitrary-template fidelity and external-assistant task-pack exchange.
+   - [x] Stage 1 reviewed JD extraction with source passages, snapshots and bounded local PDF OCR.
+   - [ ] Arbitrary-template fidelity and external-assistant task-pack exchange.
 4. [ ] **Optional extensions:**
    - [x] Dashboard statistics, local SQLite vectors/hybrid retrieval, Obsidian/directory sources, standalone Buddy/history sidebar and Google Docs setup/snapshot connector.
    - [ ] Calendar/email/reminders, additional reporting, external vector backends/cloud providers and live Google app authorization (deferred).

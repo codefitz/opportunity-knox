@@ -1,3 +1,6 @@
+import {createHash} from "node:crypto";
+import {providerUsage,reportedModel} from "./ai-usage.mjs";
+import {readProviderStream,ollamaTimings} from "./buddy-stream.mjs";
 import { runLocalCodex, listLocalCodexModels } from "./codex-local.mjs";
 import { isIP } from "node:net";
 import { lookup as systemLookup } from "node:dns";
@@ -137,6 +140,7 @@ export function updateBuddy(previous, body) {
           "requestTimeoutSeconds",
           "maxOutputTokens",
           "contextCharacters",
+          "streamResponses",
         ].includes(key),
     )
   )
@@ -192,6 +196,10 @@ export function updateBuddy(previous, body) {
         throw buddyError(400, `Invalid ${key}: choose ${min}–${max}.`);
       next[key] = body[key];
     }
+  if(body.streamResponses!==undefined){
+    if(typeof body.streamResponses!=="boolean")throw buddyError(400,"Live response previews must be on or off.");
+    next.streamResponses=body.streamResponses;
+  }
   if (next.enabled) assertConfigured(next);
   next.revision++;
   return next;
@@ -374,7 +382,12 @@ export function providerRequest(config, system, messages) {
         : {}),
     };
   }
-  return { url, headers, body };
+  const streaming=typeof config.onDelta==="function"&&config.streamResponses!==false;
+  if(streaming){
+    if(config.provider==="gemini")url=url.replace(":generateContent",":streamGenerateContent?alt=sse");
+    else body.stream=true;
+  }
+  return { url, headers, body, streaming };
 }
 export function providerText(provider, response) {
   if (provider === "openai") {
@@ -431,6 +444,7 @@ export function providerText(provider, response) {
     throw buddyError(502, "The custom API returned an incomplete response.");
   return choice?.message?.content || "";
 }
+const streamedText=Symbol("streamedText");
 async function providerJSON(
   config,
   request,
@@ -438,6 +452,7 @@ async function providerJSON(
   resolve = systemLookup,
   timeout = 120000,
 ) {
+  const began=performance.now();
   const timeoutSignal = AbortSignal.timeout(timeout);
   const signal = config.signal
     ? AbortSignal.any([config.signal, timeoutSignal])
@@ -467,7 +482,7 @@ async function providerJSON(
           : response.status === 429
             ? "The provider is rate limited or out of credits. Try later."
             : response.status === 400 || response.status === 404
-              ? "Check the model ID and output mode in settings."
+              ? "Check the model ID and output mode in settings."+(request.streaming?" If this API rejects streaming, turn off live answer previews in Settings.":"")
               : "Try again later or check the API server.";
       await response.body?.cancel();
       const error = buddyError(
@@ -482,6 +497,12 @@ async function providerJSON(
       throw error;
     }
     config.onProgress?.("reading-response");
+    const contentType=response.headers?.get("content-type")||"";
+    if(request.streaming&&(/text\/event-stream/i.test(contentType)||config.provider==="ollama"&&/ndjson/i.test(contentType))){
+      config.onDiagnostics?.({responseMode:"streamed"});
+      return {[streamedText]:await readProviderStream(response,config,signal,began)};
+    }
+    if(request.streaming)config.onDiagnostics?.({responseMode:"buffered"});
     const reader = response.body.getReader();
     const chunks = [];
     let size = 0;
@@ -540,22 +561,19 @@ export async function callProvider(
   fetcher = fetch,
   resolve = systemLookup,
 ) {
-  if (config.provider === "codex")
-    return runLocalCodex(config, system, messages, BUDDY_SCHEMA);
-  const result = await providerJSON(
-    config,
-    providerRequest(config, system, messages),
-    fetcher,
-    resolve,
-    (config.requestTimeoutSeconds || 120) * 1000,
-  );
-  const output = providerText(config.provider, result);
-  if (!output)
-    throw buddyError(
-      502,
-      "The provider returned no usable text (it may have refused the request).",
-    );
-  return output;
+  const began=performance.now();
+  config.onDiagnostics?.({promptHash:createHash("sha256").update(system).digest("hex")});
+  try {
+    if(config.provider==="codex")return await runLocalCodex(config,system,messages,BUDDY_SCHEMA);
+    const result=await providerJSON(config,providerRequest(config,system,messages),fetcher,resolve,(config.requestTimeoutSeconds||120)*1000);
+    if(!result[streamedText]){const model=reportedModel(config.provider,result);if(model)config.onDiagnostics?.({reportedModel:model});const usage=providerUsage(config.provider,result);if(Object.keys(usage).length)config.onDiagnostics?.({usage:{...usage,complete:true}});}
+    if(config.provider==="ollama")config.onDiagnostics?.(ollamaTimings(result));
+    const output=result[streamedText]??providerText(config.provider,result);
+    if(!output)throw buddyError(502,"The provider returned no usable text (it may have refused the request).");
+    return output;
+  } finally {
+    config.onDiagnostics?.({providerMs:Math.round(performance.now()-began),...(config.signal?.aborted&&config.provider!=="codex"?{cancellation:"transport-stopped"}:{})});
+  }
 }
 
 /** List available models without saving settings or starting a model. */

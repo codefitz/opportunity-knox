@@ -102,3 +102,14 @@ test('Codex cancellation signals the host worker and removes queued prompt mater
  const root=mkdtempSync(join(tmpdir(),'knox-cancel-'));const controller=new AbortController();
  try{writeFileSync(join(root,'status.json'),JSON.stringify({ready:true,time:Date.now()/1000}));const pending=runLocalCodex({model:'default',signal:controller.signal},'Fictional test',[],{},root);controller.abort();await assert.rejects(pending,{status:499});assert.equal(readdirSync(root).some(n=>n.endsWith('.request.json')),false);assert.equal(readdirSync(root).some(n=>n.endsWith('.cancel.json')),true);}finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('Codex cancellation distinguishes a helper termination acknowledgement from a mere signal',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'knox-cancel-ack-')),controller=new AbortController(),stats=[];
+ let timer;
+ try{
+  writeFileSync(join(root,'status.json'),JSON.stringify({ready:true,time:Date.now()/1000}));const pending=runLocalCodex({model:'default',signal:controller.signal,onDiagnostics:d=>stats.push(d)},'Fictional test',[],{},root);
+  const request=readdirSync(root).find(n=>n.endsWith('.request.json'));
+  timer=setInterval(()=>{if(readdirSync(root).some(n=>n.endsWith('.cancel.json'))){writeFileSync(join(root,request.replace('.request.json','.response.json')),JSON.stringify({error:'Codex request cancelled.',errorCode:'cancelled'}));clearInterval(timer);}},10);
+  controller.abort();await assert.rejects(pending,{status:499});assert.ok(stats.some(d=>d.cancellation==='codex-process-stopped'));assert.equal(readdirSync(root).some(n=>n.endsWith('.response.json')),false);
+ }finally{clearInterval(timer);rmSync(root,{recursive:true,force:true});}
+});

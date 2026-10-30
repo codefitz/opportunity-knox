@@ -58,6 +58,7 @@ class CodexWorker:
                     with tempfile.TemporaryDirectory(prefix='knox-codex-') as temp:
                         schema=Path(temp)/'schema.json';schema.write_text(json.dumps(job['schema']));output=Path(temp)/'answer.json'
                         env={k:v for k,v in os.environ.items() if k not in ('OPENAI_API_KEY','CODEX_API_KEY','CODEX_ACCESS_TOKEN')}
+                        execution_started=time.monotonic()
                         self.process=subprocess.Popen(command(self.executable,temp,schema,output,model),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True,start_new_session=True,env=env)
                         self.write(progress,{'stage':'running-codex'})
                         first=True
@@ -75,7 +76,7 @@ class CodexWorker:
                         if self.process.returncode or not output.exists():raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
                         if output.stat().st_size>2*1024*1024:raise ValueError()
                         answer=output.read_text();json.loads(answer)
-                        if job['expiresAt']>=time.time():self.write(response,{'output':answer})
+                        if job['expiresAt']>=time.time():self.write(response,{'output':answer,'timings':{'executionMs':round((time.monotonic()-execution_started)*1000)}})
                 except RuntimeError as e:self.write(response,{'error':str(e),'errorCode':'deadline' if 'exceeded its configured deadline' in str(e) else 'cancelled' if str(e)=='Codex request cancelled.' else 'codex-failed'})
                 except (OSError,ValueError,KeyError,TypeError):self.write(response,{'error':'The Codex request could not be processed.'})
                 finally:

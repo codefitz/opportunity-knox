@@ -1,3 +1,8 @@
+import AIActivity,{type ActivityDestination} from "./components/AIActivity";
+import RecordImports from "./components/RecordImports";
+import OpportunityBriefing from "./components/OpportunityBriefing";
+import AIWorkflowSettings from "./components/AIWorkflowSettings";
+import JobIntake,{type IntakeResult} from "./components/JobIntake";
 import ReliabilitySettings from "./components/ReliabilitySettings";
 import {useUploadQueue} from "./components/useUploadQueue";
 import {calendarDay} from "./lib/dashboard";
@@ -107,7 +112,7 @@ import ProfileSettings, {
 import "./themes.css";
 
 type Page =
-  "dashboard" | "opportunities" | "board" | "todos" | "library" | "buddy" | "settings";
+  "dashboard" | "opportunities" | "board" | "todos" | "library" | "buddy" | "activity" | "settings";
 const PAGE_LABELS: Record<Page, string> = {
   dashboard: "Dashboard",
   opportunities: "Opportunities",
@@ -115,6 +120,7 @@ const PAGE_LABELS: Record<Page, string> = {
   todos: "To-do list",
   library: "Career library",
   buddy: "Career Buddy",
+  activity: "AI activity",
   settings: "Settings",
 };
 function routePage(): Page {
@@ -272,6 +278,7 @@ export default function App() {
     appearanceSavingRef = useRef(false),
     appearanceRevision = useRef(0);
   appearanceSettingsRef.current = settings;
+  const [initialOpportunityTab,setInitialOpportunityTab]=useState("overview");
   const [page, setPage] = useState<Page>(routePage),
     [opportunityFilters, setOpportunityFilters] = useState({...defaultOpportunityFilters,tags:[] as string[]});
   const [error, setError] = useState(""),
@@ -532,7 +539,8 @@ export default function App() {
       setRestarting(false);
     }
   }
-  async function openOpportunity(id: string) {
+  async function openOpportunity(id: string,tab="overview") {
+    setInitialOpportunityTab(tab);
     try {
       setSelected(await api<Opportunity>(`/opportunities/${id}`));
     } catch (e) {
@@ -666,6 +674,7 @@ export default function App() {
               { id: "todos", label: "To-do list", icon: ListTodo },
               { id: "library", label: "Career library", icon: FolderOpen },
               { id: "buddy", label: "Career Buddy", icon: Sparkles },
+              { id: "activity", label: "AI activity", icon: Clock3 },
               { id: "settings", label: "Settings", icon: Settings2 },
             ] as const
           ).map((item) => (
@@ -1126,6 +1135,7 @@ export default function App() {
             )}
           </main>
         )}
+        {page === "activity" && <AIActivity timezone={settings?.timezone||"Europe/London"} onError={report} onOpen={(destination:ActivityDestination)=>{if(destination.type==="opportunity"&&destination.id)void openOpportunity(destination.id,destination.tab);else if(destination.type==="buddy"){localStorage.setItem("knox-buddy-conversation",destination.id||"legacy");navigate("buddy");}else if(destination.type==="intake"){setNewUrl("");setNewFile(null);setNewText("");setNewOpen(true);}else if(destination.type==="feedback")window.dispatchEvent(new Event("knox-feedback-inbox"));else navigate("settings");}}/>}
         {page === "buddy" && <BuddyWorkspace onError={report} onChanged={()=>void load(true)} />}
         {page === "library" && (
           <Library
@@ -1151,6 +1161,7 @@ export default function App() {
             profile={profile}
             onProfileSaved={setProfile}
             onSaved={setSettings}
+            onImported={()=>void load(true)}
             restarting={restarting}
             onRestart={() => void restartBoard()}
             onError={report}
@@ -1178,6 +1189,7 @@ export default function App() {
         <OpportunityDetail
           key={selected.id}
           opportunity={selected}
+          initialTab={initialOpportunityTab}
           timezone={settings?.timezone || "Europe/London"}
           onClose={() => setSelected(null)}
           onUpdate={updated}
@@ -1484,6 +1496,7 @@ function NewOpportunity({
     [busy, setBusy] = useState(false),
     [detailsOpen, setDetailsOpen] = useState(false),
     [retrieved, setRetrieved] = useState<JobLookupResult | null>(null);
+  const [intake,setIntake]=useState<IntakeResult|null>(null),[intakeBusy,setIntakeBusy]=useState(false);
   const dirty = useRef(new Set<string>(initialText ? ["description"] : []));
   const change =
     (key: string) =>
@@ -1505,10 +1518,11 @@ function NewOpportunity({
     setDetailsOpen(true);
   }
   function changeUrl(url: string) {
+    setIntake(null);
     setForm((current) => {
       const next: Record<string, string> = { ...current, url };
-      if (retrieved) {
-        for (const key of JOB_FIELDS)
+      if (retrieved||intake?.source.kind==="url") {
+        for (const key of [...JOB_FIELDS,"applicationRoute"])
           if (!dirty.current.has(key)) next[key] = "";
       }
       return next;
@@ -1524,10 +1538,11 @@ function NewOpportunity({
         "/opportunities",
         json({
           ...form,
+          ...(intake?{intakeId:intake.id}:{}),
           ...(retrieved ? { note: lookupNote(retrieved) } : {}),
         }),
       );
-      if (file) {
+      if (file && intake?.source.kind!=="file") {
         try {
           await api(
             "/documents",
@@ -1643,9 +1658,7 @@ function NewOpportunity({
               <input
                 maxLength={10000}
                 value={form.applicationRoute || ""}
-                onChange={(e) =>
-                  setForm({ ...form, applicationRoute: e.target.value })
-                }
+                onChange={change("applicationRoute")}
                 placeholder="Employer portal, recruiter, email…"
               />
             </Field>
@@ -1674,9 +1687,13 @@ function NewOpportunity({
           <input
             type="file"
             accept=".pdf,.docx,.doc,.txt,.md"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) => {setIntake(null);setFile(e.target.files?.[0] || null);}}
           />
         </label>
+        <JobIntake url={form.url} text={form.description} file={file} onBusy={setIntakeBusy} onError={onAuthError} onApply={(result,fields)=>{
+          setForm(current=>{const next={...current};for(const [key,value] of Object.entries(fields))if(!dirty.current.has(key))next[key]=value;return next;});setIntake(result);setDetailsOpen(true);
+        }}/>
+        {intake&&<p className="lookup-applied">Source snapshot selected. It will be saved with this opportunity.</p>}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -1686,7 +1703,7 @@ function NewOpportunity({
           <button type="button" className="button secondary" onClick={onClose}>
             Cancel
           </button>
-          <button className="button primary" disabled={busy}>
+          <button className="button primary" disabled={busy||intakeBusy}>
             {busy ? (
               <Busy text="Adding…" />
             ) : (
@@ -1702,6 +1719,7 @@ function NewOpportunity({
   );
 }
 function OpportunityDetail({
+  initialTab="overview",
   opportunity: o,
   timezone,
   onClose,
@@ -1710,6 +1728,7 @@ function OpportunityDetail({
   onReload,
   onConfigureBuddy,
 }: {
+  initialTab?:string;
   opportunity: Opportunity;
   timezone: string;
   onClose: () => void;
@@ -1718,7 +1737,7 @@ function OpportunityDetail({
   onReload: () => void;
   onConfigureBuddy: () => void;
 }) {
-  const [tab, setTab] = useState("overview"),
+  const [tab, setTab] = useState(initialTab),
     [busy, setBusy] = useState(false),
     [localError, setLocalError] = useState("");
   async function mutate(path: string, body: unknown, method = "POST") {
@@ -1847,7 +1866,7 @@ function OpportunityDetail({
         )}{" "}
         {tab === "decision" && <><OpportunityReviewForm key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/><DecisionReview opportunity={o} onError={onError} /></>}
         {tab === "offers" && <OpportunityOffers key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/>}
-        {tab === "summary" && <Summary o={o} timezone={timezone} />}
+        {tab === "summary" && <><OpportunityBriefing id={o.id} revision={o.revision} timezone={timezone} onOpenSource={sourceId=>setTab(sourceId.startsWith("events:")?"timeline":sourceId.startsWith("activities:")?"activities":sourceId.startsWith("document:")?"documents":"overview")}/><Summary o={o} timezone={timezone} /></>}
         {tab === "buddy" && (
           <CareerBuddy
             opportunity={o}
@@ -5299,7 +5318,9 @@ function SettingsPage({
   onRestart,
   onError,
   onNotice,
+  onImported,
 }: {
+  onImported:()=>void;
   settings: Settings;
   appearance: Appearance;
   appearanceDirty: boolean;
@@ -5505,7 +5526,9 @@ function SettingsPage({
           </div>
         </section>
       </form>
+      <AIWorkflowSettings onError={onError}/>
       <ReliabilitySettings onError={onError} timezone={settings.timezone}/>
+      <RecordImports timezone={settings.timezone} onImported={onImported}/>
       <section className="settings-section">
         <div className="settings-section-heading">
           <ShieldCheck size={21} />

@@ -44,6 +44,7 @@ export default function Feedback({
     setItems(r.items);
     setAIAvailable(r.aiAvailable);
   }
+  useEffect(()=>{const show=()=>{setTab("inbox");setOpen(true);};window.addEventListener("knox-feedback-inbox",show);return()=>window.removeEventListener("knox-feedback-inbox",show);},[]);
   useEffect(() => {
     if (open) {
       dialog.current?.showModal();
@@ -106,6 +107,7 @@ export default function Feedback({
             "todos",
             "library",
             "buddy",
+            "activity",
             "settings",
           ].includes(route)
           ? route

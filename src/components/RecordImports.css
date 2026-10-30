@@ -1,0 +1,77 @@
+.record-imports {
+  min-width: 0;
+}
+.record-imports > .field {
+  margin-top: 1.25rem;
+}
+.record-import-row {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+.record-import-row h4 {
+  margin: 0 0 0.5rem;
+}
+.record-import-row details {
+  margin: 0.6rem 0;
+}
+.record-import-row summary {
+  cursor: pointer;
+}
+.record-import-row dl,
+.record-import-history {
+  max-height: 24rem;
+  overflow: auto;
+}
+.record-import-row dt {
+  font-weight: 600;
+}
+.record-import-row dd {
+  margin: 0 0 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.record-import-row fieldset {
+  min-width: 0;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.record-import-value {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 14rem;
+  overflow: auto;
+}
+.record-import-row select {
+  max-width: 100%;
+}
+.record-imports .checkbox-row {
+  align-items: flex-start;
+}
+.record-imports > p,
+.record-import-row > p {
+  overflow-wrap: anywhere;
+}
+
+.record-imports > p,
+.record-import-row p,
+.record-import-row dl,
+.record-import-row summary {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+}
+.record-imports > p {
+  margin: 0.65rem 0;
+}
+.record-imports > h3 {
+  margin-top: 1rem;
+}
+.record-import-row h4 {
+  font-size: 14px;
+}

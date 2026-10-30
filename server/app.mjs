@@ -1,3 +1,8 @@
+import {createAIActivity,publicRates} from "./ai-activity.mjs";
+import {createRecordImports} from "./record-imports.mjs";
+import {createOpportunitySummaries} from "./opportunity-summary.mjs";
+import {createAIWorkflow} from "./ai-workflow.mjs";
+import {createJobIntake} from "./job-intake.mjs";
 import {createReliability} from "./reliability.mjs";
 import {createBackupSchedule} from "./backup-schedule.mjs";
 import {createOpportunityWorkflow} from "./opportunity-workflow.mjs";
@@ -583,7 +588,7 @@ export function createApp(options = {}) {
     record.events.push(event);
     return event;
   };
-  function createOpportunity(body) {
+  function createOpportunity(body,{skipAutomation=false}={}) {
     const record = {
       id: randomUUID(),
       stage: body.stage ?? "identification",
@@ -623,7 +628,7 @@ export function createApp(options = {}) {
     record.stageEnteredAt = event.effectiveAt;
     record.currentStageEventId = event.id;
     putRecord(record);
-    queueMicrotask(()=>buddy.automate(record.id,{useLibrary:body.autoUseLibrary===true}));
+    if(!skipAutomation)queueMicrotask(()=>buddy.automate(record.id,{useLibrary:body.autoUseLibrary===true}));
     return fullRecord(record);
   }
   const saveDocument = ({
@@ -798,7 +803,6 @@ export function createApp(options = {}) {
   }
   const reliability=createReliability({dataDir,settings,createRestore:(name)=>{const id="restore-"+randomUUID();restoreIsolatedBackup(safePath(filesDir,settings().backupSubdir),name,join(folder(dataDir,"restores",{create:true}),id));return id;}});
   const backupSchedule=createBackupSchedule({getConfig,putConfig,createBackup,clock:options.backupClock,timers:options.backupTimers!==false,canRun:()=>!reliability.applying()});
-  const feedback=createFeedback({getConfig,putConfig,fetcher:options.buddyFetch});
   const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
   const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
   const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert});
@@ -821,6 +825,12 @@ export function createApp(options = {}) {
     automationEnabled:options.automationEnabled,
     createOpportunity,putTask,
   });
+  const feedback=createFeedback({getConfig,putConfig,fetcher:options.buddyFetch,requests:buddy.requests});
+  const aiActivity=createAIActivity({db,getConfig,putConfig,listRecords});
+  const recordImports=createRecordImports({db,getConfig,putConfig,listRecords,getRecord,putRecord,getDocuments,listTasks,createBackup});
+  const summaries=createOpportunitySummaries({getConfig,putConfig,getRecord,getDocuments,listTasks,listRecords,requests:buddy.requests,buddyFetch:options.buddyFetch});
+  const aiWorkflow=createAIWorkflow({getConfig,putConfig});
+  const jobIntake=createJobIntake({dataDir,db,getConfig,requests:buddy.requests,saveDocument,getDocument,getDocuments,getRecord,putRecord,fullRecord,addEvent,documentPath,createOpportunity,pageFetcher:options.intakePageFetcher,extractor:options.intakeExtractor,pdfExtractor:options.intakePDF,buddyFetch:options.buddyFetch,onCreated:id=>queueMicrotask(()=>buddy.automate(id))});
   obsidian = createObsidianIntegration({
     dataDir,
     filesDir,
@@ -987,7 +997,12 @@ export function createApp(options = {}) {
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
         if(reliability.applying()&&!['GET','HEAD'].includes(method)&&!path.startsWith('/api/reliability/')&&path!=='/api/logout')fail(503,"Workspace maintenance is in progress. Wait for it to finish.");
-        try {if(await reliability.handle(path,method,req,res,{json,readBody}))return;
+        try {if(await aiActivity.handle(path,method,req,res,{json,readBody}))return;
+        if(await recordImports.handle(path,method,req,res,{json,readBody}))return;
+        if(await summaries.handle(path,method,req,res,{json,readBody}))return;
+        if(await aiWorkflow.handle(path,method,req,res,{json,readBody}))return;
+        if(await jobIntake.handle(path,method,req,res,{json,readBody}))return;
+        if(await reliability.handle(path,method,req,res,{json,readBody}))return;
         if(await backupSchedule.handle(path,method,req,res,{json,readBody}))return;
         if(await feedback.handle(path,method,req,res,{json,readBody}))return;
         if(await workflow.handle(path,method,req,res,{json,readBody}))return;
@@ -1172,8 +1187,9 @@ export function createApp(options = {}) {
             ).length,
           });
         }
-        if (path === "/api/opportunities" && method === "POST")
-          return json(res, createOpportunity(await readBody(req)), 201);
+        if (path === "/api/opportunities" && method === "POST") {
+          try{return json(res,jobIntake.create(await readBody(req)),201);}catch(e){if(Number.isInteger(e.status)&&e.status>=400&&e.status<600)fail(e.status,e.message);throw e;}
+        }
         const match = path.match(
           /^\/api\/opportunities\/([^/]+)(?:\/(events|activities)(?:\/([^/]+))?)?$/,
         );
@@ -1816,13 +1832,17 @@ export function createApp(options = {}) {
             careerBuddy: buddy.publicSettings(),
             conversations: buddy.exportMessages(),
             decisionAssessments: buddy.exportAssessments(),
+            opportunityBriefings:summaries.export(),
+            recordImports:recordImports.exportReports(),
+            aiActivity:aiActivity.exportRequests(),
+            aiUsageRates:publicRates(getConfig),
             buddyWorkspace:buddy.exportWorkspace(),
             buddyAttachments:buddy.exportAttachments(),
             decisionSettings: buddy.publicDecisionSettings(),
             fitCriteria: getConfig("fitCriteria"),
             feedback:getConfig("feedbackInbox")?.items||[],
             opportunities: listRecords(),
-            documents: getDocuments().map(publicDocument),
+            documents: getDocuments().map(d=>({...publicDocument(d),sha256:d.sha256})),
           });
         }
         if (path === "/api/backups" && method === "GET") {
@@ -1980,7 +2000,7 @@ export function createApp(options = {}) {
           ? server.close((err) => (err ? reject(err) : done()))
           : done(),
       );
-      studio.close();await buddy.close();
+      studio.close();jobIntake.close();await buddy.close();
       db.close();
     },
   };

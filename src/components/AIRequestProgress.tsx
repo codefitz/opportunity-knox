@@ -1,12 +1,10 @@
+import BuddyRequestDetails, {
+  requestStage,
+  type BuddyRequestInfo,
+} from "./BuddyRequestDetails";
 import { useEffect, useState } from "react";
 import { api, json } from "../api";
-type Request = {
-  id: string;
-  stage: string;
-  startedAt: string;
-  finishedAt?: string;
-  durationMs?: number;
-};
+type Request = BuddyRequestInfo;
 export default function AIRequestProgress({
   id,
   scope,
@@ -50,34 +48,37 @@ export default function AIRequestProgress({
   }, [id, scope]);
   if (!request && !id) return null;
   return (
-    <div className="buddy-working" role="status">
-      <span>
-        {request?.stage || "Starting"} ·{" "}
-        {request
-          ? Math.max(
-              0,
-              Math.floor(
-                (request.durationMs ?? now - Date.parse(request.startedAt)) /
-                  1000,
-              ),
-            )
-          : 0}
-        s
-      </span>
-      {cancellable && !request?.finishedAt && (
-        <button
-          type="button"
-          className="button secondary small"
-          onClick={() =>
-            void api(
-              "/buddy/requests/" + encodeURIComponent(request?.id || id!),
-              json({ cancel: true }),
-            ).catch(onError)
-          }
-        >
-          Cancel request
-        </button>
-      )}
+    <div className="buddy-request-status">
+      <div className="buddy-working" role="status">
+        <span>
+          {request ? requestStage(request.stage) : "Starting"} ·{" "}
+          {request
+            ? Math.max(
+                0,
+                Math.floor(
+                  (request.durationMs ?? now - Date.parse(request.startedAt)) /
+                    1000,
+                ),
+              )
+            : 0}
+          s
+        </span>
+        {cancellable && !request?.finishedAt && (
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() =>
+              void api(
+                "/buddy/requests/" + encodeURIComponent(request?.id || id!),
+                json({ cancel: true }),
+              ).catch(onError)
+            }
+          >
+            Cancel request
+          </button>
+        )}
+      </div>
+      <BuddyRequestDetails request={request} />
     </div>
   );
 }

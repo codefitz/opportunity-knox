@@ -1,3 +1,4 @@
+import {requireAIStage,workflowSettings} from "./ai-workflow.mjs";
 import { statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
@@ -239,6 +240,9 @@ export function createDecisionReview(ctx) {
         return true;
       }
       if (method !== "POST") throw buddyError(405, "Method not supported.");
+      requireAIStage(getConfig,"fit");
+      if(automatic&&!workflowSettings(getConfig).autoFit)throw buddyError(403,"Automatic fit assessment is disabled.");
+
       const body = await readBody(req),
         c =
           automatic && !config().enabled
@@ -275,9 +279,9 @@ export function createDecisionReview(ctx) {
       if (active.has(opportunity.id) || active.size >= 2)
         throw buddyError(429, "A decision assessment is already running.");
       const requestId=typeof body.requestId==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(body.requestId)?body.requestId:randomUUID();
-      const task=ctx.requests.start(requestId,'decision:'+opportunity.id,c);
+      const task=ctx.requests.start(requestId,'decision:'+opportunity.id,c,{kind:'fit',promptVersion:'fit-assessment-2026-10-30-v1'});
       active.add(opportunity.id);
-      c.signal=task.signal;c.onProgress=task.progress;
+      c.signal=task.signal;c.onProgress=task.progress;c.onDiagnostics=task.diagnostics;
       const disconnected=()=>{if(res&&!res.writableEnded)void ctx.requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});};res?.on?.('close',disconnected);
       try {
         task.check();
@@ -321,7 +325,7 @@ export function createDecisionReview(ctx) {
           [{ role: "user", content: JSON.stringify(context) }],
           buddyFetch,
         );
-        task.check();task.progress("validating");
+        task.check();requireAIStage(getConfig,"fit");if(automatic&&!workflowSettings(getConfig).autoFit)throw buddyError(403,"Automatic fit assessment is disabled.");task.progress("validating");
         const ids = new Set([
             opportunity.id,
             ...retrieval.chunks.map((x) => x.sourceId),

@@ -1,3 +1,4 @@
+import {requireAIStage} from "./ai-workflow.mjs";
 import {createBuddyRequests} from "./buddy-requests.mjs";
 import {createOpportunityAutomation} from "./opportunity-automation.mjs";
 import {createStandaloneBuddy} from "./standalone-buddy.mjs";
@@ -408,11 +409,12 @@ export function createCareerBuddy(ctx) {
     return [...new Set(value)];
   };
   const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
-  const requests=createBuddyRequests(db);ctx={...ctx,requests};
+  const requests=createBuddyRequests(db,{getConfig});ctx={...ctx,requests};
   const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
   const automation=createOpportunityAutomation(ctx,decisions,parseBuddyOutput);
   return {
+    requests,
     automate:automation.schedule,
     exportAssessments: decisions.exportAssessments,
     exportWorkspace:workspace.exportMessages,
@@ -526,8 +528,9 @@ export function createCareerBuddy(ctx) {
             });
           } else {
             assertConfigured(c);
-            await callProvider(
-              c,
+            const testTask=requests.start(randomUUID(),"connection:career-buddy",c,{kind:"connection-test",promptVersion:"connection-test-v1"});
+            try{await callProvider(
+              {...c,signal:testTask.signal,onProgress:testTask.progress,onDiagnostics:testTask.diagnostics},
               "Reply with the single word Ready. No career records are supplied.",
               [
                 {
@@ -537,7 +540,7 @@ export function createCareerBuddy(ctx) {
                 },
               ],
               ctx.buddyFetch,
-            );
+            );testTask.check();testTask.finish("completed");}catch(e){testTask.finish("failed",e.status||500);throw e;}
             json(res, {
               ok: true,
               provider: c.provider,
@@ -606,6 +609,8 @@ export function createCareerBuddy(ctx) {
         assertConfigured(c);
         const message = string(body.message, 12000, "message", true);
         const action = body.action || "chat";
+        const stage=["cv","cover"].includes(action)?"drafting":["fit","salary","skills"].includes(action)?"fit":null;
+        if(stage)requireAIStage(getConfig,stage);
         if (
           !["chat", "fit", "salary", "skills", "cv", "cover"].includes(action)
         )
@@ -635,9 +640,9 @@ export function createCareerBuddy(ctx) {
             400,
             "Choose whether to include other opportunity summaries.",
           );
-        const task=requests.start(requestId,"opportunity:"+opportunity.id,c);
+        const task=requests.start(requestId,"opportunity:"+opportunity.id,c,{kind:["cv","cover"].includes(action)?"draft":"opportunity-chat",action,promptVersion:"opportunity-chat-2026-10-30-v1"});
         inFlight.add(opportunity.id);
-        c.signal=task.signal;c.onProgress=task.progress;
+        c.signal=task.signal;c.onProgress=task.progress;c.onDelta=task.preview;c.onDiagnostics=task.diagnostics;
         const disconnected=()=>{if(!res.writableEnded)void requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});};res.on('close',disconnected);
         try {
           task.check();
@@ -738,12 +743,13 @@ export function createCareerBuddy(ctx) {
             ],
             ctx.buddyFetch,
           );
-          task.check();task.progress("validating");
+          task.check();if(stage)requireAIStage(getConfig,stage);task.progress("validating");
           const parsed = parseBuddyOutput(raw, [
             opportunity.id,
             ...context.otherOpportunities.map((o) => o.id),
             ...retrieval.chunks.map((d) => d.sourceId),
           ]);
+          if(parsed.draft.kind!=="none"){requireAIStage(getConfig,"drafting");task.describe({kind:"draft"});}
           if (
             ["fit", "salary", "skills", "cv", "cover"].includes(action) &&
             parsed.changes.length
@@ -891,6 +897,7 @@ export function createCareerBuddy(ctx) {
         return true;
       }
       if (match[2] === "draft" && method === "POST") {
+        requireAIStage(getConfig,"drafting");
         const lock = "draft:" + saved.id;
         if (inFlight.has(lock))
           throw buddyError(
@@ -912,6 +919,7 @@ export function createCareerBuddy(ctx) {
               opportunity.company +
               " - " +
               opportunity.role;
+            requireAIStage(getConfig,"drafting");
             const doc = saveDocument({
               name:
                 filename.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 220) +

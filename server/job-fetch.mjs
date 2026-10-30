@@ -199,7 +199,7 @@ function networkError(error) {
   );
 }
 
-function requestPage(url, address, deadline, maxBytes, injectedRequest) {
+function requestPage(url, address, deadline, maxBytes, injectedRequest, intakeOptions={}) {
   return new Promise((resolve, reject) => {
     let request;
     let response;
@@ -285,14 +285,14 @@ function requestPage(url, address, deadline, maxBytes, injectedRequest) {
           .split(";")[0]
           .trim()
           .toLowerCase();
-        if (contentType === "application/pdf" || /\.pdf$/i.test(url.pathname))
+        if (!intakeOptions.allowPdf && (contentType === "application/pdf" || /\.pdf$/i.test(url.pathname)))
           return fail(
             new JobFetchError(
               "This link points to a PDF. Download it and upload the job description instead.",
               "PDF_DOCUMENT",
             ),
           );
-        if (!["text/html", "application/xhtml+xml"].includes(contentType))
+        if (!["text/html", "application/xhtml+xml",...(intakeOptions.allowPdf?["application/pdf"]:[])].includes(contentType))
           return fail(
             new JobFetchError(
               "This link did not return a supported HTML job page. Paste the description or upload its PDF/DOCX instead.",
@@ -377,6 +377,7 @@ function requestPage(url, address, deadline, maxBytes, injectedRequest) {
             html: Buffer.concat(chunks).toString("utf8"),
             url: url.href,
             contentType,
+            ...(intakeOptions.includeBytes?{bytes:Buffer.concat(chunks)}:{}),
           }),
         );
       });
@@ -408,6 +409,7 @@ export async function fetchJobPage(inputUrl, options = {}) {
       deadline,
       maxBytes,
       options.request,
+      {includeBytes:options.includeBytes===true,allowPdf:options.allowPdf===true},
     );
     if (!result.redirect) return result;
     if (hop === MAX_REDIRECTS)

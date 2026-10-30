@@ -1,3 +1,7 @@
+import BuddyRequestDetails, {
+  requestStage,
+  type BuddyRequestInfo,
+} from "./BuddyRequestDetails";
 import { useEffect, useState, useRef } from "react";
 import { api, json, readFile, ApiError } from "../api";
 type Message = {
@@ -8,6 +12,7 @@ type Message = {
   createdAt: string;
   cursor?: number;
   status?: string;
+  requestId?:string;
   attachments?: { id: string; name: string }[];
   appliedAt?: string;
   result?: { id?: string };
@@ -39,7 +44,7 @@ type State = {
     warnings: string[];
   }[];
   settings: { enabled: boolean };
-  documents: { id: string; name: string; folder?: string;category?:string }[];
+  documents: { id: string; name: string; folder?: string; category?: string }[];
   opportunities: { id: string; company: string; role: string }[];
 };
 export default function BuddyWorkspace({
@@ -53,15 +58,11 @@ export default function BuddyWorkspace({
     () => localStorage.getItem("knox-buddy-conversation") || "legacy",
   );
   const [historySearch, setHistorySearch] = useState("");
-  const [request, setRequest] = useState<{
-    stage: string;
-    startedAt: string;
-    timeoutSeconds: number;
-    errorCode?: string;
-  } | null>(null);
+  const [request, setRequest] = useState<BuddyRequestInfo | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const drafts = useRef<Record<string, string>>({});
+  const loadSequence = useRef(0);
   const [state, setState] = useState<State | null>(null),
     [useLibrary, setUseLibrary] = useState(false),
     [attached, setAttached] = useState<string[]>([]),
@@ -76,10 +77,15 @@ export default function BuddyWorkspace({
       requestId: string;
     } | null>(null);
   useEffect(() => {
-    if (!busy || !pending?.requestId) return;
+    const pollingId = busy
+      ? pending?.requestId
+      : request?.finishedAt
+        ? null
+        : request?.id;
+    if (!pollingId) return;
     const timer = window.setInterval(() => {
       void api<{ request: NonNullable<typeof request> }>(
-        "/buddy/requests/" + pending.requestId,
+        "/buddy/requests/" + pollingId,
       )
         .then((r) => {
           setRequest(r.request);
@@ -90,14 +96,21 @@ export default function BuddyWorkspace({
         .catch(() => {});
     }, 750);
     return () => window.clearInterval(timer);
-  }, [busy, pending?.requestId]);
+  }, [busy, pending?.requestId, request?.id, request?.finishedAt]);
   async function load(id = conversationId) {
-    const result = await api<State>(
-      "/buddy/workspace?conversationId=" + encodeURIComponent(id),
-    );
+    const sequence = ++loadSequence.current;
+    const [result, latest] = await Promise.all([
+      api<State>("/buddy/workspace?conversationId=" + encodeURIComponent(id)),
+      api<{ request: BuddyRequestInfo | null }>(
+        "/buddy/requests?scope=" + encodeURIComponent(id),
+      ),
+    ]);
+    if (sequence !== loadSequence.current) return;
     setState(result);
+    setRequest(latest.request);
     setOlderAvailable(result.messages.length >= 100);
   }
+
   useEffect(() => {
     void load().catch(onError);
   }, [conversationId]);
@@ -106,6 +119,8 @@ export default function BuddyWorkspace({
   }, [conversationId, state?.messages.at(-1)?.id]);
   function chooseConversation(id: string) {
     if (busy || id === conversationId) return;
+    loadSequence.current++;
+    setRequest(null);
     drafts.current[conversationId] = input;
     localStorage.setItem("knox-buddy-conversation", id);
     setState(null);
@@ -273,10 +288,10 @@ export default function BuddyWorkspace({
               Use career library — automatically find relevant evidence
             </label>
             <p className="buddy-muted">
-              When checked, Buddy chooses relevant library/folder/vault sources and
-              sends bounded excerpts to your configured provider. Attachments
-              and an explicitly chosen template are included independently.
-              Originals stay unchanged.
+              When checked, Buddy chooses relevant library/folder/vault sources
+              and sends bounded excerpts to your configured provider.
+              Attachments and an explicitly chosen template are included
+              independently. Originals stay unchanged.
             </p>
             <details>
               <summary>CV template and document sources</summary>
@@ -311,15 +326,18 @@ export default function BuddyWorkspace({
                     .map((d) => (
                       <option value={d.id} key={d.id}>
                         {d.folder ? d.folder + " / " : ""}
-                        {d.category==="template"?"Template · ":""}{d.name}
+                        {d.category === "template" ? "Template · " : ""}
+                        {d.name}
                       </option>
                     ))}
                 </select>
               </label>
               <p className="buddy-muted">
                 Upload a template below or choose a document already in your
-                configured folders. Ask Buddy to use its headings/structure.
-                Use Document Studio after saving a Word draft to apply layouts and export PDFs. Mark reusable templates in the library to keep them out of automatic career-evidence selection.
+                configured folders. Ask Buddy to use its headings/structure. Use
+                Document Studio after saving a Word draft to apply layouts and
+                export PDFs. Mark reusable templates in the library to keep them
+                out of automatic career-evidence selection.
               </p>
             </details>
             <label className="field">
@@ -501,6 +519,7 @@ export default function BuddyWorkspace({
               >
                 <strong>{m.role === "user" ? "You" : "Career Buddy"}</strong>
                 <p style={{ whiteSpace: "pre-wrap" }}>{m.content}</p>
+                {m.role==='user'&&['failed','cancelled','interrupted'].includes(m.status||'')&&<><p className="buddy-muted">This message was not completed. Review its attachments, target and career-library choices before retrying.</p><button type="button" className="button secondary small" disabled={busy} onClick={()=>{setInput(m.content);setPending({message:m.content,requestId:m.requestId||crypto.randomUUID()});setAttached((m.attachments||[]).map(a=>a.id).filter(id=>state.attachments.some(a=>a.id===id)));setTarget('');setTemplateId('');setUseLibrary(false);}}>Review message for retry</button></>}
                 {!!m.attachments?.length && (
                   <p>
                     Attachments: {m.attachments.map((a) => a.name).join(", ")}
@@ -671,12 +690,13 @@ export default function BuddyWorkspace({
           <p role="status" aria-live="polite">
             {busy && pending
               ? request
-                ? `${({ preparing: "Preparing sources", "waiting-provider": "Waiting for AI response (not streamed)", "reading-response": "Reading AI response", "queued-codex": "Waiting for the Codex helper", "running-codex": "Codex is running (not streamed)", validating: "Checking the response", cancelling: "Cancelling request" } as Record<string, string>)[request.stage] || request.stage} · ${elapsed}s elapsed · ${request.timeoutSeconds}s AI response limit`
+                ? `${requestStage(request.stage)} · ${elapsed}s elapsed · ${request.timeoutSeconds || 0}s AI response limit`
                 : "Starting request…"
               : request
-                ? `Last request: ${request.stage}${request.errorCode && request.errorCode !== request.stage ? " · " + request.errorCode : ""}`
+                ? `Last request: ${requestStage(request.stage)}${request.errorCode && request.errorCode !== request.stage ? " · " + request.errorCode : ""}`
                 : ""}
           </p>
+          <BuddyRequestDetails request={request} />
           <p className="buddy-muted">
             Each conversation keeps its own context; earlier history is
             accessible in the sidebar. Opportunity chats remain with their
