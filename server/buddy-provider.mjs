@@ -21,6 +21,12 @@ export const PROVIDERS = {
   ollama: { name: "Ollama", baseUrl: "http://host.docker.internal:11434" },
   custom: { name: "Custom (OpenAI compatible)", baseUrl: "" },
 };
+export const EMBEDDING_PROVIDERS = {
+  builtin: { name: "Built-in local · MiniLM", baseUrl: "" },
+  openai: PROVIDERS.openai,
+  ollama: PROVIDERS.ollama,
+  custom: PROVIDERS.custom,
+};
 export function buddyError(status, message) {
   const error = new Error(message);
   error.status = status;
@@ -688,6 +694,323 @@ export async function listProviderModels(
   return {
     models,
     suggested,
+    truncated:
+      rows.length > 1000 || Boolean(data.has_more || data.nextPageToken),
+  };
+}
+
+export function assertEmbeddingConfigured(config) {
+  if (config.provider === "builtin") return;
+  if (!["openai", "ollama", "custom"].includes(config.provider))
+    throw buddyError(400, "Choose a supported embedding provider.");
+  if (!config.model || !config.baseUrl)
+    throw buddyError(
+      400,
+      "Set an embedding model ID and API base URL in Semantic search settings.",
+    );
+  if (config.provider === "openai" && !config.apiKey)
+    throw buddyError(400, "Add an API key for OpenAI embeddings.");
+  validateBaseUrl(config.baseUrl);
+}
+
+export function embeddingRequest(config, texts) {
+  assertEmbeddingConfigured(config);
+  if (
+    !Array.isArray(texts) ||
+    !texts.length ||
+    texts.length > 32 ||
+    texts.some(
+      (item) => typeof item !== "string" || !item.trim() || item.length > 12000,
+    )
+  )
+    throw buddyError(
+      400,
+      "Choose between 1 and 32 non-empty text chunks, up to 12,000 characters each.",
+    );
+  const headers = { "Content-Type": "application/json" };
+  if (config.apiKey) headers.Authorization = "Bearer " + config.apiKey;
+  if (config.provider === "ollama") {
+    return {
+      url: config.baseUrl + "/api/embed",
+      headers,
+      body: { model: config.model, input: texts },
+    };
+  }
+  return {
+    url: config.baseUrl + "/embeddings",
+    headers,
+    body: {
+      model: config.model,
+      input: texts,
+      encoding_format: "float",
+    },
+  };
+}
+
+export function embeddingVectors(provider, response, expectedCount = 1) {
+  let raw = null;
+  if (provider === "ollama") {
+    if (Array.isArray(response?.embeddings)) raw = response.embeddings;
+    else if (expectedCount === 1 && Array.isArray(response?.embedding))
+      raw = [response.embedding];
+  } else if (Array.isArray(response?.data)) {
+    const items = response.data;
+    if (
+      items.length === expectedCount &&
+      items.every(
+        (item) =>
+          item && typeof item === "object" && Array.isArray(item.embedding),
+      )
+    ) {
+      if (items.every((item) => Number.isInteger(item.index))) {
+        const sorted = [...items].sort((a, b) => a.index - b.index);
+        if (sorted.every((item, idx) => item.index === idx))
+          raw = sorted.map((item) => item.embedding);
+      } else {
+        raw = items.map((item) => item.embedding);
+      }
+    }
+  } else if (Array.isArray(response?.embeddings)) {
+    raw = response.embeddings;
+  }
+  if (!Array.isArray(raw) || raw.length !== expectedCount)
+    throw buddyError(
+      502,
+      "The endpoint did not return the expected embedding vectors. Check that the base URL and model support embeddings.",
+    );
+  const dimensions = Array.isArray(raw[0]) ? raw[0].length : 0;
+  if (dimensions < 8 || dimensions > 16384)
+    throw buddyError(
+      502,
+      "The endpoint returned an invalid embedding vector dimension.",
+    );
+  let normalized = true;
+  for (const vec of raw) {
+    if (
+      !Array.isArray(vec) ||
+      vec.length !== dimensions ||
+      vec.some((n) => typeof n !== "number" || !Number.isFinite(n))
+    )
+      throw buddyError(
+        502,
+        "The endpoint returned non-numeric or inconsistent embedding vectors.",
+      );
+    const norm = Math.hypot(...vec);
+    if (!Number.isFinite(norm) || norm <= 0)
+      throw buddyError(
+        502,
+        "The endpoint returned a zero-magnitude embedding vector.",
+      );
+    if (Math.abs(norm - 1) > 0.01) normalized = false;
+  }
+  const model =
+    typeof response?.model === "string" &&
+    response.model.trim() &&
+    response.model.length <= 200 &&
+    !/[\x00-\x1f\x7f]/.test(response.model)
+      ? response.model.trim()
+      : "";
+  return { vectors: raw, dimensions, normalized, reportedModel: model };
+}
+
+export async function callEmbeddingProvider(
+  config,
+  texts,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  const request = embeddingRequest(config, texts);
+  let data;
+  try {
+    data = await providerJSON(
+      config,
+      request,
+      fetcher,
+      resolve,
+      (config.requestTimeoutSeconds || 30) * 1000,
+    );
+  } catch (error) {
+    if (
+      error.providerStatus === 400 ||
+      error.providerStatus === 404 ||
+      error.providerStatus === 422
+    ) {
+      const next = buddyError(
+        502,
+        (EMBEDDING_PROVIDERS[config.provider]?.name || "The provider") +
+          " returned HTTP " +
+          error.providerStatus +
+          ". Check that the base URL supports embeddings and that the selected model is an embedding model.",
+      );
+      next.providerStatus = error.providerStatus;
+      throw next;
+    }
+    throw error;
+  }
+  const parsed = embeddingVectors(config.provider, data, texts.length);
+  if (config.apiKey && parsed.reportedModel.includes(config.apiKey))
+    parsed.reportedModel = "";
+  return parsed;
+}
+
+export async function testEmbeddingProvider(
+  config,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  const parsed = await callEmbeddingProvider(
+    config,
+    ["Fictional embedding capability test."],
+    fetcher,
+    resolve,
+  );
+  return {
+    ok: true,
+    provider: config.provider,
+    model: config.model,
+    ...(parsed.reportedModel ? { reportedModel: parsed.reportedModel } : {}),
+    check: "embedding",
+    dimensions: parsed.dimensions,
+    normalized: parsed.normalized,
+  };
+}
+
+/** List available embedding models without saving settings or starting a model. */
+export async function listEmbeddingModels(
+  config,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  if (config.provider === "builtin") {
+    const id = config.model || "Xenova/all-MiniLM-L6-v2";
+    return { models: [{ id, name: id }], suggested: id, truncated: false };
+  }
+  if (!["openai", "ollama", "custom"].includes(config.provider))
+    throw buddyError(400, "Choose a supported embedding provider.");
+  if (!config.baseUrl)
+    throw buddyError(400, "Enter the embedding API base URL first.");
+  validateBaseUrl(config.baseUrl);
+  if (config.provider === "openai" && !config.apiKey)
+    throw buddyError(
+      400,
+      "Add an API key to find embedding models for this provider.",
+    );
+  const headers = {};
+  const path = config.provider === "ollama" ? "/api/tags" : "/models";
+  if (config.apiKey) headers.Authorization = "Bearer " + config.apiKey;
+  let data;
+  try {
+    data = await providerJSON(
+      config,
+      { method: "GET", url: config.baseUrl + path, headers },
+      fetcher,
+      resolve,
+      15000,
+    );
+  } catch (error) {
+    if (error.providerStatus === 404)
+      throw buddyError(
+        502,
+        "This API does not provide a model list. Enter an embedding model ID manually.",
+      );
+    if (error.status === 504)
+      throw buddyError(
+        504,
+        "Finding embedding models timed out. Check the server or enter a model ID manually.",
+      );
+    throw error;
+  }
+  const rows =
+    config.provider === "ollama"
+      ? data.models
+      : Array.isArray(data.data)
+        ? data.data
+        : data.models;
+  if (!Array.isArray(rows))
+    throw buddyError(
+      502,
+      "The API returned an invalid model list. Enter an embedding model ID manually.",
+    );
+  const embeddingModels = [],
+    fallbackModels = [],
+    seen = new Set();
+  for (const item of rows.slice(0, 1000)) {
+    if (!item || typeof item !== "object") continue;
+    const raw =
+      config.provider === "ollama"
+        ? item.name || item.model
+        : item.id || item.name;
+    if (typeof raw !== "string") continue;
+    const id = raw.trim();
+    if (
+      !id ||
+      id.length > 200 ||
+      /[\x00-\x1f\x7f]/.test(id) ||
+      seen.has(id) ||
+      (config.apiKey && id.includes(config.apiKey))
+    )
+      continue;
+    seen.add(id);
+    if (
+      /rerank|whisper|\btts\b|dall-e|flux|diffusion|moderation|realtime|transcribe|canary/i.test(
+        id,
+      ) ||
+      (config.provider === "ollama" &&
+        item.details?.format &&
+        item.details.format !== "gguf")
+    )
+      continue;
+    const display =
+      typeof item.display_name === "string"
+        ? item.display_name
+        : typeof item.displayName === "string"
+          ? item.displayName
+          : "";
+    const name =
+      display &&
+      display !== id &&
+      display.length <= 200 &&
+      !(config.apiKey && display.includes(config.apiKey)) &&
+      !/[\x00-\x1f\x7f]/.test(display)
+        ? display + " (" + id + ")"
+        : id;
+    const families = [
+      item.details?.family,
+      ...(Array.isArray(item.details?.families) ? item.details.families : []),
+      ...(Array.isArray(item.capabilities) ? item.capabilities : []),
+      item.task,
+      item.type,
+      item.object,
+    ].filter((v) => typeof v === "string");
+    const isEmbedding =
+      /embed|minilm|\bbge(?:[-_:/]|$)|\be5(?:[-_:/]|$)|mpnet|paraphrase-|gte-|jina-embeddings|voyage-/i.test(
+        id + " " + name,
+      ) ||
+      families.some((f) =>
+        /\b(?:embed|embedding|embeddings|bert|nomic-bert|roberta|xlm-roberta|mpnet)\b/i.test(
+          f,
+        ),
+      );
+    const isChat =
+      /^(?:gpt-|o[134]-|chatgpt-|claude-|gemini-|davinci|babbage)|\b(?:chat|instruct)\b/i.test(
+        id,
+      );
+    if (isEmbedding) embeddingModels.push({ id, name });
+    else if (!isChat) fallbackModels.push({ id, name });
+  }
+  const models =
+    config.provider === "custom" && !embeddingModels.length
+      ? fallbackModels
+      : embeddingModels;
+  const preferred =
+    config.provider === "openai"
+      ? models.find((m) => m.id === "text-embedding-3-small") ||
+        models.find((m) => m.id === "text-embedding-3-large") ||
+        models[0]
+      : embeddingModels[0] || models[0];
+  return {
+    models,
+    suggested: preferred?.id || "",
     truncated:
       rows.length > 1000 || Boolean(data.has_more || data.nextPageToken),
   };

@@ -2696,6 +2696,45 @@ test('built-in embedding default needs no key and clears external credentials wh
  assert.equal(local.status,200);assert.equal(local.data.hasKey,false);assert.equal(local.data.baseUrl,'');
 });
 
+test('embedding model discovery and capability tests work before and after saving, retain same-endpoint keys and never start indexing',async(t)=>{
+ const calls=[];
+ const f=await fixture(t,{
+  embeddingFn:async texts=>texts.map(()=>[1,...Array(383).fill(0)]),
+  buddyFetch:async(url,opts)=>{
+   calls.push({url,method:opts.method,auth:opts.headers?.Authorization||'',body:opts.body?JSON.parse(opts.body):null});
+   if(url==='http://localhost:11434/api/tags')return new Response(JSON.stringify({models:[{name:'chat-only:latest',details:{format:'gguf',family:'llama'}},{name:'fictional-embed:latest',details:{format:'gguf',family:'nomic-bert'}}]}));
+   if(url==='http://localhost:11434/api/embed')return new Response(JSON.stringify({model:'fictional-embed:latest',embeddings:[[1,...Array(767).fill(0)]]}));
+   if(url==='https://api.openai.com/v1/models')return new Response(JSON.stringify({data:[{id:'gpt-4o'},{id:'text-embedding-3-small'}]}));
+   if(url==='https://api.openai.com/v1/embeddings')return new Response(JSON.stringify({model:'text-embedding-3-small',data:[{index:0,embedding:[1,...Array(1535).fill(0)]}]}));
+   return new Response('not found',{status:404});
+  }
+ });await f.setup();
+ assert.equal((await f.request('/api/buddy/embedding-models',{method:'POST',auth:false,body:{}})).status,401);
+ assert.equal((await f.request('/api/buddy/embedding-test',{method:'POST',auth:false,body:{}})).status,401);
+ const initial=(await f.request('/api/buddy/embedding-settings')).data;
+ const localTest=await f.request('/api/buddy/embedding-test',{method:'POST',body:{}});
+ assert.equal(localTest.status,200);assert.equal(localTest.data.dimensions,384);assert.equal(localTest.data.provider,'builtin');
+ // Unsaved Ollama discovery and capability test
+ const ollamaModels=await f.request('/api/buddy/embedding-models',{method:'POST',body:{revision:initial.revision,provider:'ollama',baseUrl:'http://localhost:11434'}});
+ assert.equal(ollamaModels.status,200);assert.deepEqual(ollamaModels.data.models.map(m=>m.id),['fictional-embed:latest']);assert.equal(ollamaModels.data.suggested,'fictional-embed:latest');
+ const ollamaTest=await f.request('/api/buddy/embedding-test',{method:'POST',body:{revision:initial.revision,provider:'ollama',baseUrl:'http://localhost:11434',model:'fictional-embed:latest'}});
+ assert.equal(ollamaTest.status,200);assert.equal(ollamaTest.data.dimensions,768);assert.equal(ollamaTest.data.normalized,true);
+ // Unsaved test does not mutate saved settings or start vector indexing
+ assert.equal((await f.request('/api/buddy/embedding-settings')).data.provider,'builtin');
+ assert.equal((await f.request('/api/buddy/vector-index')).data.job,null);
+ // Save OpenAI embedding settings and verify stored key reuse vs endpoint change
+ const saved=await f.request('/api/buddy/embedding-settings',{method:'PATCH',body:{revision:initial.revision,provider:'openai',baseUrl:'https://api.openai.com/v1',model:'text-embedding-3-small',apiKey:'fictional-openai-embed-key'}});
+ assert.equal(saved.status,200);
+ const openaiModels=await f.request('/api/buddy/embedding-models',{method:'POST',body:{revision:saved.data.revision,provider:'openai',baseUrl:'https://api.openai.com/v1',apiKey:''}});
+ assert.equal(openaiModels.status,200);assert.equal(openaiModels.data.suggested,'text-embedding-3-small');
+ assert.equal(calls.at(-1).auth,'Bearer fictional-openai-embed-key');
+ const openaiTest=await f.request('/api/buddy/embedding-test',{method:'POST',body:{revision:saved.data.revision,provider:'openai',baseUrl:'https://api.openai.com/v1',model:'text-embedding-3-small',apiKey:''}});
+ assert.equal(openaiTest.status,200);assert.equal(openaiTest.data.dimensions,1536);assert.equal(calls.at(-1).auth,'Bearer fictional-openai-embed-key');
+ // Switching to custom endpoint without a new key does not send the OpenAI key
+ const customTest=await f.request('/api/buddy/embedding-test',{method:'POST',body:{revision:saved.data.revision,provider:'custom',baseUrl:'https://custom.example/v1',model:'custom-embed',apiKey:''}});
+ assert.equal(customTest.status,502);assert.equal(calls.at(-1).auth,'');
+});
+
 test('explicit vector indexing is authenticated, persistent and removable without changing original documents',async t=>{
  const f=await fixture(t,{embeddingFn:async texts=>texts.map(()=>[1,...Array(383).fill(0)])});await f.setup();
  const route='/api/buddy/vector-index';assert.equal((await f.request(route,{auth:false})).status,401);

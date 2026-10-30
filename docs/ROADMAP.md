@@ -1,20 +1,69 @@
-> Status note — 29 October 2026: dated sections below are a delivery history, not a cumulative current backlog. Earlier statements such as “not implemented” or “still open” may be superseded by later milestones. Use [PLAN.md](PLAN.md) and [PLAN_AUDIT.md](PLAN_AUDIT.md) for reconciled status.
-
 # Implementation roadmap
 
-Started 22 October 2026. See `PLAN.md` for the agreed product plan. The private local board is running; production remote hosting remains to be configured.
+**Current status — 30 October 2026.** Core workflow and the defined existing-workflow integration phase are complete. AI integration and optional extensions are partial; completed work is struck through below. [PLAN.md](PLAN.md#remaining-work) is the canonical backlog and [PLAN_AUDIT.md](PLAN_AUDIT.md) reconciles the original 39 markers.
+
+## Delivered and verified within the documented scope
+
+- [x] ~~Private local browser board, dashboard, Kanban/list, dated stages, notes, tasks, profile and themes.~~
+- [x] ~~Career library uploads, categories/folders, large upload recovery, read-only directory/vault sources, local MiniLM vectors and hybrid retrieval.~~
+- [x] ~~Career Buddy providers/Codex catalogue, chat attachments and history sidebar, automatic intent/evidence selection, reviewed updates, STAR stories and master/tailored document drafts.~~
+- [x] ~~Criteria/fit assessments, automatic reviews/tags, communications/interviews, manual review decisions and offers.~~
+- [x] ~~Built-in/marked templates, Document Studio previews/PDF export, application-pack review/approval/submission snapshots.~~
+- [x] ~~Verified backup scheduling/upgrades, isolated and live/portable restore activation, storage migration/relinking and crash recovery.~~
+- [x] ~~Smarter job intake with source passages/snapshots/OCR, independent AI workflow switches, and saved dated/stale-aware opportunity briefings.~~
+- [x] ~~Historical JSON import with duplicate review, selective merges, pre-import backup, atomic writes and preserved source reports.~~
+- [x] ~~AI activity with per-attempt history, prompt/model metadata, reported usage, optional saved-rate estimates, cancellation and workflow review/retry.~~
+- [x] ~~Global private feedback inbox, optional advisory AI review, and export.~~
+
+Latest implementation verification: **213 Node tests + 39 launcher/helper tests (252 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
+
+## Remaining work
+
+The same **13 work areas** appear in the plan. Optional/account-dependent items are labelled; completed imports, briefings and activity/usage work are not outstanding.
+
+| ID | Remaining scope | Status / dependency | Completed boundary |
+| --- | --- | --- | --- |
+| R1 | [x] ~~External embedding capability checks and model discovery~~ | Complete | Separate from completed chat discovery and built-in MiniLM. |
+| R2 | [ ] External embedding indexing and optional vector backends | Open | Follow R1; local SQLite vectors and hybrid retrieval are complete. |
+| R3 | [ ] Universal persisted AI task scheduler | Open | Runnable/deferred jobs and embedding-job coverage; activity, usage, prompt versions and rate estimates are complete. |
+| R4 | [ ] External-assistant task-pack export/result import | Open | Separate from the completed Codex provider and application-document packs. |
+| R5 | [ ] Codex live output/token accounting and remote cancellation acknowledgement | Open / provider-dependent | Current helper returns final text; local process cancellation is complete. Remote compute/billing termination cannot be assumed. |
+| R6 | [ ] Live cloud-document references and native editing | Deferred / account-dependent | Google configuration/search/snapshot connector is complete; live account verification is V2. |
+| R7 | [ ] Arbitrary unmarked templates and cross-engine layout fidelity | Open / validation-dependent | Built-in/marked templates, previews and Word/PDF exports are complete; bespoke acceptance is V3. |
+| R8 | [ ] Email/calendar integration and reminders | Open | Choose account permissions and delivery approach; on-screen due-date queues are complete. |
+| R9 | [ ] Human-readable managed folder names and stage subfolders | Optional enhancement | Existing stable-ID storage, relocation and migration are complete. |
+| R10 | [ ] Private production remote hosting with HTTPS/VPN | Choice-dependent | Needs V1. Local hosting, launcher, authentication and concurrent-client protections are complete. |
+| R11 | [ ] Named reusable criteria/evidence profiles | Open | The current saved criteria profile and evidence-selection workflows are complete. |
+| R12 | [ ] Explicit chat-attachment copying into the career library | Optional enhancement | Chat uploads, retained originals and reuse are complete; no automatic copying/indexing. |
+| R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Optional enhancement | Public HTML/PDF lookup, snapshots and OCR are complete; paste/upload remains the fallback. |
+
+## Choices and validation still pending
+
+| ID | Choice or validation | Boundary |
+| --- | --- | --- |
+| V1 | Choose production host, OS, persistent disk and remote-access method | Required before R10. |
+| V2 | Verify the board-owned Google OAuth app with the user’s client/account | Deferred by user choice; simulated OAuth tests and separate Codex access do not satisfy this. |
+| V3 | Choose/approve any further storage locations, bespoke layouts or additional reporting scope | Configuration/product choices; existing storage controls, built-in layouts and dashboards are complete. |
+| V4 | Complete live-provider, OCR/retrieval-corpus and host-shortcut acceptance checks | Implementation/fixture/browser evidence exists; real-model quality and Finder double-click checks are not inferred from it. |
+
+## Delivery history — historical snapshots
+
+The dated notes below describe what was true at each increment. Superseded pending statements are struck through or annotated. They are not an additional backlog; use the current tables above. Tests with fictional providers do not prove live-account authorization, real-model quality or production remote deployment.
+
+<details>
+<summary>Expand the delivery history (22–30 October 2026)</summary>
 
 ## First increment — implemented
 
-- [x] Password setup/login for a private personal board.
-- [x] Eight-stage board, list view, search, outcomes, and opportunity details.
-- [x] SQLite persistence and stage history with editable effective dates.
-- [x] Repeatable interview and communication entries and combined notes summary.
-- [x] Application/reference file uploads, downloads, and document status/version records.
-- [x] In-app storage subdirectories and pending host-folder changes.
-- [x] One-command Docker lifecycle with remembered storage, health checks, and desktop shortcuts.
-- [x] Meaningful persistence/API and launcher tests, production build, browser review.
-- [x] Record export and consistent local backup.
+- [x] ~~Password setup/login for a private personal board.~~
+- [x] ~~Eight-stage board, list view, search, outcomes, and opportunity details.~~
+- [x] ~~SQLite persistence and stage history with editable effective dates.~~
+- [x] ~~Repeatable interview and communication entries and combined notes summary.~~
+- [x] ~~Application/reference file uploads, downloads, and document status/version records.~~
+- [x] ~~In-app storage subdirectories and pending host-folder changes.~~
+- [x] ~~One-command Docker lifecycle with remembered storage, health checks, and desktop shortcuts.~~
+- [x] ~~Meaningful persistence/API and launcher tests, production build, browser review.~~
+- [x] ~~Record export and consistent local backup.~~
 
 Verification details and limits are recorded in `VERIFICATION.md`. The automatic Docker Desktop startup path is implemented; this run started the installed engine directly before the first complete launcher test. The Mac shortcuts invoke the tested launcher but have not separately been double-clicked through Finder.
 
@@ -24,15 +73,17 @@ Version 0.2 adds public job-link retrieval, structured/visible job details, prev
 
 Version 0.3 implements: Opportunity Knox branding; Forest/Cappuccino/Ocean/Midnight themes; distinct dashboard, opportunities, Kanban and to-do pages; profile name/photo; clearer career-material library and pending AI-indexing status; persisted tasks and statistics based on saved records. Integration requirements are recorded in `KNOX_CONTRACT.md`.
 
-- Previewed import of chosen existing career/application folders, duplicate detection, and existing-file linking.
-- Native Google Drive/Docs connectors and cloud-document editing/export.
-- Server-side folder browsing, multiple independent reference roots, communications direction/channel refinements, and explicit review decisions beyond stage/outcome/notes.
-- Further AI tools for JD extraction, approved CV templates, PDF export, and richer retrieval beyond the current local text chunks.
-- OCR for scanned documents, JavaScript-rendered job pages, and complete original-page snapshots. The extracted job description and source provenance can be saved by link lookup; storing the full original HTML/PDF snapshot remains future work.
-- Submission-pack approval and enforced snapshot workflow across all selected document versions.
-- Portable backup/restore and export/import with document reconciliation across hosts.
-- Authenticated remote hosting, chosen hostname/VPN, HTTPS, and deployment-specific verification.
-- Calendar/email integration and reminders.
+- [x] ~~Managed folder uploads, read-only existing-file selection and reviewed historical JSON record import/duplicate matching. These are separate delivered workflows; arbitrary folder-to-opportunity extraction is not supplied.~~
+- [x] ~~Google Docs OAuth setup, read-only search and explicit local Word snapshot imports.~~
+- [ ] Live cloud references/native editing (R6); live account verification is V2.
+- [x] ~~Configured-root browsing, multiple read-only reference roots, communication direction/channels and explicit dated review decisions.~~
+- [x] ~~Reviewed JD extraction, built-in/marked templates, PDF export and local vector/hybrid retrieval. Arbitrary-template fidelity is R7.~~
+- [x] ~~Bounded local English PDF OCR and original HTML/PDF source snapshots in reviewed intake.~~
+- [ ] Browser-rendered JavaScript-only job pages (R13).
+- [x] ~~Application-pack approval, submission metadata, linked history and preserved submitted versions.~~
+- [x] ~~Portable backup/restore activation and managed-document reconciliation; historical JSON import is record-only and retains source archives.~~
+- [ ] Production remote HTTPS/VPN hosting (R10/V1).
+- [ ] Calendar/email integration and reminders (R8).
 
 Version 0.4 implements Career Buddy provider/model settings and connection testing; local PDF/DOCX/text extraction and chunk retrieval; persistent opportunity chats; reviewed dated interview/communication/note/field updates; fit, salary and skills prompts; editable CV/cover drafts saved as versioned Word documents. API keys remain server-side and are excluded from record exports. See `CAREER_BUDDY.md` for setup and `VERIFICATION.md` for validation limits.
 
@@ -40,12 +91,12 @@ Version 0.4.2 adds automatic provider model discovery, an Ollama model suggestio
 
 A provider must be configured by the user. Real paid-provider credentials and live model output quality have not been tested in this run. External application submission and email sending are not implemented.
 
-Version 0.4.3 adds Lavender, Terracotta, Graphite and Plum themes, plus a custom accent and background tint with preview, save and reset. Appearance settings persist with the workspace. The Career library continues to use locally extracted text chunks and keyword retrieval; vector embeddings and semantic search are not implemented.
+Version 0.4.3 adds Lavender, Terracotta, Graphite and Plum themes, plus a custom accent and background tint with preview, save and reset. Appearance settings persist with the workspace. The Career library continues to use locally extracted text chunks and keyword retrieval; ~~vector embeddings and semantic search are not implemented~~. Superseded by completed local vector indexing and hybrid retrieval below.
 
 Version 0.4.4 adds multi-file and directory drag-and-drop (plus a folder picker) to the Career library and opportunity Documents tabs, recursively reading dropped directories while skipping hidden/system folders (`.git`, `.obsidian`, `.trash`, `node_modules`) and preserving relative folder paths in document names. It expands local text extraction to PowerPoint (`.pptx` slides and speaker notes), Word footnotes/endnotes/comments (`.docx`), HTML, RTF, YAML/code, and video caption files (`.vtt`/`.srt`). It splits the Career library view between **Used (prepared)** and **Unused (unprepared)** sources with **Reset & re-prepare** (`DELETE /api/buddy/index`, `POST /api/buddy/index` with `force: true`), adds collapsible folder grouping (collapsed by default with **Expand all / Collapse all** controls) and a collapsible **Tags** section with automatic/editable tags, supports bulk deletion by folder and by tag as well as individual deletion and **Clear all** (`DELETE /api/documents`, preserving `submitted` snapshots), adds an **Obsidian Vault** integration (`/api/obsidian/*` and `server/obsidian-vault.mjs`) to create a new vault or connect an existing vault, export existing library sources into the vault (with companion Markdown notes and extracted text), and sync vault notes into the library, and provides an in-app **Update & restart board** control (`POST /api/restart`) that automatically refreshes the browser once the restarted server responds.
 
 
-## Current follow-up work — 27 October 2026
+## Follow-up delivery snapshot — 27 October 2026
 
 - Appearance choices and custom colours save automatically; contrasting light/dark presets are available. Prepared and unprepared source sections fold independently. Individual or selected library documents can be moved between folders in the configured library; a bulk move is limited to 500 files.
 - An existing Obsidian vault can be connected read-only. The host launcher mounts a separate host vault read-only, and the app blocks export to a read-only vault. Sync from the vault is an explicit action that copies eligible files into managed library storage; connecting alone does not add them to Career Buddy's sources. The vault is not a live, in-place retrieval source.
@@ -57,45 +108,45 @@ Still open: vector or semantic search; in-place directory and vault sources; pre
 
 ## Embedding configuration and decision-model planning
 
-Embedding settings now have their own provider, endpoint, model ID and private API key, separate from Career Buddy chat settings. OpenAI, Ollama and custom compatible endpoints are configurable. Saving performs no network request and does not activate semantic indexing. Embedding capability testing, model discovery, vector storage and hybrid retrieval remain open. The plan also contains a separate decision-model placeholder for user-defined fit criteria and evidence-based, reviewable recommendations.
+Embedding settings now have their own provider, endpoint, model ID and private API key, separate from Career Buddy chat settings. OpenAI, Ollama and custom compatible endpoints are configurable. Saving performs no network request and does not activate semantic indexing. External capability checks/discovery remain R1. ~~Local vector storage, hybrid retrieval and the criteria-based decision model remain open~~ — all three were subsequently delivered below.
 
 
-The Docker image now bundles a pinned local MiniLM embedding model with CPU inference, remote model loading disabled and a built-in fictional-text test. New embedding configurations use it by default. Existing external embedding choices remain saved. Library indexing and semantic retrieval still require implementation.
+The Docker image now bundles a pinned local MiniLM embedding model with CPU inference, remote model loading disabled and a built-in fictional-text test. New embedding configurations use it by default. Existing external embedding choices remain saved. ~~Library indexing and semantic retrieval still require implementation~~ — both were subsequently delivered in steps 2–3 below.
 
 
 ## Persistent local vector indexing — semantic search step 2
 
 The Career Library now offers explicit selection of managed library files and selected read-only vault sources for local MiniLM indexing. Vectors, chunk hashes, model revision and source fingerprints persist in SQLite. Background jobs report document/chunk progress, allow cooperative cancellation between batches, retain completed documents, and offer explicit retry. Jobs interrupted by a restart stay stopped. Changed files are invalidated on status refresh and verified by hash before reuse/publication; deleted/reset/deselected sources lose their vectors. Unchanged completed sources reuse their vectors. Backups include the vector table. Restored or moved files may require reindexing when their file metadata changes. Originals remain unchanged.
 
-This release requires the built-in local embedding provider for indexing; saved external settings are preserved but external indexing is still pending. Career Buddy continues to use keyword retrieval. Step 3 is hybrid semantic/keyword retrieval with source references and quality tests.
+This release requires the built-in local embedding provider for indexing; saved external settings are preserved but external indexing is still pending. ~~Career Buddy continues to use keyword retrieval; hybrid retrieval is next~~. Step 3 below subsequently delivered hybrid retrieval and passage references.
 
 
 ## Career Buddy hybrid retrieval — semantic search step 3
 
 Career Buddy now combines semantic and keyword rankings for selected sources with saved compatible MiniLM vectors. Query embeddings run locally, passage rankings are fused within the existing context budget, and unindexed sources remain available through keyword matching. Replies persist search mode/fallback reasons and per-source passage references. Source hashes are rechecked after query inference; changed, deleted/deselected or reset sources cannot supply stale semantic evidence. No automatic document indexing or external embedding call is introduced.
 
-Keyword fallback covers absent/incompatible indexes, busy indexing, model failure and unusable semantic matches. Library list filtering remains metadata-only. External embedding providers/custom vector stores, retrieval tuning against a user-approved corpus, and the separate criteria-based decision model remain open.
+Keyword fallback covers absent/incompatible indexes, busy indexing, model failure and unusable semantic matches. Library list filtering remains metadata-only. External embedding providers/custom vector stores remain R2; retrieval tuning against a user-approved corpus is an acceptance check (V4). ~~The separate criteria-based decision model remains open~~ — delivered below.
 
 
 ## Opportunity criteria and decision assessments
 
 Settings now provides a saved criteria profile (up to 30 required/preferred criteria) and independent decision-model provider, endpoint, API key, model discovery and connection-listing test using the existing provider adapters. These settings default off and do not inherit chat credentials. Each opportunity has a Fit assessment tab with explicit evidence selection (up to 20 files). Assessments combine the current opportunity, criteria and selected excerpts using the existing hybrid retrieval; criteria can also be assessed against the opportunity alone, with missing candidate evidence left unknown.
 
-Each dated result saves per-criterion met/unmet/unknown, cited source IDs, reasons, questions and a recommendation, alongside the exact criteria and model revisions. Unmet/unknown required criteria forbid an unqualified proceed recommendation. Invalid responses, missing criteria, unsupported citations, edit proposals and drafts are rejected without saving an assessment. Opportunity stages/outcomes never change automatically. Criteria, model, opportunity or selected-file changes mark prior results out of date on refresh. Assessments persist in SQLite, JSON exports and full backups; API keys remain private. Multiple named profiles, formal manual decision reasons and live-provider quality validation remain future work.
+Each dated result saves per-criterion met/unmet/unknown, cited source IDs, reasons, questions and a recommendation, alongside the exact criteria and model revisions. Unmet/unknown required criteria forbid an unqualified proceed recommendation. Invalid responses, missing criteria, unsupported citations, edit proposals and drafts are rejected without saving an assessment. Opportunity stages/outcomes never change automatically. Criteria, model, opportunity or selected-file changes mark prior results out of date on refresh. Assessments persist in SQLite, JSON exports and full backups; API keys remain private. Named profiles remain R11 and live-provider quality remains V4. ~~Formal manual decision reasons remain future work~~ — delivered in Opportunity workflow below.
 
 
 ## Standalone Career Buddy workspace
 
 The sidebar Career Buddy page has four career-focused modes sharing the configured Career Buddy provider: realistic coaching, multi-turn STAR achievement development, recruiter email/transcript/notes intake, and opportunity updates. Coaching prompts require candid, evidence-based encouragement and pushback rather than praise or invented strengths. STAR prompts ask about situation, task, individual action and results before proposing a draft story, CV bullet and cover-letter highlight. Recruiter intake proposes an employer/role and linked tasks; unknown fields should prompt questions. Updates require an explicitly selected exact opportunity; company names alone cannot authorize a change.
 
-Selected library/vault evidence uses hybrid retrieval; no sources are selected automatically. Recruiter/update modes include up to 200 recent employer/role summaries for clarification. Pasted email/transcript text is supported; attachment parsing and email/calendar connections are not introduced. Modes have separate conversation histories and saved proposals. Review controls save draft STAR Markdown into the library, create opportunities with tasks transactionally, or apply validated opportunity changes with revision conflicts. Repeated application of a proposal is idempotent. Existing employer/role duplicates block recruiter creation. Original documents are unchanged; no applications or communications are sent. Conversations and proposals persist in SQLite, backups and record exports. Coaching quality, follow-up quality and live-provider behaviour still need user evaluation; these are prompt-guided behaviours, not guaranteed model capabilities.
+Selected library/vault evidence uses hybrid retrieval; ~~no sources are selected automatically~~ is superseded by the opt-in Use career library workflow below. Recruiter/update modes include up to 200 recent employer/role summaries for clarification. Pasted email/transcript text is supported; ~~attachment parsing is not introduced~~ — later delivered with chat uploads. Email/calendar connections remain R8. ~~Modes have separate histories~~ — superseded by unified, conversation-scoped history below; reviewed proposals persist. Review controls save draft STAR Markdown into the library, create opportunities with tasks transactionally, or apply validated opportunity changes with revision conflicts. Repeated application of a proposal is idempotent. Existing employer/role duplicates block recruiter creation. Original documents are unchanged; no applications or communications are sent. Conversations and proposals persist in SQLite, backups and record exports. Coaching quality, follow-up quality and live-provider behaviour still need user evaluation; these are prompt-guided behaviours, not guaranteed model capabilities.
 
 
 ## Codex CLI provider
 
 Career Buddy and the independent decision-model settings now offer Codex · local CLI. The launcher watcher owns a host worker and private file queue in the existing state mount; no additional network port is exposed and no Codex sign-in credentials are mounted into Docker. The worker requires ChatGPT CLI sign-in, ignores user configuration, uses ephemeral read-only execution in a temporary directory, disables shell/apps/plugins/memory/web features, and constrains output to the board schema. Existing validation and reviewed actions remain authoritative. Submitted conversation context/selected excerpts are sent to OpenAI and use Codex account limits; this data destination was explicitly authorized by the user.
 
-The default model and manual model IDs are supported; the model list intentionally offers only the default, not a fabricated account catalogue. Connection tests can run a fictional inference. Codex requests have a five-minute bounded deadline; other providers retain their existing deadlines. Missing/stale helper, sign-in/model errors and timeouts are surfaced. The launcher starts/stops the helper with the watcher. Full streaming/progress/cancel controls and broader model discovery remain pending.
+The initial default/manual model support was followed by the actual account catalogue picker below. ~~The model list offers only the default~~ is superseded. Connection tests can run a fictional inference. Codex requests have a five-minute bounded deadline; other providers retain their existing deadlines. Missing/stale helper, sign-in/model errors and timeouts are surfaced. The launcher starts/stops the helper with the watcher. ~~Progress/cancel controls and broader model discovery remain pending~~ — subsequently delivered. Codex live output/token accounting and remote cancellation acknowledgement remain R5.
 
 
 ## Codex model catalogue picker
@@ -109,7 +160,7 @@ Standalone Buddy now infers coaching, STAR, recruiter, update or master-CV inten
 
 Chat uploads support five files per message, 5 MB each and 100 retained originals. Original base64 bytes are in a separate SQLite table from extraction metadata, included in full backups and excluded from JSON record exports. Users can preview extraction, exclude/reuse files or delete originals; conversation text already saved is not erased by file deletion. Files are not silently imported into the career library or vector index.
 
-Recruiter proposals now retain contact details, work arrangement, employment type, reference, closing/action dates, tags and source notes/extracted text. Reviewed master-CV proposals save editable Word drafts from scratch or using template structure; exact source formatting is not preserved. Templates can be uploaded or located by name/configured folder among available library/vault documents. General directory browsing and authenticated Google Docs integration remain pending.
+Recruiter proposals now retain contact details, work arrangement, employment type, reference, closing/action dates, tags and source notes/extracted text. Reviewed master-CV proposals save editable Word drafts from scratch or using template structure; exact source formatting is not preserved. Templates can be uploaded or located by name/configured folder among available library/vault documents. ~~General directory browsing and Google Docs connector implementation remain pending~~ — delivered in Document connections below. User-owned live Google authorization remains V2.
 
 New/edited opportunities queue automatic tags and saved-criteria assessment when a model is enabled. Existing tags are preserved. Decisions use the enabled decision model or fall back to the enabled chat model. No criterion profile is invented. Assessment does not change stage/outcome. Job state and retry are exposed in Fit assessment; jobs are serialized/coalesced and interrupted work does not automatically resume. Library evidence is used when explicitly opted into the triggering recruiter/update chat; manual opportunity edits default to opportunity-only assessment. No existing opportunities are bulk-processed on upgrade.
 
@@ -133,7 +184,7 @@ Career Library and Settings now offer multiple independently mounted read-only f
 
 ## P1 request controls across opportunity workflows — 29 October 2026
 
-Opportunity chat and manual assessments share the standalone request registry, provider abort signal, progress stages, elapsed time and persisted terminal diagnostics. Views recover the latest scoped status after reopening; explicit retries use the existing send/assess controls. Cancelling prevents late provider replies/assessments from being saved. Automatic review supports cancelling queued or running work, aborting current tag/fit calls and skipping subsequent steps. Already completed tags/assessments remain; cancellation is not a rollback. Queued requests are not automatically retried after restart. Token streaming and provider-side cancellation acknowledgement remain pending.
+Opportunity chat and manual assessments share the standalone request registry, provider abort signal, progress stages, elapsed time and persisted terminal diagnostics. Views recover the latest scoped status after reopening; explicit retries use the existing send/assess controls. Cancelling prevents late provider replies/assessments from being saved. Automatic review supports cancelling queued or running work, aborting current tag/fit calls and skipping subsequent steps. Already completed tags/assessments remain; cancellation is not a rollback. Queued requests are not automatically retried after restart. ~~HTTP token streaming remains pending~~ — delivered in response optimisations below. Codex live output and remote compute cancellation acknowledgement remain R5.
 
 
 ## P2 document layouts and PDF export — 29 October 2026
@@ -147,7 +198,7 @@ Structured categories distinguish master/tailored/general CVs, cover letters, te
 
 ## Plan reconciliation — 29 October 2026
 
-Audited all 39 previously unchecked markers against code, tests and dated verification notes. Corrected stale entries for configured-root browsing/in-place selection, fit-criteria/assessment structure, request state, templates/PDF export and restore UI. Split partial items rather than marking broad milestones complete: isolated restore is implemented; clean/remote service activation, live-board replacement and record reconciliation remain open. Google app authorization remains deferred despite separate connector-assisted private exports. No implementation or runtime state changed during this documentation audit.
+Audited all 39 previously unchecked markers against code, tests and dated verification notes. Corrected stale entries for configured-root browsing/in-place selection, fit-criteria/assessment structure, request state, templates/PDF export and restore UI. Split partial items rather than marking broad milestones complete: isolated restore was implemented at that point; ~~clean-install activation, live-board replacement and reconciliation remain open~~ were subsequently delivered in Reliability/Historical import. Production remote hosting remains R10. Google app authorization remains deferred despite separate connector-assisted private exports. No implementation or runtime state changed during this documentation audit.
 
 
 ## Application packs — 29 October 2026
@@ -205,7 +256,9 @@ Private unused previews expire after 30 minutes, are bounded to 20 pending revie
 ## Independent AI workflow controls
 Settings → AI workflow provides persisted revision-checked switches for job extraction, fit/role assessment and CV/cover drafting, plus independent automatic fit and tagging switches. Defaults retain previous behaviour without writing settings or starting jobs on upgrade. Provider enablement/credentials remain separate requirements. Intake AI, fit/salary/skills actions, decision assessments and generated CV/cover proposals enforce stage policy on the server; unfinished model results are rechecked before publishing, and draft saves respect current policy. Plain chat/coaching, local OCR/reading, manual uploads and Document Studio remain available. Natural-language auto chat is guided by policy and generated recruiter/CV proposals are rejected when disabled; switches do not classify or censor every free-text coaching answer. Existing work is retained and turning switches on does not bulk-process old records.
 
-- [x] Saved opportunity Buddy briefings: source references, generation date/provider/model, stale indication and explicit refresh, alongside the chronological summary.
+## Saved opportunity briefings — 29 October 2026
+
+- [x] ~~Saved opportunity Buddy briefings: source references, generation date/provider/model, stale indication and explicit refresh, alongside the chronological summary.~~
 
 ## Historical record import and duplicate reconciliation — 30 October 2026
 
@@ -222,3 +275,9 @@ AI activity is available in the sidebar. It lists recorded requests with task/pr
 New records carry task/action metadata, prompt version, system-only SHA-256 fingerprint, requested and reported model IDs where supplied, duration/status, numeric usage and optional rate snapshots. Buffered and streamed OpenAI/Claude/Gemini/Ollama/custom accounting is normalized; cumulative stream counters replace earlier snapshots. Missing and partial usage stay distinct from zero. Codex's current text-only helper supplies no token accounting; account usage has no per-request price here. Legacy records remain unchanged and unreported metadata is not reconstructed.
 
 Optional exact provider/requested-model rates are user-entered, currency-specific, revision-protected and saved with each new request. Older estimates retain their rates. Flat estimates omit cache/service-tier/tool/tax differences; partial usage and unavailable rates have no cost estimate. Different currencies are never added together. Retry IDs still work with existing clients, while previous terminal attempts are archived separately and late callbacks cannot overwrite a newer attempt. Request records/rates survive restart, full backup/restore and JSON export. No prompt text, response body, endpoint or API key is added to activity diagnostics. See [AI_ACTIVITY.md](AI_ACTIVITY.md).
+
+## External embedding capability checks and model discovery — 30 October 2026
+
+Settings → Semantic search now discovers embedding models from OpenAI, Ollama and custom OpenAI-compatible endpoints (`POST /api/buddy/embedding-models`), filtering out chat, image, speech and reranker entries while keeping manual model ID entry available. Capability testing (`POST /api/buddy/embedding-test`) works before or after saving for both the built-in local MiniLM model and external providers, sending a short fictional phrase to `/embeddings` or `/api/embed` and verifying non-zero finite vectors and their dimensions. Stored keys are retained only when provider and base URL match. Neither discovery nor capability testing starts vector indexing or sends career documents; external provider indexing remains R2.
+
+</details>

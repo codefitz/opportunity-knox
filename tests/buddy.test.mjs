@@ -10,6 +10,10 @@ import {
   providerText,
   callProvider,
   listProviderModels,
+  listEmbeddingModels,
+  embeddingRequest,
+  embeddingVectors,
+  testEmbeddingProvider,
 } from "../server/buddy-provider.mjs";
 import {
   parseBuddyOutput,
@@ -702,4 +706,190 @@ test("hybrid retrieval recovers synonym evidence under a tight budget and retain
  assert.ok(hybrid.chunks.every(c=>c.sourceId==="a"));assert.equal(JSON.stringify(documents),before);
  assert.deepEqual(retrieveHybridChunks(documents,query,new Map(),190),keyword);
  assert.deepEqual(retrieveHybridChunks(documents,query,new Map([["unselected:1",0.99]]),190).chunks.map(c=>c.sourceId),keyword.chunks.map(c=>c.sourceId));
+});
+
+test("embedding model discovery filters out chat/media/rerank models, suggests embedding defaults and protects keys", async () => {
+  const openaiCfg = config("openai");
+  const openaiFound = await listEmbeddingModels(
+    openaiCfg,
+    async (url, opts) => {
+      assert.equal(url, "https://api.openai.com/v1/models");
+      assert.equal(opts.method, "GET");
+      assert.equal(opts.headers.Authorization, "Bearer private-fixture-key");
+      return new Response(
+        JSON.stringify({
+          data: [
+            { id: "gpt-4o" },
+            { id: "text-embedding-ada-002" },
+            { id: "text-embedding-3-small", display_name: "Embedding 3 Small" },
+            { id: "whisper-1" },
+            { id: "private-fixture-key" },
+          ],
+          has_more: true,
+        }),
+      );
+    },
+  );
+  assert.deepEqual(openaiFound.models, [
+    { id: "text-embedding-ada-002", name: "text-embedding-ada-002" },
+    {
+      id: "text-embedding-3-small",
+      name: "Embedding 3 Small (text-embedding-3-small)",
+    },
+  ]);
+  assert.equal(openaiFound.suggested, "text-embedding-3-small");
+  assert.equal(openaiFound.truncated, true);
+  assert.ok(!JSON.stringify(openaiFound).includes("private-fixture-key"));
+
+  const ollamaCfg = config("ollama");
+  const ollamaFound = await listEmbeddingModels(
+    ollamaCfg,
+    async (url, opts) => {
+      assert.equal(url, "http://host.docker.internal:11434/api/tags");
+      assert.equal(opts.method, "GET");
+      return new Response(
+        JSON.stringify({
+          models: [
+            {
+              name: "chat-example:latest",
+              details: { format: "gguf", family: "llama" },
+            },
+            {
+              name: "nomic-custom:latest",
+              details: { format: "gguf", family: "nomic-bert" },
+            },
+            {
+              name: "mxbai-embed-large:latest",
+              details: { format: "gguf", family: "bert" },
+            },
+            {
+              name: "bge-reranker:latest",
+              details: { format: "gguf", family: "bert" },
+            },
+            { name: "flux-image", details: { format: "safetensors" } },
+          ],
+        }),
+      );
+    },
+  );
+  assert.deepEqual(
+    ollamaFound.models.map((m) => m.id),
+    ["nomic-custom:latest", "mxbai-embed-large:latest"],
+  );
+  assert.equal(ollamaFound.suggested, "nomic-custom:latest");
+
+  const customCfg = config("custom");
+  const customMixed = await listEmbeddingModels(customCfg, async () =>
+    new Response(
+      JSON.stringify({
+        data: [
+          { id: "chat-instruct-v1" },
+          { id: "bge-large-en-v1.5" },
+          { id: "bge-reranker-large" },
+        ],
+      }),
+    ),
+  );
+  assert.deepEqual(customMixed.models, [
+    { id: "bge-large-en-v1.5", name: "bge-large-en-v1.5" },
+  ]);
+  assert.equal(customMixed.suggested, "bge-large-en-v1.5");
+
+  const customFallback = await listEmbeddingModels(customCfg, async () =>
+    new Response(
+      JSON.stringify({
+        data: [{ id: "fictional-company-vectors-v1" }, { id: "gpt-4o-mini" }],
+      }),
+    ),
+  );
+  assert.deepEqual(customFallback.models, [
+    {
+      id: "fictional-company-vectors-v1",
+      name: "fictional-company-vectors-v1",
+    },
+  ]);
+  assert.equal(customFallback.suggested, "fictional-company-vectors-v1");
+});
+
+test("external embedding capability tests verify protocol, vector dimensions, normalization and failure safety", async () => {
+  const unitVec = [1, ...Array(15).fill(0)];
+  const unnormVec = [2, ...Array(15).fill(0)];
+
+  const openaiReq = embeddingRequest(config("openai"), ["Fictional chunk"]);
+  assert.equal(openaiReq.url, "https://api.openai.com/v1/embeddings");
+  assert.equal(openaiReq.body.encoding_format, "float");
+  assert.ok(!JSON.stringify(openaiReq.body).includes("private-fixture-key"));
+
+  const ollamaReq = embeddingRequest(config("ollama"), ["Fictional chunk"]);
+  assert.equal(ollamaReq.url, "http://host.docker.internal:11434/api/embed");
+  assert.deepEqual(ollamaReq.body, {
+    model: "fixture-model",
+    input: ["Fictional chunk"],
+  });
+
+  const openaiRes = await testEmbeddingProvider(
+    config("openai"),
+    async (url, opts) => {
+      assert.equal(url, "https://api.openai.com/v1/embeddings");
+      const sent = JSON.parse(opts.body);
+      assert.deepEqual(sent.input, ["Fictional embedding capability test."]);
+      return new Response(
+        JSON.stringify({
+          model: "text-embedding-3-small",
+          data: [{ index: 0, embedding: unitVec }],
+        }),
+      );
+    },
+  );
+  assert.equal(openaiRes.ok, true);
+  assert.equal(openaiRes.check, "embedding");
+  assert.equal(openaiRes.dimensions, 16);
+  assert.equal(openaiRes.normalized, true);
+  assert.equal(openaiRes.reportedModel, "text-embedding-3-small");
+
+  const ollamaRes = await testEmbeddingProvider(
+    config("ollama"),
+    async (url) => {
+      assert.equal(url, "http://host.docker.internal:11434/api/embed");
+      return new Response(
+        JSON.stringify({
+          model: "nomic-embed-text:latest",
+          embeddings: [unnormVec],
+        }),
+      );
+    },
+  );
+  assert.equal(ollamaRes.ok, true);
+  assert.equal(ollamaRes.dimensions, 16);
+  assert.equal(ollamaRes.normalized, false);
+
+  // Rejects invalid vectors (short, NaN, zero norm, mismatched count) and chat-only HTTP errors safely
+  assert.throws(() =>
+    embeddingVectors("openai", { data: [{ embedding: [1, 2, 3] }] }, 1),
+  );
+  assert.throws(() =>
+    embeddingVectors(
+      "openai",
+      { data: [{ embedding: [NaN, ...Array(15).fill(0)] }] },
+      1,
+    ),
+  );
+  assert.throws(() =>
+    embeddingVectors(
+      "ollama",
+      { embeddings: [Array(16).fill(0)] },
+      1,
+    ),
+  );
+  await assert.rejects(
+    () =>
+      testEmbeddingProvider(
+        config("custom"),
+        async () => new Response("private-fixture-key", { status: 404 }),
+      ),
+    (err) =>
+      err.status === 502 &&
+      /supports embeddings/i.test(err.message) &&
+      !err.message.includes("private-fixture-key"),
+  );
 });
