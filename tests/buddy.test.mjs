@@ -14,6 +14,13 @@ import {
   embeddingRequest,
   embeddingVectors,
   testEmbeddingProvider,
+  defaultEmbedding,
+  publicEmbedding,
+  updateEmbeddingSettings,
+  testVectorBackend,
+  upsertExternalVectors,
+  queryExternalVectors,
+  deleteExternalVectors,
 } from "../server/buddy-provider.mjs";
 import {
   parseBuddyOutput,
@@ -892,4 +899,110 @@ test("external embedding capability tests verify protocol, vector dimensions, no
       /supports embeddings/i.test(err.message) &&
       !err.message.includes("private-fixture-key"),
   );
+});
+
+test("vector backend settings, Qdrant and custom HTTP vector store adapters validate URLs, collections and payloads", async () => {
+  const base = defaultEmbedding();
+  assert.equal(base.vectorBackend, "sqlite");
+  const updated = updateEmbeddingSettings(base, {
+    revision: base.revision,
+    provider: "builtin",
+    vectorBackend: "qdrant",
+    vectorUrl: "http://localhost:6333",
+    vectorCollection: "fictional_collection",
+    vectorApiKey: "fictional-vector-secret",
+  });
+  assert.equal(updated.vectorBackend, "qdrant");
+  assert.equal(updated.vectorApiKey, "fictional-vector-secret");
+  const pub = publicEmbedding(updated);
+  assert.equal(pub.hasVectorKey, true);
+  assert.equal(pub.vectorApiKey, undefined);
+
+  // Endpoint change without new key clears stored vectorApiKey
+  const changedEndpoint = updateEmbeddingSettings(updated, {
+    revision: updated.revision,
+    provider: "builtin",
+    vectorBackend: "custom",
+    vectorUrl: "http://localhost:8080",
+    vectorCollection: "fictional_collection",
+  });
+  assert.equal(changedEndpoint.vectorApiKey, "");
+
+  // Rejects invalid collection name and insecure non-local HTTP vectorUrl
+  assert.throws(() =>
+    updateEmbeddingSettings(base, {
+      revision: base.revision,
+      vectorBackend: "qdrant",
+      vectorUrl: "http://localhost:6333",
+      vectorCollection: "../bad-collection",
+    }),
+  );
+  assert.throws(() =>
+    updateEmbeddingSettings(base, {
+      revision: base.revision,
+      vectorBackend: "custom",
+      vectorUrl: "http://93.184.216.34:8080",
+      vectorCollection: "fictional_collection",
+    }),
+  );
+
+  // Custom HTTP vector store adapter
+  const customCfg = updateEmbeddingSettings(base, {
+    revision: base.revision,
+    provider: "builtin",
+    vectorBackend: "custom",
+    vectorUrl: "http://localhost:8080",
+    vectorCollection: "fictional_collection",
+    vectorApiKey: "fictional-custom-key",
+  });
+  const calls = [];
+  const mockFetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method || "GET", body: init.body ? JSON.parse(init.body) : null });
+    if (url.endsWith("/health")) return new Response(JSON.stringify({ ok: true }));
+    if (url.endsWith("/upsert")) return new Response(JSON.stringify({ ok: true }));
+    if (url.endsWith("/query"))
+      return new Response(
+        JSON.stringify({
+          matches: [
+            { sourceId: "doc-1", index: 1, hash: "hash-1", score: 0.91 },
+          ],
+        }),
+      );
+    if (url.endsWith("/delete")) return new Response(JSON.stringify({ ok: true }));
+    return new Response("not found", { status: 404 });
+  };
+  const health = await testVectorBackend(customCfg, mockFetch);
+  assert.equal(health.ok, true);
+  assert.equal(health.vectorBackend, "custom");
+
+  await upsertExternalVectors(
+    customCfg,
+    {
+      sourceId: "doc-1",
+      model: "builtin",
+      fingerprint: "fp-1",
+      dimensions: 16,
+      vectors: [{ index: 1, hash: "hash-1", values: Array(16).fill(0.25) }],
+    },
+    mockFetch,
+  );
+  assert.equal(calls.at(-1).url, "http://localhost:8080/upsert");
+  assert.equal("text" in calls.at(-1).body.vectors[0], false);
+
+  const matches = await queryExternalVectors(
+    customCfg,
+    {
+      model: "builtin",
+      sourceIds: ["doc-1"],
+      vector: Array(16).fill(0.25),
+      limit: 10,
+    },
+    mockFetch,
+  );
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].sourceId, "doc-1");
+  assert.equal(matches[0].score, 0.91);
+
+  await deleteExternalVectors(customCfg, { sourceIds: ["doc-1"] }, mockFetch);
+  assert.equal(calls.at(-1).url, "http://localhost:8080/delete");
 });

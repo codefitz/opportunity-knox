@@ -2773,6 +2773,102 @@ test('Career Buddy uses hybrid excerpts only from selected sources, persists cov
  await f.restart();await f.login();const saved=(await f.request('/api/opportunities/'+op.id+'/buddy')).data.messages.find(m=>m.id===answer.id);assert.equal(saved.context.retrieval.mode,'hybrid');assert.ok(saved.sources[0].excerpts.length);
 });
 
+test('external embedding providers and Qdrant vector backend index and retrieve selected sources without exposing vector keys or raw text',async t=>{
+ let context,selectedId,hiddenId,collectionSize=null;
+ const points=new Map();
+ const f=await fixture(t,{
+  buddyFetch:async(url,opts={})=>{
+   const method=opts.method||'GET';
+   if(url==='http://localhost:11434/api/embed'){
+    const body=JSON.parse(opts.body);
+    const inputs=Array.isArray(body.input)?body.input:[body.input];
+    return new Response(JSON.stringify({model:body.model,embeddings:inputs.map(text=>text.includes('leadership')||text.includes('coached')?[3,4,...Array(14).fill(0)]:[0,1,...Array(14).fill(0)])}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections'&&method==='GET'){
+    assert.equal(opts.headers?.['api-key'],'fictional-qdrant-secret');
+    return new Response(JSON.stringify({result:{collections:[]}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections/fictional_vectors'&&method==='GET'){
+    assert.equal(opts.headers?.['api-key'],'fictional-qdrant-secret');
+    if(!collectionSize)return new Response(JSON.stringify({status:{error:'Not found'}}),{status:404,headers:{'Content-Type':'application/json'}});
+    return new Response(JSON.stringify({result:{config:{params:{vectors:{size:collectionSize}}}}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections/fictional_vectors'&&method==='PUT'){
+    collectionSize=JSON.parse(opts.body).vectors.size;
+    return new Response(JSON.stringify({result:true}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections/fictional_vectors/points/delete?wait=true'&&method==='POST'){
+    return new Response(JSON.stringify({result:{status:'acknowledged'}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections/fictional_vectors/points?wait=true'&&method==='PUT'){
+    for(const pt of JSON.parse(opts.body).points){
+     assert.equal('text' in pt.payload,false);
+     points.set(pt.id,pt);
+    }
+    return new Response(JSON.stringify({result:{status:'completed'}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   if(url==='http://localhost:6333/collections/fictional_vectors/points/search'&&method==='POST'){
+    const qVec=JSON.parse(opts.body).vector;
+    const res=[...points.values()].map(pt=>({id:pt.id,score:pt.vector.reduce((s,n,i)=>s+n*qVec[i],0),payload:pt.payload}));
+    return new Response(JSON.stringify({result:res}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+   return buddyResponse(buddyReply({reply:'Fictional external hybrid coaching.',sourceIds:[selectedId,hiddenId]}));
+  }
+ });
+ await f.setup();await enableBuddy(f);
+ const initial=(await f.request('/api/buddy/embedding-settings')).data;
+ const configured=await f.request('/api/buddy/embedding-settings',{
+  method:'PATCH',
+  body:{
+   revision:initial.revision,
+   provider:'ollama',
+   baseUrl:'http://localhost:11434',
+   model:'fictional-embed:latest',
+   vectorBackend:'qdrant',
+   vectorUrl:'http://localhost:6333',
+   vectorCollection:'fictional_vectors',
+   vectorApiKey:'fictional-qdrant-secret'
+  }
+ });
+ assert.equal(configured.status,200);
+ assert.equal(configured.data.vectorBackend,'qdrant');
+ assert.equal(configured.data.hasVectorKey,true);
+ assert.equal(configured.data.vectorApiKey,undefined);
+ assert.equal(JSON.stringify(configured.data).includes('fictional-qdrant-secret'),false);
+
+ const tested=await f.request('/api/buddy/embedding-test',{method:'POST',body:{revision:configured.data.revision,provider:'ollama',baseUrl:'http://localhost:11434',model:'fictional-embed:latest',vectorBackend:'qdrant',vectorUrl:'http://localhost:6333',vectorCollection:'fictional_vectors'}});
+ assert.equal(tested.status,200);
+ assert.equal(tested.data.dimensions,16);
+ assert.equal(tested.data.vectorBackend,'qdrant');
+ assert.equal(tested.data.vectorStoreOk,true);
+
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ async function upload(name,text){return (await f.request('/api/documents',{method:'POST',body:{name,kind:'cv',contentBase64:Buffer.from(text).toString('base64')}})).data;}
+ const source=await upload('Fictional external CV.txt','Gardening and baking. '.repeat(2100)+'I coached colleagues and mentored engineers.');selectedId=source.id;
+ const hidden=await upload('Fictional external secret.txt','Unselected external secret leadership evidence.');hiddenId=hidden.id;
+
+ const started=await f.request('/api/buddy/vector-index',{method:'POST',body:{documentIds:[source.id,hidden.id]}});
+ assert.equal(started.status,200);
+ for(let i=0;i<200;i++){const state=(await f.request('/api/buddy/vector-index')).data;if(state.job.status==='completed')break;await new Promise(r=>setTimeout(r,5));}
+ const idxState=(await f.request('/api/buddy/vector-index')).data;
+ assert.equal(idxState.provider,'ollama');
+ assert.equal(idxState.vectorBackend,'qdrant');
+ assert.equal(idxState.dimensions,16);
+ assert.ok(points.size>=2);
+
+ const chat=await buddyChat(f,op.id,{message:'What leadership evidence can I highlight?',documentIds:[source.id]});
+ assert.equal(chat.status,200);
+ const answer=chat.data.messages.at(-1);
+ assert.equal(answer.context.retrieval.mode,'hybrid');
+ assert.equal(answer.context.retrieval.indexedSources,1);
+ assert.ok(context.context.excerpts.some(c=>c.text.includes('coached')));
+ assert.equal(context.context.excerpts.some(c=>c.sourceId===hidden.id),false);
+ assert.equal(answer.sourceIds.includes(hidden.id),false);
+ const exported=await f.request('/api/export');
+ assert.equal(JSON.stringify(exported.data).includes('fictional-qdrant-secret'),false);
+});
+
 test('criteria assessments use independent private settings, persist snapshots, reject edits and become stale',async t=>{
  let payload,output,sourceId;
  const f=await fixture(t,{buddyFetch:async(_,opts)=>{payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply(output));}});await f.setup();

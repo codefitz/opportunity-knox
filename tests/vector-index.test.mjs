@@ -263,3 +263,227 @@ test("semantic search excludes sources changed, cleared or deselected while the 
   assert.equal(result.documents[0].chunks.length, 0);
   assert.equal(result.scores.size, 0);
 });
+
+test("external embedding providers index non-384 vectors in SQLite, normalize vectors and invalidate on model change", async (t) => {
+  const f = await fixture(t);
+  let embedCalls = 0;
+  f.ctx.buddyFetch = async (url, init) => {
+    embedCalls++;
+    assert.equal(url, "http://localhost:11434/api/embed");
+    const body = JSON.parse(init.body);
+    assert.equal(body.model, "nomic-embed-text");
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    return new Response(
+      JSON.stringify({
+        model: "nomic-embed-text",
+        embeddings: inputs.map((_, idx) => [
+          3,
+          4,
+          ...Array(766).fill(idx === 0 ? 0 : 0),
+        ]),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  f.ctx.putConfig("embeddingSettings", {
+    provider: "ollama",
+    model: "nomic-embed-text",
+    baseUrl: "http://localhost:11434",
+    vectorBackend: "sqlite",
+  });
+  const active = await f.reopen();
+  assert.equal(active.status().provider, "ollama");
+  assert.equal(active.status().model, "nomic-embed-text");
+  assert.equal(active.status().configured, true);
+  active.start(["fiction"]);
+  const done = await wait(active);
+  assert.equal(done.job.status, "completed");
+  assert.equal(done.dimensions, 768);
+  assert.equal(done.sources[0].status, "indexed");
+  assert.equal(done.sources[0].chunks, 3);
+  assert.equal(embedCalls, 2);
+
+  // Verify stored vectors are normalized to unit length (3/5 = 0.6, 4/5 = 0.8)
+  const stored = JSON.parse(
+    f.db.prepare("SELECT data FROM document_vectors WHERE id=?").get("fiction")
+      .data,
+  );
+  assert.equal(stored.dimensions, 768);
+  assert.ok(Math.abs(stored.vectors[0].values[0] - 0.6) < 1e-6);
+  assert.ok(Math.abs(stored.vectors[0].values[1] - 0.8) < 1e-6);
+
+  // Hybrid search uses external embedding provider and matches normalized vectors
+  const docs = await f.ctx.indexDocuments(["fiction"]);
+  active.start(["fiction"]);
+  await wait(active);
+  const searchRes = await active.search(docs, "fictional leadership");
+  assert.equal(searchRes.mode, "hybrid");
+  assert.equal(searchRes.indexedSources, 1);
+  assert.equal(searchRes.scores.size, 3);
+  assert.ok(Math.abs(searchRes.scores.get("fiction:1") - 1) < 1e-5);
+
+  const selected = await active.selectSources("fictional leadership", [
+    { id: "fiction", name: "Fictional experience.txt" },
+  ]);
+  assert.deepEqual(selected, ["fiction"]);
+
+  // Changing the embedding model invalidates the previous model's vectors without deleting files
+  f.ctx.putConfig("embeddingSettings", {
+    provider: "ollama",
+    model: "mxbai-embed-large",
+    baseUrl: "http://localhost:11434",
+    vectorBackend: "sqlite",
+  });
+  assert.equal(active.status().sources[0].status, "stale");
+  const afterModelChange = await active.search(docs, "fictional leadership");
+  assert.equal(afterModelChange.mode, "keyword");
+  assert.equal(afterModelChange.reason, "not-indexed");
+});
+
+test("external vector backends (Qdrant and custom HTTP) store and query vectors without raw text and enforce selection and hash boundaries", async (t) => {
+  const f = await fixture(t);
+  const qdrantPoints = new Map();
+  let collectionDims = null;
+  let qdrantDeleted = 0;
+
+  f.ctx.buddyFetch = async (url, init = {}) => {
+    const method = init.method || "GET";
+    if (url === "http://localhost:11434/api/embed") {
+      const body = JSON.parse(init.body);
+      const inputs = Array.isArray(body.input) ? body.input : [body.input];
+      return new Response(
+        JSON.stringify({
+          model: body.model,
+          embeddings: inputs.map(() => [0.6, 0.8, ...Array(14).fill(0)]),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (
+      url === "http://localhost:6333/collections/fictional_chunks" &&
+      method === "GET"
+    ) {
+      if (!collectionDims)
+        return new Response(JSON.stringify({ status: { error: "Not found" } }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      return new Response(
+        JSON.stringify({
+          result: {
+            config: { params: { vectors: { size: collectionDims } } },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (
+      url === "http://localhost:6333/collections/fictional_chunks" &&
+      method === "PUT"
+    ) {
+      const body = JSON.parse(init.body);
+      collectionDims = body.vectors.size;
+      return new Response(JSON.stringify({ result: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (
+      url ===
+        "http://localhost:6333/collections/fictional_chunks/points/delete?wait=true" &&
+      method === "POST"
+    ) {
+      qdrantDeleted++;
+      return new Response(JSON.stringify({ result: { status: "acknowledged" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (
+      url ===
+        "http://localhost:6333/collections/fictional_chunks/points?wait=true" &&
+      method === "PUT"
+    ) {
+      const body = JSON.parse(init.body);
+      for (const pt of body.points) {
+        // Ensure raw document text is never sent to the external vector store
+        assert.equal("text" in pt.payload, false);
+        qdrantPoints.set(pt.id, pt);
+      }
+      return new Response(JSON.stringify({ result: { status: "completed" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (
+      url ===
+        "http://localhost:6333/collections/fictional_chunks/points/search" &&
+      method === "POST"
+    ) {
+      const points = [...qdrantPoints.values()].map((pt) => ({
+        id: pt.id,
+        score: 0.94,
+        payload: pt.payload,
+      }));
+      // Also inject an unselected source from the external store to verify client-side boundary filtering
+      points.push({
+        id: "unselected-uuid",
+        score: 0.99,
+        payload: {
+          sourceId: "unselected-doc",
+          index: 1,
+          hash: "forged",
+        },
+      });
+      return new Response(JSON.stringify({ result: points }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw Error("Unexpected URL: " + method + " " + url);
+  };
+
+  f.ctx.putConfig("embeddingSettings", {
+    provider: "ollama",
+    model: "nomic-embed-text",
+    baseUrl: "http://localhost:11434",
+    vectorBackend: "qdrant",
+    vectorUrl: "http://localhost:6333",
+    vectorCollection: "fictional_chunks",
+  });
+
+  const active = await f.reopen();
+  assert.equal(active.status().vectorBackend, "qdrant");
+  assert.equal(active.status().vectorCollection, "fictional_chunks");
+  active.start(["fiction"]);
+  const done = await wait(active);
+  assert.equal(done.job.status, "completed");
+  assert.equal(done.dimensions, 16);
+  assert.equal(collectionDims, 16);
+  assert.equal(qdrantPoints.size, 3);
+
+  const metaRow = JSON.parse(
+    f.db.prepare("SELECT data FROM document_vectors WHERE id=?").get("fiction")
+      .data,
+  );
+  assert.equal(metaRow.vectorBackend, "qdrant");
+  assert.equal(metaRow.vectorCollection, "fictional_chunks");
+  assert.equal(metaRow.vectors.length, 3);
+
+  const docs = await f.ctx.indexDocuments(["fiction"]);
+  active.start(["fiction"]);
+  await wait(active);
+
+  const searchRes = await active.search(docs, "fictional query");
+  assert.equal(searchRes.mode, "hybrid");
+  assert.equal(searchRes.scores.size, 3);
+  assert.equal(searchRes.scores.has("unselected-doc:1"), false);
+  assert.equal(searchRes.scores.get("fiction:1"), 0.94);
+
+  // If Qdrant returns a tampered chunk hash, it is rejected by local SQLite hash verification
+  for (const pt of qdrantPoints.values()) {
+    pt.payload.hash = "tampered-hash";
+  }
+  const tamperedRes = await active.search(docs, "fictional query");
+  assert.equal(tamperedRes.scores.size, 0);
+});

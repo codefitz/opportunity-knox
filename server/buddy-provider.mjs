@@ -27,6 +27,40 @@ export const EMBEDDING_PROVIDERS = {
   ollama: PROVIDERS.ollama,
   custom: PROVIDERS.custom,
 };
+export const VECTOR_BACKENDS = {
+  sqlite: { name: "Built-in local SQLite (default)", baseUrl: "" },
+  qdrant: {
+    name: "Qdrant vector database",
+    baseUrl: "http://host.docker.internal:6333",
+  },
+  custom: { name: "Custom HTTP vector store", baseUrl: "" },
+};
+export function defaultEmbedding(localModel = "Xenova/all-MiniLM-L6-v2") {
+  return {
+    revision: 1,
+    provider: "builtin",
+    model: localModel,
+    baseUrl: "",
+    apiKey: "",
+    vectorBackend: "sqlite",
+    vectorUrl: "",
+    vectorCollection: "opportunity_knox_vectors",
+    vectorApiKey: "",
+  };
+}
+export function publicEmbedding(config, localModel = "Xenova/all-MiniLM-L6-v2") {
+  const { apiKey, vectorApiKey, ...safe } = {
+    ...defaultEmbedding(localModel),
+    ...config,
+  };
+  return {
+    ...safe,
+    hasKey: Boolean(apiKey),
+    hasVectorKey: Boolean(vectorApiKey),
+    providers: EMBEDDING_PROVIDERS,
+    vectorBackends: VECTOR_BACKENDS,
+  };
+}
 export function buddyError(status, message) {
   const error = new Error(message);
   error.status = status;
@@ -493,7 +527,10 @@ async function providerJSON(
       await response.body?.cancel();
       const error = buddyError(
         502,
-        PROVIDERS[config.provider].name +
+        (PROVIDERS[config.provider]?.name ||
+          EMBEDDING_PROVIDERS[config.provider]?.name ||
+          VECTOR_BACKENDS[config.vectorBackend]?.name ||
+          "The API server") +
           " returned HTTP " +
           response.status +
           ". " +
@@ -711,6 +748,469 @@ export function assertEmbeddingConfigured(config) {
   if (config.provider === "openai" && !config.apiKey)
     throw buddyError(400, "Add an API key for OpenAI embeddings.");
   validateBaseUrl(config.baseUrl);
+}
+
+export function assertVectorBackendConfigured(config) {
+  const backend = config.vectorBackend || "sqlite";
+  if (backend === "sqlite") return;
+  if (!["qdrant", "custom"].includes(backend))
+    throw buddyError(400, "Choose a supported vector store backend.");
+  if (!config.vectorUrl)
+    throw buddyError(
+      400,
+      "Enter a vector store URL in Semantic search settings.",
+    );
+  validateBaseUrl(config.vectorUrl);
+  const col = config.vectorCollection || "opportunity_knox_vectors";
+  if (typeof col !== "string" || !/^[a-zA-Z0-9._-]{1,120}$/.test(col))
+    throw buddyError(
+      400,
+      "Use letters, numbers, dots, underscores or hyphens for the vector collection name.",
+    );
+}
+
+export function updateEmbeddingSettings(
+  previous,
+  body,
+  { requireRevision = true, localModel = "Xenova/all-MiniLM-L6-v2" } = {},
+) {
+  const current = { ...defaultEmbedding(localModel), ...previous };
+  if (!body || typeof body !== "object" || !Object.keys(body).length) {
+    if (requireRevision)
+      throw buddyError(
+        409,
+        "Embedding settings changed. Reload before saving.",
+      );
+    return current;
+  }
+  if (
+    (requireRevision || body.revision !== undefined) &&
+    body.revision !== current.revision
+  )
+    throw buddyError(
+      409,
+      "Embedding settings changed. Reload before saving.",
+    );
+  if (
+    Object.keys(body).some(
+      (key) =>
+        ![
+          "revision",
+          "provider",
+          "model",
+          "baseUrl",
+          "apiKey",
+          "clearKey",
+          "vectorBackend",
+          "vectorUrl",
+          "vectorCollection",
+          "vectorApiKey",
+          "clearVectorKey",
+        ].includes(key),
+    )
+  )
+    throw buddyError(400, "Unsupported embedding setting.");
+  const next = { ...current };
+  const targetProvider = body.provider ?? current.provider ?? "builtin";
+  if (!Object.hasOwn(EMBEDDING_PROVIDERS, targetProvider))
+    throw buddyError(400, "Choose a supported embedding provider.");
+  if (targetProvider === "builtin") {
+    next.provider = "builtin";
+    next.model = localModel;
+    next.baseUrl = "";
+    next.apiKey = "";
+  } else {
+    if (targetProvider !== current.provider) {
+      next.apiKey = "";
+      next.model = "";
+      next.baseUrl = EMBEDDING_PROVIDERS[targetProvider].baseUrl;
+    }
+    next.provider = targetProvider;
+    if (body.model !== undefined)
+      next.model = text(body.model, 200, "embedding model ID");
+    if (body.baseUrl !== undefined)
+      next.baseUrl = text(body.baseUrl, 2000, "embedding API base URL");
+    if (next.provider === "openai")
+      next.baseUrl = EMBEDDING_PROVIDERS.openai.baseUrl;
+    else if (next.baseUrl) next.baseUrl = validateBaseUrl(next.baseUrl);
+    if (body.clearKey !== undefined && typeof body.clearKey !== "boolean")
+      throw buddyError(400, "Clear key must be true or false.");
+    if (
+      ["custom", "ollama"].includes(next.provider) &&
+      next.baseUrl !== current.baseUrl
+    )
+      next.apiKey = "";
+    if (body.clearKey) next.apiKey = "";
+    if (body.apiKey !== undefined && body.apiKey !== "")
+      next.apiKey = text(body.apiKey, 4000, "embedding API key");
+  }
+  const prevBackend = current.vectorBackend || "sqlite";
+  const targetBackend = body.vectorBackend ?? prevBackend;
+  if (!Object.hasOwn(VECTOR_BACKENDS, targetBackend))
+    throw buddyError(400, "Choose a supported vector store backend.");
+  if (targetBackend === "sqlite") {
+    next.vectorBackend = "sqlite";
+    next.vectorUrl = "";
+    next.vectorCollection =
+      current.vectorCollection || "opportunity_knox_vectors";
+    next.vectorApiKey = "";
+  } else {
+    if (targetBackend !== prevBackend) {
+      next.vectorApiKey = "";
+      next.vectorUrl = VECTOR_BACKENDS[targetBackend].baseUrl;
+    }
+    next.vectorBackend = targetBackend;
+    if (body.vectorUrl !== undefined)
+      next.vectorUrl = text(body.vectorUrl, 2000, "vector store URL");
+    if (next.vectorUrl) next.vectorUrl = validateBaseUrl(next.vectorUrl);
+    else if (requireRevision)
+      throw buddyError(
+        400,
+        "Enter a vector store URL in Semantic search settings.",
+      );
+    if (body.vectorCollection !== undefined) {
+      const col = text(body.vectorCollection, 120, "vector collection name");
+      if (!col || !/^[a-zA-Z0-9._-]+$/.test(col))
+        throw buddyError(
+          400,
+          "Use letters, numbers, dots, underscores or hyphens for the vector collection name.",
+        );
+      next.vectorCollection = col;
+    } else if (!next.vectorCollection) {
+      next.vectorCollection = "opportunity_knox_vectors";
+    }
+    if (
+      body.clearVectorKey !== undefined &&
+      typeof body.clearVectorKey !== "boolean"
+    )
+      throw buddyError(400, "Clear vector key must be true or false.");
+    if (next.vectorUrl !== (current.vectorUrl || "")) next.vectorApiKey = "";
+    if (body.clearVectorKey) next.vectorApiKey = "";
+    if (body.vectorApiKey !== undefined && body.vectorApiKey !== "")
+      next.vectorApiKey = text(
+        body.vectorApiKey,
+        4000,
+        "vector store API key",
+      );
+  }
+  next.revision = (current.revision || 1) + 1;
+  return next;
+}
+
+function vectorHeaders(config, hasBody = false) {
+  const headers = {};
+  if (hasBody) headers["Content-Type"] = "application/json";
+  if (config.vectorApiKey) {
+    headers.Authorization = "Bearer " + config.vectorApiKey;
+    if (config.vectorBackend === "qdrant")
+      headers["api-key"] = config.vectorApiKey;
+  }
+  return headers;
+}
+
+function qdrantPointId(sourceId, index) {
+  const hex = createHash("sha256")
+    .update(`${sourceId}:${index}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+export async function testVectorBackend(
+  config,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  assertVectorBackendConfigured(config);
+  const backend = config.vectorBackend || "sqlite";
+  if (backend === "sqlite") return { ok: true, vectorBackend: "sqlite" };
+  const url =
+    backend === "qdrant"
+      ? config.vectorUrl + "/collections"
+      : config.vectorUrl + "/health";
+  const data = await providerJSON(
+    { ...config, provider: "custom" },
+    { method: "GET", url, headers: vectorHeaders(config) },
+    fetcher,
+    resolve,
+    15000,
+  );
+  if (
+    !data ||
+    typeof data !== "object" ||
+    data.ok === false ||
+    data.status === "error" ||
+    (backend === "qdrant" &&
+      !Array.isArray(data.result?.collections) &&
+      data.status !== "ok")
+  )
+    throw buddyError(
+      502,
+      "The vector store did not return a valid status response.",
+    );
+  return {
+    ok: true,
+    vectorBackend: backend,
+    vectorCollection: config.vectorCollection || "opportunity_knox_vectors",
+  };
+}
+
+export async function upsertExternalVectors(
+  config,
+  payload,
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  assertVectorBackendConfigured(config);
+  const backend = config.vectorBackend || "sqlite";
+  if (backend === "sqlite") return;
+  const col = config.vectorCollection || "opportunity_knox_vectors";
+  const ctx = { ...config, provider: "custom" };
+  if (backend === "qdrant") {
+    const colUrl =
+      config.vectorUrl + "/collections/" + encodeURIComponent(col);
+    let needCreate = false;
+    try {
+      const info = await providerJSON(
+        ctx,
+        { method: "GET", url: colUrl, headers: vectorHeaders(config) },
+        fetcher,
+        resolve,
+        15000,
+      );
+      const existingSize = info?.result?.config?.params?.vectors?.size;
+      if (
+        Number.isInteger(existingSize) &&
+        existingSize !== payload.dimensions
+      ) {
+        await providerJSON(
+          ctx,
+          { method: "DELETE", url: colUrl, headers: vectorHeaders(config) },
+          fetcher,
+          resolve,
+          15000,
+        );
+        needCreate = true;
+      }
+    } catch (error) {
+      if (error.providerStatus === 404) needCreate = true;
+      else throw error;
+    }
+    if (needCreate) {
+      await providerJSON(
+        ctx,
+        {
+          method: "PUT",
+          url: colUrl,
+          headers: vectorHeaders(config, true),
+          body: {
+            vectors: { size: payload.dimensions, distance: "Cosine" },
+          },
+        },
+        fetcher,
+        resolve,
+        15000,
+      );
+    }
+    await providerJSON(
+      ctx,
+      {
+        method: "POST",
+        url: colUrl + "/points/delete?wait=true",
+        headers: vectorHeaders(config, true),
+        body: {
+          filter: {
+            must: [{ key: "sourceId", match: { value: payload.sourceId } }],
+          },
+        },
+      },
+      fetcher,
+      resolve,
+      15000,
+    );
+    await providerJSON(
+      ctx,
+      {
+        method: "PUT",
+        url: colUrl + "/points?wait=true",
+        headers: vectorHeaders(config, true),
+        body: {
+          points: payload.vectors.map((v) => ({
+            id: qdrantPointId(payload.sourceId, v.index),
+            vector: v.values,
+            payload: {
+              sourceId: payload.sourceId,
+              index: v.index,
+              hash: v.hash,
+              fingerprint: payload.fingerprint,
+              model: payload.model,
+            },
+          })),
+        },
+      },
+      fetcher,
+      resolve,
+      30000,
+    );
+    return;
+  }
+  await providerJSON(
+    ctx,
+    {
+      method: "POST",
+      url: config.vectorUrl + "/upsert",
+      headers: vectorHeaders(config, true),
+      body: {
+        collection: col,
+        sourceId: payload.sourceId,
+        model: payload.model,
+        fingerprint: payload.fingerprint,
+        dimensions: payload.dimensions,
+        vectors: payload.vectors,
+      },
+    },
+    fetcher,
+    resolve,
+    30000,
+  );
+}
+
+export async function queryExternalVectors(
+  config,
+  { model, sourceIds, vector, limit = 200 },
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  assertVectorBackendConfigured(config);
+  const backend = config.vectorBackend || "sqlite";
+  if (backend === "sqlite") return [];
+  const col = config.vectorCollection || "opportunity_knox_vectors";
+  const ctx = { ...config, provider: "custom" };
+  if (backend === "qdrant") {
+    const colUrl =
+      config.vectorUrl + "/collections/" + encodeURIComponent(col);
+    const data = await providerJSON(
+      ctx,
+      {
+        method: "POST",
+        url: colUrl + "/points/search",
+        headers: vectorHeaders(config, true),
+        body: {
+          vector,
+          limit,
+          with_payload: true,
+          filter: {
+            must: [
+              { key: "model", match: { value: model } },
+              { key: "sourceId", match: { any: sourceIds } },
+            ],
+          },
+        },
+      },
+      fetcher,
+      resolve,
+      15000,
+    );
+    const rows = Array.isArray(data?.result) ? data.result : [];
+    return rows.map((item) => ({
+      sourceId: item?.payload?.sourceId,
+      index: item?.payload?.index,
+      hash: item?.payload?.hash,
+      fingerprint: item?.payload?.fingerprint,
+      model: item?.payload?.model,
+      score: item?.score,
+    }));
+  }
+  const data = await providerJSON(
+    ctx,
+    {
+      method: "POST",
+      url: config.vectorUrl + "/query",
+      headers: vectorHeaders(config, true),
+      body: { collection: col, model, sourceIds, vector, limit },
+    },
+    fetcher,
+    resolve,
+    15000,
+  );
+  const rows = Array.isArray(data?.matches)
+    ? data.matches
+    : Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.data)
+        ? data.data
+        : [];
+  return rows.map((item) => ({
+    sourceId: item?.sourceId,
+    index: item?.index,
+    hash: item?.hash,
+    fingerprint: item?.fingerprint,
+    model: item?.model,
+    score: item?.score,
+  }));
+}
+
+export async function deleteExternalVectors(
+  config,
+  { sourceIds = [], clear = false },
+  fetcher = fetch,
+  resolve = systemLookup,
+) {
+  assertVectorBackendConfigured(config);
+  const backend = config.vectorBackend || "sqlite";
+  if (backend === "sqlite") return;
+  const col = config.vectorCollection || "opportunity_knox_vectors";
+  const ctx = { ...config, provider: "custom" };
+  if (backend === "qdrant") {
+    const colUrl =
+      config.vectorUrl + "/collections/" + encodeURIComponent(col);
+    try {
+      if (clear) {
+        await providerJSON(
+          ctx,
+          { method: "DELETE", url: colUrl, headers: vectorHeaders(config) },
+          fetcher,
+          resolve,
+          15000,
+        );
+      } else if (sourceIds.length) {
+        await providerJSON(
+          ctx,
+          {
+            method: "POST",
+            url: colUrl + "/points/delete?wait=true",
+            headers: vectorHeaders(config, true),
+            body: {
+              filter: {
+                must: [{ key: "sourceId", match: { any: sourceIds } }],
+              },
+            },
+          },
+          fetcher,
+          resolve,
+          15000,
+        );
+      }
+    } catch (error) {
+      if (error.providerStatus !== 404) throw error;
+    }
+    return;
+  }
+  await providerJSON(
+    ctx,
+    {
+      method: "POST",
+      url: config.vectorUrl + "/delete",
+      headers: vectorHeaders(config, true),
+      body: {
+        collection: col,
+        ...(clear ? { clear: true } : { sourceIds }),
+      },
+    },
+    fetcher,
+    resolve,
+    15000,
+  );
 }
 
 export function embeddingRequest(config, texts) {

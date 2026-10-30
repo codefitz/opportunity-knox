@@ -21,6 +21,12 @@ type Job = {
 };
 type Status = {
   model: string;
+  provider?: string;
+  providerName?: string;
+  configured?: boolean;
+  vectorBackend?: string;
+  vectorBackendName?: string;
+  vectorCollection?: string;
   revision: string;
   dimensions: number;
   sources: Source[];
@@ -105,7 +111,20 @@ export default function VectorIndex({
       </div>
       <p>
         {sources.filter((s) => s.status === "indexed").length} of{" "}
-        {sources.length} sources indexed · MiniLM · 384 dimensions · Local CPU
+        {sources.length} sources indexed ·{" "}
+        {data?.provider && data.provider !== "builtin"
+          ? `${data.model || data.providerName || data.provider}`
+          : "MiniLM"}{" "}
+        ·{" "}
+        {data?.dimensions
+          ? `${data.dimensions} dimensions`
+          : "Dimensions detected on index"}{" "}
+        ·{" "}
+        {data?.vectorBackend && data.vectorBackend !== "sqlite"
+          ? `${data.vectorBackendName || data.vectorBackend}${data.vectorCollection ? ` (${data.vectorCollection})` : ""}`
+          : data?.provider && data.provider !== "builtin"
+            ? "Local SQLite"
+            : "Local CPU"}
       </p>
       <details>
         <summary>Choose sources ({chosen.length} selected)</summary>
@@ -244,12 +263,13 @@ export default function VectorIndex({
         </details>
       )}
       <p className="field-hint">
-        Uses the built-in local model selected in Settings; external embedding
-        providers will follow separately. Re-run indexing after changing files.
-        Completed sources are reused when unchanged; cancelled or interrupted
-        work waits for you to retry. Removing sources from this job selection
-        does not delete their vectors; deselect connected sources in their folder or vault
-        source settings, or use Clear vectors above.
+        Uses the embedding model and vector store backend selected in Settings →
+        Semantic search. Re-run indexing after changing files, embedding models,
+        or vector backends. Completed sources are reused when unchanged;
+        cancelled or interrupted work waits for you to retry. Removing sources
+        from this job selection does not delete their vectors; deselect
+        connected sources in their folder or vault source settings, or use Clear
+        vectors above.
       </p>
     </section>
   );

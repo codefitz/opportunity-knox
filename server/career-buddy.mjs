@@ -11,10 +11,14 @@ import {
   defaultBuddy,
   publicBuddy,
   updateBuddy,
+  defaultEmbedding,
+  publicEmbedding,
+  updateEmbeddingSettings,
   callProvider,
   listProviderModels,
   listEmbeddingModels,
   testEmbeddingProvider,
+  testVectorBackend,
   EMBEDDING_PROVIDERS,
   assertConfigured,
   buddyError,
@@ -411,7 +415,7 @@ export function createCareerBuddy(ctx) {
       );
     return [...new Set(value)];
   };
-  const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn});
+  const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn,buddyFetch:ctx.buddyFetch});
   const requests=createBuddyRequests(db,{getConfig});ctx={...ctx,requests};
   const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
@@ -446,62 +450,13 @@ export function createCareerBuddy(ctx) {
         path === "/api/buddy/embedding-models" ||
         path === "/api/buddy/embedding-test"
       ) {
-        const current = getConfig("embeddingSettings") || {
-          ...defaultBuddy(),
-          provider: "builtin",
-          model: LOCAL_MODEL,
-          baseUrl: "",
-        };
-        const expose = (value) => {
-          const safe = publicBuddy(value);
-          safe.providers = EMBEDDING_PROVIDERS;
-          return safe;
-        };
-        const resolve = (body, requireRevision = false) => {
-          if (!body || typeof body !== "object" || !Object.keys(body).length) {
-            if (requireRevision)
-              throw buddyError(
-                409,
-                "Embedding settings changed. Reload before saving.",
-              );
-            return current;
-          }
-          if (
-            (requireRevision || body.revision !== undefined) &&
-            body.revision !== current.revision
-          )
-            throw buddyError(
-              409,
-              "Embedding settings changed. Reload before saving.",
-            );
-          const targetProvider = body.provider ?? current.provider;
-          if (targetProvider === "builtin")
-            return {
-              ...defaultBuddy(),
-              revision: current.revision + 1,
-              provider: "builtin",
-              model: LOCAL_MODEL,
-              baseUrl: "",
-            };
-          if (!["openai", "ollama", "custom"].includes(targetProvider))
-            throw buddyError(400, "Choose a supported embedding provider.");
-          const base =
-            current.provider === "builtin"
-              ? {
-                  ...current,
-                  provider: targetProvider,
-                  model: "",
-                  baseUrl: EMBEDDING_PROVIDERS[targetProvider].baseUrl,
-                  apiKey: "",
-                }
-              : current;
-          return updateBuddy(base, {
-            revision: current.revision,
-            ...body,
-            provider: targetProvider,
-            enabled: false,
+        const current = getConfig("embeddingSettings") || defaultEmbedding(LOCAL_MODEL);
+        const expose = (value) => publicEmbedding(value, LOCAL_MODEL);
+        const resolve = (body, requireRevision = false) =>
+          updateEmbeddingSettings(current, body, {
+            requireRevision,
+            localModel: LOCAL_MODEL,
           });
-        };
         if (path === "/api/buddy/embedding-settings") {
           if (method === "GET") {
             json(res, expose(current));
@@ -537,6 +492,7 @@ export function createCareerBuddy(ctx) {
           throw buddyError(429, "Embedding test is already running.");
         inFlight.add("embedding-test");
         try {
+          let embeddingResult;
           if (c.provider === "builtin") {
             let vectors;
             try {
@@ -556,17 +512,26 @@ export function createCareerBuddy(ctx) {
                 "The bundled model could not be loaded. Check the installed image and logs.",
               );
             }
-            json(res, {
+            embeddingResult = {
               ok: true,
               provider: "builtin",
               model: LOCAL_MODEL,
               check: "embedding",
               dimensions: vectors[0].length,
               normalized: true,
-            });
+            };
           } else {
-            json(res, await testEmbeddingProvider(c, ctx.buddyFetch));
+            embeddingResult = await testEmbeddingProvider(c, ctx.buddyFetch);
           }
+          const vectorStore = await testVectorBackend(c, ctx.buddyFetch);
+          json(res, {
+            ...embeddingResult,
+            vectorBackend: vectorStore.vectorBackend,
+            ...(vectorStore.vectorCollection
+              ? { vectorCollection: vectorStore.vectorCollection }
+              : {}),
+            vectorStoreOk: true,
+          });
         } finally {
           inFlight.delete("embedding-test");
         }
