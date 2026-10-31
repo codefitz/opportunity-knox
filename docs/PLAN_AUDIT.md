@@ -19,7 +19,7 @@ Use [PLAN.md — Remaining work](PLAN.md#remaining-work) and [ROADMAP.md](ROADMA
 | --- | --- | --- | --- |
 | 1 | Complete | ~~External embedding capability tests/model discovery~~ | [x] ~~Embedding-specific model discovery and fictional-text capability/dimension checks (`POST /api/buddy/embedding-models`, `POST /api/buddy/embedding-test`).~~ |
 | 2 | Complete | ~~External embedding indexing/custom vector database~~ | [x] ~~External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with local SQLite chunk/hash validation, selection scoping, and secret-safe settings.~~ |
-| 3 | Partial | Token streaming/cold-load timing/provider cancellation acknowledgement | [x] ~~HTTP live previews/timings and owned Codex process-termination acknowledgement.~~ **Remaining:** R5. |
+| 3 | Will Not Do | Token streaming/cold-load timing/provider cancellation acknowledgement | [x] ~~HTTP live previews/timings and owned Codex process-termination acknowledgement.~~ **Will Not Do:** R5 deprioritised by user decision. |
 | 4 | Complete | ~~Stage/tag/deadline/overdue toolbar filters~~ | [x] ~~Shared list/Kanban filters, counts, removable selections and validation.~~ |
 | 5 | Complete | ~~Identification application-route field~~ | [x] ~~Editable application route in creation/Overview/export/Summary; submitted packs retain their recorded route.~~ |
 | 6 | Complete | ~~Structured strengths/gaps/questions/recommendation/criteria/user reason~~ | [x] ~~Structured criteria/results plus manual strengths/gaps and dated proceed/ignore/defer decisions/history.~~ |
@@ -44,7 +44,7 @@ Use [PLAN.md — Remaining work](PLAN.md#remaining-work) and [ROADMAP.md](ROADMA
 | 25 | Complete | ~~External-assistant task-pack export/result import~~ | [x] ~~Export ZIP/JSON task packs with opportunity context, evidence excerpts, instructions, and schema; validate, conflict-check, preview, apply mutations and save Word drafts with task records in `ai_tasks`.~~ |
 | 26 | Complete | ~~Scheduled/pre-upgrade backups/portable restore~~ | [x] ~~Opt-in scheduled and verified pre-upgrade backups, portable activation/reconciliation and rollback.~~ |
 | 27 | Open | Remote HTTPS/VPN deployment | [ ] **Remaining:** R10/V1. Repeated scope refers to the same canonical work area. |
-| 28 | Partial | AI task table/reference profiles/templates/criteria | [x] ~~Universal `ai_tasks` SQLite table and scheduler, lifecycle records, saved criteria/templates and request usage/cost/prompt-version records.~~ **Remaining:** R11. |
+| 28 | Complete | ~~AI task table/reference profiles/templates/criteria~~ | [x] ~~Universal `ai_tasks` SQLite table and scheduler, lifecycle records, saved criteria/templates and request usage/cost/prompt-version records.~~ (R11 named profile extension deprioritised as Will Not Do). |
 | 29 | Complete | ~~Existing-workflow integration parent phase~~ | [x] ~~Defined existing-workflow phase, including historical JSON import and portable restore.~~ |
 | 30 | Complete | ~~Historical import/in-place attachment/deduplication/restore verification~~ | [x] ~~Read-only in-place sources, isolated/portable restore checks and reviewed historical JSON matching.~~ |
 | 31 | Partial | AI integration parent phase | [x] ~~Provider/retrieval/chat/drafting, controls, intake, assessments, request activity and external task packs.~~ **Remaining:** R7. |

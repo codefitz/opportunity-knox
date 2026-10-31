@@ -29,15 +29,20 @@ The same **13 work areas** appear in the plan. Optional/account-dependent items 
 | R2 | [x] ~~External embedding indexing and optional vector backends~~ | Complete | External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with SQLite metadata and boundary validation. |
 | R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [x] ~~External-assistant task-pack export/result import~~ | Complete | Export opportunity context, evidence excerpts, instructions, and JSON schema into ZIP/JSON task packs; validate, conflict-check, and preview external assistant results before applying mutations and saving document drafts with audit trail in `ai_tasks`. Separate from application-document packs and Codex runner. |
-| R5 | [ ] Codex live output/token accounting and remote cancellation acknowledgement | Open / provider-dependent | Current helper returns final text; local process cancellation is complete. Remote compute/billing termination cannot be assumed. |
 | R6 | [ ] Live cloud-document references and native editing | Deferred / account-dependent | Google configuration/search/snapshot connector is complete; live account verification is V2. |
 | R7 | [ ] Arbitrary unmarked templates and cross-engine layout fidelity | Open / validation-dependent | Built-in/marked templates, previews and Word/PDF exports are complete; bespoke acceptance is V3. |
 | R8 | [ ] Email/calendar integration and reminders | Open | Choose account permissions and delivery approach; on-screen due-date queues are complete. |
 | R9 | [ ] Human-readable managed folder names and stage subfolders | Optional enhancement | Existing stable-ID storage, relocation and migration are complete. |
 | R10 | [ ] Private production remote hosting with HTTPS/VPN | Choice-dependent | Needs V1. Local hosting, launcher, authentication and concurrent-client protections are complete. |
-| R11 | [ ] Named reusable criteria/evidence profiles | Open | The current saved criteria profile and evidence-selection workflows are complete. |
 | R12 | [ ] Explicit chat-attachment copying into the career library | Optional enhancement | Chat uploads, retained originals and reuse are complete; no automatic copying/indexing. |
 | R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Optional enhancement | Public HTML/PDF lookup, snapshots and OCR are complete; paste/upload remains the fallback. |
+
+## Will Not Do / Deprioritised scope
+
+| ID | Scope | Disposition / Rationale |
+| --- | --- | --- |
+| R5 | Codex live output/token accounting and remote cancellation acknowledgement | Will Not Do. Local Codex process termination is complete; intermediate streaming and remote token tracking are unnecessary overhead. |
+| R11 | Named reusable criteria/evidence profiles | Will Not Do. The existing saved criteria profile and candidate evidence selection workflows are sufficient; multiple named criteria profiles add unnecessary complexity. |
 
 ## Choices and validation still pending
 
