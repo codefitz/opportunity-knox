@@ -2459,20 +2459,32 @@ function Activities({
           <h3>Keep the conversation moving.</h3>
           <p>Add as many interviews and communications as you need.</p>
         </div>
-        <button
-          className="button secondary small"
-          disabled={saving || busy}
-          onClick={() => {
-            setForm(empty);
-            setFiles([]);
-            setError("");
-            setEditId("");
-            setOpen(!open);
-          }}
-        >
-          <Plus size={15} />
-          Add activity
-        </button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {Boolean(o.activities?.some((a) => a.scheduledAt)) && (
+            <a
+              href={`/api/opportunities/${encodeURIComponent(o.id)}/calendar.ics`}
+              className="button secondary small"
+              title="Download all scheduled interviews and activities as an iCalendar file"
+            >
+              <CalendarDays size={14} />
+              Export .ics
+            </a>
+          )}
+          <button
+            className="button secondary small"
+            disabled={saving || busy}
+            onClick={() => {
+              setForm(empty);
+              setFiles([]);
+              setError("");
+              setEditId("");
+              setOpen(!open);
+            }}
+          >
+            <Plus size={15} />
+            Add activity
+          </button>
+        </div>
       </div>
       {error && (
         <div className="alert error" role="alert">
@@ -2853,13 +2865,26 @@ function Activities({
                     </details>
                   )}
                 </div>
-                <button
-                  className="text-button"
-                  disabled={saving || busy}
-                  onClick={() => edit(a)}
-                >
-                  Edit
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+                  <button
+                    className="text-button"
+                    disabled={saving || busy}
+                    onClick={() => edit(a)}
+                  >
+                    Edit
+                  </button>
+                  {Boolean(a.scheduledAt) && (
+                    <a
+                      href={`/api/opportunities/${encodeURIComponent(o.id)}/activities/${encodeURIComponent(a.id)}/calendar.ics`}
+                      className="text-button"
+                      title="Download this event as an iCalendar (.ics) file"
+                      style={{ fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <CalendarDays size={12} />
+                      Add to calendar
+                    </a>
+                  )}
+                </div>
               </article>
             ))}
         </div>

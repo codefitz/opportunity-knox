@@ -3579,3 +3579,53 @@ test('external assistant task-pack export, preview with conflict check, and appl
  assert.equal(tasksRes.data.items[0].targetId,op.id);
  assert.equal(tasksRes.data.items[0].status,'completed');
 });
+
+test('calendar ICS export supports authenticated global, opportunity, and single activity downloads',async t=>{
+ const f=await fixture(t);await f.setup();
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+
+ // Add scheduled interview to opportunity
+ const actRes=await f.request('/api/opportunities/'+op.id+'/activities',{
+   method:'POST',
+   body:{
+     title:'Panel Interview',
+     kind:'interview',
+     type:'video',
+     scheduledAt:'2026-11-20T14:00:00.000Z',
+     contact:'panel@acme.com',
+     notes:'Bring architecture diagram.',
+   }
+ });
+ assert.equal(actRes.status,200);
+ const act=actRes.data.activities.find(a=>a.title==='Panel Interview');
+ assert.ok(act);
+
+ // 1. Unauthenticated checks
+ assert.equal((await f.request('/api/calendar/interviews.ics',{auth:false})).status,401);
+ assert.equal((await f.request('/api/opportunities/'+op.id+'/calendar.ics',{auth:false})).status,401);
+ assert.equal((await f.request('/api/opportunities/'+op.id+'/activities/'+act.id+'/calendar.ics',{auth:false})).status,401);
+
+ // 2. Global interviews calendar feed
+ const globalRes=await f.request('/api/calendar/interviews.ics');
+ assert.equal(globalRes.status,200);
+ assert.equal(globalRes.response.headers.get('content-type'),'text/calendar; charset=utf-8');
+ assert.ok(globalRes.data.includes('BEGIN:VCALENDAR'));
+ assert.ok(globalRes.data.includes('Panel Interview'));
+ assert.ok(globalRes.data.includes('DTSTART:20261120T140000Z'));
+ assert.ok(globalRes.data.includes('panel@acme.com'));
+
+ // 3. Opportunity-scoped calendar
+ const oppCalRes=await f.request('/api/opportunities/'+op.id+'/calendar.ics');
+ assert.equal(oppCalRes.status,200);
+ assert.equal(oppCalRes.response.headers.get('content-type'),'text/calendar; charset=utf-8');
+ assert.ok(oppCalRes.data.includes('BEGIN:VCALENDAR'));
+ assert.ok(oppCalRes.data.includes('Panel Interview'));
+
+ // 4. Single activity calendar
+ const actCalRes=await f.request('/api/opportunities/'+op.id+'/activities/'+act.id+'/calendar.ics');
+ assert.equal(actCalRes.status,200);
+ assert.equal(actCalRes.response.headers.get('content-type'),'text/calendar; charset=utf-8');
+ assert.ok(actCalRes.data.includes('BEGIN:VCALENDAR'));
+ assert.ok(actCalRes.data.includes('SUMMARY:[video] Panel Interview'));
+ assert.ok(actCalRes.data.includes('END:VCALENDAR'));
+});

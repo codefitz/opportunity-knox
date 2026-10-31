@@ -586,7 +586,20 @@ export default function Dashboard(props: Props) {
               <h2>Interviews to prepare</h2>
               <p>Planned and rescheduled entries on active opportunities.</p>
             </div>
-            <CalendarDays size={18} className="knox-muted-icon" />
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              {interviews.length > 0 && (
+                <a
+                  href="/api/calendar/interviews.ics"
+                  className="button secondary small"
+                  style={{ textDecoration: "none", fontSize: "11px", padding: "4px 8px" }}
+                  title="Subscribe or download all planned interviews as an iCalendar (.ics) feed"
+                >
+                  <CalendarDays size={13} />
+                  Export .ics
+                </a>
+              )}
+              <CalendarDays size={18} className="knox-muted-icon" />
+            </div>
           </div>
           <div className="knox-upcoming-list">
             {interviews.length ? (

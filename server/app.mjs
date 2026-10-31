@@ -9,6 +9,11 @@ import {createBackupSchedule} from "./backup-schedule.mjs";
 import {createOpportunityWorkflow} from "./opportunity-workflow.mjs";
 import {createFeedback} from "./feedback.mjs";
 import {createApplicationPacks} from "./application-packs.mjs";
+import {
+  generateSingleActivityIcs,
+  generateOpportunityCalendarIcs,
+  generateAllInterviewsCalendarIcs,
+} from "./calendar.mjs";
 import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
@@ -1194,6 +1199,44 @@ export function createApp(options = {}) {
         }
         if (path === "/api/opportunities" && method === "POST") {
           try{return json(res,jobIntake.create(await readBody(req)),201);}catch(e){if(Number.isInteger(e.status)&&e.status>=400&&e.status<600)fail(e.status,e.message);throw e;}
+        }
+        if (path === "/api/calendar/interviews.ics" && method === "GET") {
+          const opportunities = listRecords().map(fullRecord);
+          const ics = generateAllInterviewsCalendarIcs(opportunities);
+          res.writeHead(200, {
+            "Content-Type": "text/calendar; charset=utf-8",
+            "Content-Disposition": 'attachment; filename="interviews.ics"',
+            "Cache-Control": "no-store",
+          });
+          res.end(ics);
+          return;
+        }
+        const calendarMatch = path.match(
+          /^\/api\/opportunities\/([^/]+)\/(?:calendar\.ics|activities\/([^/]+)\/calendar\.ics)$/,
+        );
+        if (calendarMatch && method === "GET") {
+          const record = fullRecord(getRecord(calendarMatch[1]));
+          let ics;
+          let filename;
+          if (calendarMatch[2]) {
+            const act = (record.activities || []).find((a) => a.id === calendarMatch[2]);
+            if (!act) fail(404, "Activity not found.");
+            ics = generateSingleActivityIcs(act, record);
+            if (!ics) fail(400, "Activity has no scheduled date.");
+            const safeTitle = (act.title || "interview").replace(/[^a-zA-Z0-9_-]/g, "_");
+            filename = `interview-${safeTitle}.ics`;
+          } else {
+            ics = generateOpportunityCalendarIcs(record);
+            const safeCompany = (record.company || "opportunity").replace(/[^a-zA-Z0-9_-]/g, "_");
+            filename = `${safeCompany}-interviews.ics`;
+          }
+          res.writeHead(200, {
+            "Content-Type": "text/calendar; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+            "Cache-Control": "no-store",
+          });
+          res.end(ics);
+          return;
         }
         const match = path.match(
           /^\/api\/opportunities\/([^/]+)(?:\/(events|activities)(?:\/([^/]+))?)?$/,

@@ -367,6 +367,24 @@ Deployment through the normal launcher completed with a verified full backup of 
 - User interface: "Scheduled & background tasks" pane in AI Activity view (`src/components/AIActivity.tsx`), displaying task kind, subject, badges, phase/progress, enqueued/started/finished timestamps, error diagnostics, and Cancel/Retry controls with 5-second polling.
 - Live Docker container rebuild and browser verification have not been rerun in this step.
 
+## Calendar ICS export for interviews (R8) — 31 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 230 Node tests and 39 launcher/helper tests (269 total). Fictional-data unit, calendar and server integration tests cover:
+- RFC 5545 iCalendar generation (`server/calendar.mjs`):
+  - Line folding to <= 75 octets, compliant escaping of text fields (`\,`, `\;`, `\\`, `\n`).
+  - Correct UTC `DTSTART`/`DTEND` timestamps and date-only `VALUE=DATE` formatting with exclusive end dates.
+  - VEVENT summary, full opportunity context description (employer, role, stage, status, contact, notes, follow-up), and VALARM 30-minute reminder display.
+- Endpoints & access control (`server/app.mjs`):
+  - `GET /api/calendar/interviews.ics`: Authenticated global calendar feed containing all scheduled interviews across all opportunities.
+  - `GET /api/opportunities/:id/calendar.ics`: Authenticated opportunity-scoped calendar containing all scheduled activities/interviews for that opportunity.
+  - `GET /api/opportunities/:id/activities/:activityId/calendar.ics`: Authenticated single-event ICS download for a specific interview/activity.
+  - Strict 401 unauthenticated protection, 404 for missing records/activities, and 400 for undated activities.
+- User interface:
+  - Added "Add to calendar" action link to each scheduled activity in the Opportunity Communications & Interviews view (`src/App.tsx`).
+  - Added "Export .ics" button to the Communications & Interviews header when scheduled activities exist.
+  - Added "Export .ics" feed button to the "Interviews to prepare" panel on the Dashboard (`src/components/Dashboard.tsx`).
+- Live Docker container rebuild and browser verification have not been rerun in this step.
+
 ## External-assistant task-pack export & result import (R4) — 31 October 2026
 
 `npm run check` passes: production TypeScript/Vite build, 224 Node tests and 39 launcher/helper tests (263 total). Fictional-provider unit, assistant packs and server integration tests cover:

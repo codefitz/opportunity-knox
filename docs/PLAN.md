@@ -14,7 +14,7 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | R2 | [x] ~~External embedding indexing and optional vector backends~~ | Complete | External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with SQLite metadata and boundary validation. |
 | R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [x] ~~External-assistant task-pack export/result import~~ | Complete | Export opportunity context, evidence excerpts, instructions, and JSON schema into ZIP/JSON task packs; validate, conflict-check, and preview external assistant results before applying mutations and saving document drafts with audit trail in `ai_tasks`. Separate from application-document packs and Codex runner. |
-| R8 | [ ] Calendar ICS export for interviews | Open | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities; on-screen due-date queues and To-do list handle reminders. |
+| R8 | [x] ~~Calendar ICS export for interviews~~ | Complete | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities (single-event downloads, opportunity-scoped calendar, and global interview subscription feed); on-screen due-date queues and To-do list handle reminders. |
 | R9 | [ ] Human-readable managed folder names and stage subfolders | Open | Employer/role-labelled managed folders and stage organization; stable-ID storage, relocation and migration are complete. |
 | R12 | [ ] Explicit chat-attachment & STAR story promotion to career library | Open | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence. |
 | R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Open | Headless browser rendering for JS-rendered job boards; public HTML/PDF lookup, snapshots and OCR are complete. |
@@ -118,7 +118,7 @@ One card represents one application opportunity, including a stable ID so repeat
 
 Live-provider briefing wording quality remains an acceptance check (V4), not unfinished summary UI/persistence.
 - [x] ~~Provide overdue/deadline indicators and next-action dates (plus a dedicated To-do list and Dashboard queues).~~
-- [ ] Email/calendar reminders (later integration; the stopped service does not process background reminders or AI work).
+- [x] ~~Standard iCalendar (.ics) export for interviews, opportunity activities, and global calendar feeds.~~
 
 ## Main screens
 
