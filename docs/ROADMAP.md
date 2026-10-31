@@ -17,7 +17,7 @@
 - [x] ~~External-assistant task-pack export (ZIP/JSON) and result import with schema validation, conflict preview, audit task recording, and Word draft generation.~~
 - [x] ~~Global private feedback inbox, optional advisory AI review, and export.~~
 
-Latest implementation verification: **230 Node tests + 39 launcher/helper tests (269 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
+Latest implementation verification: **235 Node tests + 39 launcher/helper tests (274 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
 
 ## Remaining work
 
@@ -30,8 +30,8 @@ The same **13 work areas** appear in the plan. Optional/account-dependent items 
 | R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [x] ~~External-assistant task-pack export/result import~~ | Complete | Export opportunity context, evidence excerpts, instructions, and JSON schema into ZIP/JSON task packs; validate, conflict-check, and preview external assistant results before applying mutations and saving document drafts with audit trail in `ai_tasks`. Separate from application-document packs and Codex runner. |
 | R8 | [x] ~~Calendar ICS export for interviews~~ | Complete | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities (single-event downloads, opportunity-scoped calendar, and global interview subscription feed); on-screen due-date queues and To-do list handle reminders. |
-| R9 | [ ] Human-readable managed folder names and stage subfolders | Open | Employer/role-labelled managed folders and stage organization; stable-ID storage, relocation and migration are complete. |
-| R12 | [ ] Explicit chat-attachment & STAR story promotion to career library | Open | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence. |
+| R9 | [x] ~~Human-readable managed folder names and stage subfolders~~ | Complete | Saves opportunity documents under `<stable-id>-<company>-<role>/` formatted folder names with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories; includes `POST /api/opportunities/:id/organize-folders` for transparent migration of existing files with hash verification and rollback protection, plus UI organize action. |
+| R12 | [x] ~~Explicit chat-attachment & STAR story promotion to career library~~ | Complete | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence; explicit copy action for chat uploads and optional title/download for STAR stories. |
 | R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Open | Headless browser rendering for JS-rendered job boards; public HTML/PDF lookup, snapshots and OCR are complete. |
 
 ## Backburner / Deferred / Will Not Do scope

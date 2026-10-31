@@ -126,6 +126,14 @@ export type Appearance = {
   themeBackground: string;
 };
 export type Profile = { name: string; avatarUrl: string; revision: number };
+export type UpdateStatus = {
+  updateAvailable: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseUrl?: string;
+  reason?: string;
+  checkedAt?: string | null;
+};
 export type Task = {
   id: string;
   title: string;

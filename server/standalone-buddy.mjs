@@ -14,6 +14,7 @@ import {
   wordDraft,
   retrieveHybridChunks,
 } from "./buddy-documents.mjs";
+import { validateCategory } from "./document-categories.mjs";
 const modes = ["auto", "coach", "star", "recruiter", "update", "cv"];
 const text = (v, max = 12000) => {
   if (typeof v !== "string" || v.length > max)
@@ -115,7 +116,7 @@ export function createStandaloneBuddy(ctx) {
         return true;
       }
       const attachmentMatch = path.match(
-        /^\/api\/buddy\/attachments\/([^/]+)(\/content)?$/,
+        /^\/api\/buddy\/attachments\/([^/]+)(\/content|\/promote)?$/,
       );
       if (attachmentMatch) {
         const a = attachments().find((a) => a.id === attachmentMatch[1]);
@@ -128,7 +129,28 @@ export function createStandaloneBuddy(ctx) {
           json(res, { ok: true });
           return true;
         }
-        if (method === "GET" && attachmentMatch[2]) {
+        if (method === "POST" && attachmentMatch[2] === "/promote") {
+          const body = await readBody(req);
+          const rawOriginal = db
+            .prepare(
+              "SELECT data FROM standalone_attachment_originals WHERE id=?",
+            )
+            .get(a.id)?.data || a.contentBase64 || "";
+          const content = Buffer.from(rawOriginal, "base64");
+          const customName = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 255) : a.name;
+          const category = body.category ? validateCategory(body.category) : "reference";
+          const document = saveDocument({
+            name: customName,
+            kind: "reference",
+            category,
+            status: "draft",
+            content,
+            notes: body.notes ? String(body.notes).slice(0, 500) : "Promoted from Career Buddy chat attachment.",
+          });
+          json(res, { document }, 201);
+          return true;
+        }
+        if (method === "GET" && attachmentMatch[2] === "/content") {
           res.writeHead(200, {
             "Content-Type": "application/octet-stream",
             "Content-Disposition": "attachment",
@@ -709,13 +731,17 @@ export function createStandaloneBuddy(ctx) {
           });
         } else if (p.star) {
           const s = p.star;
+          const starTitle = typeof body.title === "string" && body.title.trim()
+            ? body.title.trim().slice(0, 100)
+            : "Career STAR highlight";
+          const docName = starTitle.endsWith(".md") ? starTitle : `${starTitle}.md`;
           result = saveDocument({
-            name: "Career STAR highlight.md",
+            name: docName,
             kind: "reference",
-            category:"star-story",
+            category: "star-story",
             status: "draft",
             content: Buffer.from(
-              `# Career STAR highlight\n\n## Situation\n${s.situation}\n\n## Task\n${s.task}\n\n## Action\n${s.action}\n\n## Result\n${s.result}\n\n## CV bullet\n${s.cvBullet}\n\n## Cover-letter highlight\n${s.coverHighlight}\n`,
+              `# ${starTitle.replace(/\.md$/, "")}\n\n## Situation\n${s.situation}\n\n## Task\n${s.task}\n\n## Action\n${s.action}\n\n## Result\n${s.result}\n\n## CV bullet\n${s.cvBullet}\n\n## Cover-letter highlight\n${s.coverHighlight}\n`,
             ),
             notes:
               "Reviewed Career Buddy story; verify factual claims before application use.",

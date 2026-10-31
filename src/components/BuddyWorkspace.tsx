@@ -72,6 +72,8 @@ export default function BuddyWorkspace({
     [input, setInput] = useState(""),
     [target, setTarget] = useState(""),
     [busy, setBusy] = useState(false),
+    [promotedAttachments, setPromotedAttachments] = useState<Record<string, string>>({}),
+    [customTitles, setCustomTitles] = useState<Record<string, string>>({}),
     [pending, setPending] = useState<{
       message: string;
       requestId: string;
@@ -446,6 +448,37 @@ export default function BuddyWorkspace({
                   <a href={"/api/buddy/attachments/" + a.id + "/content"}>
                     {a.name}
                   </a>{" "}
+                  {promotedAttachments[a.id] ? (
+                    <span className="badge muted">Added to library</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      disabled={busy}
+                      title="Promote this attachment into the Career library as reusable reference material"
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          await api(
+                            "/buddy/attachments/" + a.id + "/promote",
+                            json({}),
+                          );
+                          setPromotedAttachments((prev) => ({
+                            ...prev,
+                            [a.id]: "promoted",
+                          }));
+                          await load();
+                          onChanged();
+                        } catch (e) {
+                          onError(e);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Copy to library
+                    </button>
+                  )}{" "}
                   <button
                     type="button"
                     className="button secondary small"
@@ -583,6 +616,24 @@ export default function BuddyWorkspace({
                         Check names, facts, dates and impact. Ask Buddy for a
                         corrected proposal before saving if anything is wrong.
                       </p>
+                      {m.proposal.star && !m.appliedAt && (
+                        <label className="field" style={{ marginTop: "8px", marginBottom: "8px" }}>
+                          <span>Story title (optional file name in Career library)</span>
+                          <input
+                            type="text"
+                            maxLength={100}
+                            placeholder="Career STAR highlight"
+                            value={customTitles[m.id] ?? ""}
+                            disabled={busy}
+                            onChange={(e) =>
+                              setCustomTitles((prev) => ({
+                                ...prev,
+                                [m.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      )}
                       <button
                         type="button"
                         className="button primary small"
@@ -591,7 +642,12 @@ export default function BuddyWorkspace({
                           setBusy(true);
                           void api(
                             "/buddy/workspace/" + m.id + "/apply",
-                            json({ confirm: true }),
+                            json({
+                              confirm: true,
+                              ...(m.proposal?.star && customTitles[m.id]?.trim()
+                                ? { title: customTitles[m.id].trim() }
+                                : {}),
+                            }),
                           )
                             .then(async () => {
                               await load();
@@ -617,6 +673,14 @@ export default function BuddyWorkspace({
                           href={"/api/documents/" + m.result.id + "/content"}
                         >
                           Download master CV
+                        </a>
+                      )}
+                      {m.proposal.star && m.appliedAt && m.result?.id && (
+                        <a
+                          className="button secondary small"
+                          href={"/api/documents/" + m.result.id + "/content"}
+                        >
+                          Download STAR story
                         </a>
                       )}
                     </details>

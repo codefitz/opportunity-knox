@@ -12,7 +12,8 @@ import {
   realpathSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../server/app.mjs";
 
@@ -3628,4 +3629,257 @@ test('calendar ICS export supports authenticated global, opportunity, and single
  assert.ok(actCalRes.data.includes('BEGIN:VCALENDAR'));
  assert.ok(actCalRes.data.includes('SUMMARY:[video] Panel Interview'));
  assert.ok(actCalRes.data.includes('END:VCALENDAR'));
+});
+
+test('managed folders: saves opportunity documents into human-readable stage subfolders and supports organization migration', async t => {
+ const f = await fixture(t);
+ await f.setup();
+ const op = (await f.request('/api/opportunities', {
+   method: 'POST',
+   body: {
+     company: 'Acme Corp',
+     role: 'Senior Platform Engineer',
+     url: 'https://example.com/job',
+     deadline: '2026-12-01',
+   },
+ })).data;
+ assert.equal(op.company, 'Acme Corp');
+ assert.equal(op.role, 'Senior Platform Engineer');
+
+ // 1. Upload JD document for this opportunity
+ const jdRes = await f.request('/api/documents', {
+   method: 'POST',
+   body: {
+     name: 'Job Spec.txt',
+     kind: 'jd',
+     status: 'draft',
+     opportunityId: op.id,
+     contentBase64: Buffer.from('Senior Platform Engineer job specification').toString('base64'),
+   },
+ });
+ assert.equal(jdRes.status, 201);
+ const jdDoc = jdRes.data;
+
+ // 2. Upload tailored CV (draft)
+ const cvRes = await f.request('/api/documents', {
+   method: 'POST',
+   body: {
+     name: 'Platform CV.pdf',
+     kind: 'cv',
+     status: 'draft',
+     opportunityId: op.id,
+     contentBase64: Buffer.from('%PDF-1.4 fictional CV content').toString('base64'),
+   },
+ });
+ assert.equal(cvRes.status, 201);
+ const cvDoc = cvRes.data;
+
+ // 3. Upload submitted document
+ const submittedRes = await f.request('/api/documents', {
+   method: 'POST',
+   body: {
+     name: 'Submitted Application.pdf',
+     kind: 'cv',
+     status: 'submitted',
+     opportunityId: op.id,
+     contentBase64: Buffer.from('%PDF-1.4 final submitted CV').toString('base64'),
+   },
+ });
+ assert.equal(submittedRes.status, 201);
+ const submittedDoc = submittedRes.data;
+
+ // 4. Verify relative paths in database
+ const allDocs = f.app.db.prepare('SELECT data FROM documents').all().map(r => JSON.parse(r.data));
+ const storedJd = allDocs.find(d => d.id === jdDoc.id);
+ const storedCv = allDocs.find(d => d.id === cvDoc.id);
+ const storedSub = allDocs.find(d => d.id === submittedDoc.id);
+
+ assert.ok(storedJd.relativePath.includes('acme-corp-senior-platform-engineer/job-description/'));
+ assert.ok(storedCv.relativePath.includes('acme-corp-senior-platform-engineer/drafts/'));
+ assert.ok(storedSub.relativePath.includes('acme-corp-senior-platform-engineer/submitted/'));
+
+ // Content download works transparently
+ const jdContent = await f.request('/api/documents/' + jdDoc.id + '/content', { binary: true });
+ assert.equal(jdContent.data.toString(), 'Senior Platform Engineer job specification');
+
+ // 5. Test organize-folders endpoint:
+ // First, simulate a legacy document in opportunities/<id>/<doc-id>.txt
+ const legacyId = 'legacy-doc-123';
+ const legacyRelPath = `opportunities/${op.id}/${legacyId}.txt`;
+ const legacyFullPath = join(f.options.filesDir, legacyRelPath);
+ mkdirSync(dirname(legacyFullPath), { recursive: true });
+ writeFileSync(legacyFullPath, 'Legacy interview notes', { mode: 0o600 });
+ const legacyDoc = {
+   id: legacyId,
+   name: 'Interview Prep.txt',
+   kind: 'interview',
+   status: 'draft',
+   opportunityId: op.id,
+   createdAt: new Date().toISOString(),
+   size: 22,
+   version: 1,
+   notes: '',
+   category: 'star-story',
+   storageRoot: f.options.filesDir,
+   relativePath: legacyRelPath,
+   sha256: createHash('sha256').update('Legacy interview notes').digest('hex'),
+   revision: 1,
+ };
+ f.app.db.prepare('INSERT INTO documents(id, data) VALUES (?, ?)').run(legacyId, JSON.stringify(legacyDoc));
+
+ // Verify legacy document resolves before organization
+ const legacyPre = await f.request('/api/documents/' + legacyId + '/content', { binary: true });
+ assert.equal(legacyPre.data.toString(), 'Legacy interview notes');
+
+ // Run organize-folders
+ const orgRes = await f.request('/api/opportunities/' + op.id + '/organize-folders', { method: 'POST' });
+ assert.equal(orgRes.status, 200);
+ assert.equal(orgRes.data.organizedCount, 1);
+
+ // Check new location of legacy document
+ const updatedLegacyRow = JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(legacyId).data);
+ assert.ok(updatedLegacyRow.relativePath.includes('acme-corp-senior-platform-engineer/interviews/'));
+ assert.ok(!existsSync(legacyFullPath), 'Old legacy file was cleaned up after move');
+
+ // Verify content resolves from new location
+ const legacyPost = await f.request('/api/documents/' + legacyId + '/content', { binary: true });
+ assert.equal(legacyPost.data.toString(), 'Legacy interview notes');
+});
+
+test("update check: /api/board includes updateStatus and /api/updates/check checks status", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  // Test /api/board default status
+  const boardRes = await f.request('/api/board');
+  assert.equal(boardRes.status, 200);
+  assert.ok(boardRes.data.updateStatus);
+  assert.equal(typeof boardRes.data.updateStatus.updateAvailable, 'boolean');
+  assert.ok(boardRes.data.updateStatus.currentVersion);
+
+  // Test /api/updates/check endpoint
+  const checkRes = await f.request('/api/updates/check');
+  assert.equal(checkRes.status, 200);
+  assert.equal(typeof checkRes.data.updateAvailable, 'boolean');
+  assert.ok(checkRes.data.currentVersion);
+
+  // Test with mocked newer version cached
+  f.app.updateChecker._setCachedStatus({
+    updateAvailable: true,
+    currentVersion: "0.4.5",
+    latestVersion: "0.5.0",
+    releaseUrl: "https://github.com/codefitz/opportunity-knox/releases/tag/v0.5.0",
+    reason: "New version 0.5.0 is available.",
+    checkedAt: new Date().toISOString(),
+  });
+
+  const updatedBoardRes = await f.request('/api/board');
+  assert.equal(updatedBoardRes.data.updateStatus.updateAvailable, true);
+  assert.equal(updatedBoardRes.data.updateStatus.latestVersion, "0.5.0");
+});
+
+test("R12: promote chat attachment and STAR profile story to career library", async (t) => {
+  let output;
+  const f = await fixture(t, {
+    buddyFetch: async () => buddyResponse(buddyReply(output)),
+  });
+  await f.setup();
+  await enableBuddy(f);
+
+  // 1. Upload a chat attachment
+  const upload = await f.request("/api/buddy/attachments", {
+    method: "POST",
+    body: {
+      name: "Quarterly Performance Notes.docx",
+      contentBase64: Buffer.from("Quarterly accomplishments and metrics.").toString("base64"),
+    },
+  });
+  assert.equal(upload.status, 200);
+  const attachmentId = upload.data.id;
+
+  // Verify attachment is NOT in documents yet (no silent indexing)
+  const initialDocs = (await f.request("/api/documents")).data.documents;
+  assert.equal(initialDocs.length, 0);
+
+  // 2. Promote chat attachment to library via POST /api/buddy/attachments/:id/promote
+  const promoteRes = await f.request(`/api/buddy/attachments/${attachmentId}/promote`, {
+    method: "POST",
+    body: {
+      category: "supporting-statement",
+      notes: "My performance notes for interview prep",
+    },
+  });
+  assert.equal(promoteRes.status, 201);
+  assert.equal(promoteRes.data.document.name, "Quarterly Performance Notes.docx");
+  assert.equal(promoteRes.data.document.category, "supporting-statement");
+  assert.equal(promoteRes.data.document.kind, "reference");
+
+  // Verify it is now present in career library documents
+  const docsAfterAttachment = (await f.request("/api/documents")).data.documents;
+  assert.equal(docsAfterAttachment.length, 1);
+  assert.equal(docsAfterAttachment[0].id, promoteRes.data.document.id);
+
+  // Download content to verify bytes are intact
+  const content = await f.request(`/api/documents/${promoteRes.data.document.id}/content`, { binary: true });
+  assert.equal(content.data.toString(), "Quarterly accomplishments and metrics.");
+
+  // 3. Propose and promote STAR story to library
+  output = {
+    reply: JSON.stringify({
+      intent: "star",
+      message: "Here is your STAR story highlight based on our conversation.",
+      opportunity: null,
+      tasks: [],
+      star: {
+        situation: "Legacy database migration was failing under peak load.",
+        task: "Redesign the schema and failover mechanism.",
+        action: "Implemented atomic transactions and zero-downtime replication.",
+        result: "Reduced failover latency by 90% and zero lost writes.",
+        cvBullet: "Architected zero-downtime database replication, cutting failover latency by 90%.",
+        coverHighlight: "Led mission-critical database replatforming under heavy load with zero downtime.",
+      },
+    }),
+  };
+
+  const chatRes = await f.request("/api/buddy/workspace", {
+    method: "POST",
+    body: {
+      mode: "auto",
+      requestId: "star-story-chat",
+      message: "Help me craft a STAR story about the database project.",
+      documentIds: [],
+      attachmentIds: [],
+    },
+  });
+  assert.equal(chatRes.status, 200);
+  const starProposal = chatRes.data.messages.at(-1);
+  assert.ok(starProposal.proposal.star);
+
+  // Apply STAR proposal with custom title
+  const applyRes = await f.request(`/api/buddy/workspace/${starProposal.id}/apply`, {
+    method: "POST",
+    body: {
+      confirm: true,
+      title: "Database Replatforming STAR Story",
+    },
+  });
+  assert.equal(applyRes.status, 200);
+  assert.ok(applyRes.data.result.id);
+  assert.equal(applyRes.data.result.name, "Database Replatforming STAR Story.md");
+  assert.equal(applyRes.data.result.category, "star-story");
+  assert.equal(applyRes.data.result.kind, "reference");
+
+  // Verify library now contains 2 documents
+  const allDocs = (await f.request("/api/documents")).data.documents;
+  assert.equal(allDocs.length, 2);
+
+  const starDoc = allDocs.find((d) => d.id === applyRes.data.result.id);
+  assert.ok(starDoc);
+  assert.equal(starDoc.name, "Database Replatforming STAR Story.md");
+
+  // Verify content of STAR story markdown
+  const starContent = await f.request(`/api/documents/${starDoc.id}/content`, { binary: true });
+  assert.match(starContent.data.toString(), /# Database Replatforming STAR Story/);
+  assert.match(starContent.data.toString(), /## Situation\nLegacy database migration/);
+  assert.match(starContent.data.toString(), /## Result\nReduced failover latency by 90%/);
 });

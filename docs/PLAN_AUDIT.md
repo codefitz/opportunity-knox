@@ -34,7 +34,7 @@ Use [PLAN.md — Remaining work](PLAN.md#remaining-work) and [ROADMAP.md](ROADMA
 | 15 | Partial | Existing in-place server/cloud documents | [x] ~~Configured read-only host/vault sources and Google snapshot connector.~~ **Remaining:** R6/V2. |
 | 16 | Complete | ~~Multiple independent reference locations~~ | [x] ~~Multiple independently configured read-only source roots.~~ |
 | 17 | Complete | ~~Server-side folder browser~~ | [x] ~~Paged browsing within configured roots; unrestricted host browsing was not supplied.~~ |
-| 18 | Open | Employer/role-labelled folder naming and stage subfolders | [ ] **Remaining:** R9. Repeated scope refers to the same canonical work area. |
+| 18 | Complete | ~~Employer/role-labelled folder naming and stage subfolders~~ | [x] ~~R9: Employer/role-labelled folder naming `<stable-id>-<company>-<role>/` with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories and `POST /api/opportunities/:id/organize-folders` migration.~~ |
 | 19 | Complete | ~~Missing/offline handling/relinking/storage migration~~ | [x] ~~Offline protections, previewed hash-checked relinking/migration, retained originals, backup and rollback.~~ |
 | 20 | Complete | ~~Previewed historical import/content and opportunity duplicate matching~~ | [x] ~~Historical JSON preview/deduplication, explicit selected merges, full backup, conflict/replay checks and atomic writes.~~ |
 | 21 | Complete | ~~Independent AI toggles for stages 1–3~~ | [x] ~~Independent stage 1–3 switches and automatic fit/tag policy checks.~~ |

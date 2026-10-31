@@ -91,6 +91,7 @@ import {
   type Task,
   type Appearance,
   type ObsidianStatus,
+  type UpdateStatus,
 } from "./types";
 
 import JobLookup, {
@@ -296,7 +297,8 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]),
     [referenceCount, setReferenceCount] = useState(0),
     [refreshing, setRefreshing] = useState(false),
-    [restarting, setRestarting] = useState(false);
+    [restarting, setRestarting] = useState(false),
+    [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
     [dragging, setDragging] = useState(""),
@@ -354,8 +356,10 @@ export default function App() {
         profile: Profile;
         tasks: Task[];
         referenceCount: number;
+        updateStatus?: UpdateStatus;
       }>("/board");
       setOpportunities(data.opportunities);
+      if (data.updateStatus) setUpdateStatus(data.updateStatus);
       if (revision === appearanceRevision.current) setSettings(data.settings);
       else
         setSettings((current) =>
@@ -376,7 +380,13 @@ export default function App() {
     }
   }
   useEffect(() => {
-    if (session?.authenticated) void load();
+    if (session?.authenticated) {
+      void load();
+      api<UpdateStatus>("/updates/check").then(
+        (status) => { if (status) setUpdateStatus(status); },
+        () => {},
+      );
+    }
   }, [session?.authenticated]);
   useEffect(() => {
     if (session?.authenticated && (page === "dashboard" || page === "todos"))
@@ -732,9 +742,22 @@ export default function App() {
             className="signout-button"
             disabled={restarting}
             onClick={() => void restartBoard()}
+            title={
+              updateStatus?.updateAvailable
+                ? `New version ${updateStatus.latestVersion || ""} is available. Click to apply.`
+                : undefined
+            }
           >
             <RotateCw size={14} className={restarting ? "spin" : undefined} />
             {restarting ? "Restarting…" : "Update & restart"}
+            {updateStatus?.updateAvailable ? (
+              <span
+                className="update-indicator-pill"
+                title={`Version ${updateStatus.latestVersion || "new"} available`}
+              >
+                Update
+              </span>
+            ) : null}
           </button>
           <button
             className="signout-button"
@@ -1164,6 +1187,7 @@ export default function App() {
             onImported={()=>void load(true)}
             restarting={restarting}
             onRestart={() => void restartBoard()}
+            updateStatus={updateStatus}
             onError={report}
             onNotice={setNotice}
           />
@@ -2950,7 +2974,8 @@ function Documents({
     [moveDocuments, setMoveDocuments] = useState<BoardDocument[] | null>(null),
     [moveFolder, setMoveFolder] = useState(""),
     [moveError, setMoveError] = useState(""),
-    [moving, setMoving] = useState(false);
+    [moving, setMoving] = useState(false),
+    [organizing, setOrganizing] = useState(false);
   const [categoryFilter,setCategoryFilter]=useState(''),[uploadCategory,setUploadCategory]=useState(''),[bulkCategory,setBulkCategory]=useState(''),[categorising,setCategorising]=useState(false);
   const queue=useUploadQueue(opportunityId, options=>{setKind(options.kind);setStatus(options.status);setNotes(options.notes);setUploadCategory(options.category);setBatchUploads(options.batchUploads);});
   const files=queue.files,uploadAbort=useRef<AbortController|null>(null);
@@ -2976,6 +3001,30 @@ function Documents({
         : current.filter((id) => available.has(id)),
     );
   }, [documents, sourceFilter, extraction]);
+  async function organizeOpportunityFolders() {
+    if (!opportunityId || organizing) return;
+    setOrganizing(true);
+    try {
+      const res = await api<{
+        organizedCount: number;
+        retainedOriginals: number;
+        documents: BoardDocument[];
+      }>(`/opportunities/${opportunityId}/organize-folders`, { method: "POST" });
+      onChanged();
+      if (res.organizedCount > 0) {
+        onNotice?.(
+          `Organized ${res.organizedCount} document${res.organizedCount === 1 ? "" : "s"} into stage subfolders.`,
+        );
+      } else {
+        onNotice?.("All opportunity documents are already in stage subfolders.");
+      }
+    } catch (e) {
+      onError(e);
+    } finally {
+      setOrganizing(false);
+    }
+  }
+
   function startMove(items: BoardDocument[]) {
     if (!items.length) return;
     const dirs = new Set(
@@ -3154,15 +3203,29 @@ function Documents({
               : "Drag and drop files or entire directories into your library. Career Buddy prepares PDF, DOCX and text sources locally."}
           </p>
         </div>
-        <button
-          type="button"
-          className="button secondary small"
-          disabled={busy}
-          onClick={() => folderInputRef.current?.click()}
-        >
-          <FolderOpen size={15} />
-          Choose folder
-        </button>
+        <div className="section-actions">
+          {opportunityId && allDocuments.length > 0 && (
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={busy || organizing}
+              onClick={() => void organizeOpportunityFolders()}
+              title="Ensure all documents for this opportunity are structured into stage subfolders (job-description, drafts, approved, submitted, interviews, correspondence)."
+            >
+              <FolderInput size={15} />
+              {organizing ? "Organizing…" : "Organize stage folders"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={busy}
+            onClick={() => folderInputRef.current?.click()}
+          >
+            <FolderOpen size={15} />
+            Choose folder
+          </button>
+        </div>
       </div>
       <input
         ref={folderInputRef}
@@ -5341,6 +5404,7 @@ function SettingsPage({
   onSaved,
   restarting,
   onRestart,
+  updateStatus,
   onError,
   onNotice,
   onImported,
@@ -5358,6 +5422,7 @@ function SettingsPage({
   onSaved: (s: Settings) => void;
   restarting: boolean;
   onRestart: () => void;
+  updateStatus?: UpdateStatus | null;
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
 }) {
@@ -5654,15 +5719,25 @@ function SettingsPage({
               preserved.
             </p>
           </div>
-          <button
-            type="button"
-            className="button secondary"
-            disabled={restarting || backingUp}
-            onClick={onRestart}
-          >
-            <RotateCw size={16} className={restarting ? "spin" : undefined} />
-            {restarting ? "Restarting…" : "Update & restart board"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {updateStatus?.updateAvailable ? (
+              <span
+                className="update-indicator-pill"
+                title={`Version ${updateStatus.latestVersion || "new"} available`}
+              >
+                New version: {updateStatus.latestVersion}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="button secondary"
+              disabled={restarting || backingUp}
+              onClick={onRestart}
+            >
+              <RotateCw size={16} className={restarting ? "spin" : undefined} />
+              {restarting ? "Restarting…" : "Update & restart board"}
+            </button>
+          </div>
         </div>
       </section>
       <DocumentConnections onError={onError} onRestart={onRestart} restarting={restarting} />

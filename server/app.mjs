@@ -14,6 +14,13 @@ import {
   generateOpportunityCalendarIcs,
   generateAllInterviewsCalendarIcs,
 } from "./calendar.mjs";
+import {
+  opportunityFolderName,
+  opportunitySubdirectory,
+  buildOpportunityDocumentPath,
+  isOpportunityDocumentOrganized,
+} from "./managed-folders.mjs";
+import { createUpdateChecker } from "./update-checker.mjs";
 import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
@@ -350,6 +357,9 @@ export function createApp(options = {}) {
   mkdirSync(filesInput, { recursive: true });
   const filesDir = realpathSync(filesInput);
   const setupToken = options.setupToken ?? process.env.BOARD_SETUP_TOKEN ?? "";
+  const updateChecker = options.updateChecker || createUpdateChecker({
+    fetcher: options.fetcher,
+  });
   const configuredRoots =
     options.documentRoots ??
     (process.env.BOARD_DOCUMENT_ROOTS
@@ -662,11 +672,27 @@ export function createApp(options = {}) {
         )
         .reduce((n, d) => Math.max(n, d.version), 0);
     const id = randomUUID();
-    const baseSubdir = opportunityId
-      ? `${settings().documentsSubdir}/${opportunityId}`
-      : settings().referenceSubdir;
-    folder(filesDir, baseSubdir);
-    const relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
+    let relativePath;
+    if (opportunityId) {
+      let opp = null;
+      try {
+        opp = getRecord(opportunityId);
+      } catch {}
+      relativePath = buildOpportunityDocumentPath({
+        documentsSubdir: settings().documentsSubdir,
+        opportunity: opp,
+        documentId: id,
+        name,
+        kind,
+        status,
+        category: resolvedCategory,
+      });
+      folder(filesDir, dirname(relativePath));
+    } else {
+      const baseSubdir = settings().referenceSubdir;
+      folder(filesDir, baseSubdir);
+      relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
+    }
     const target = safePath(filesDir, relativePath);
     writeFileSync(target, content, { flag: "wx", mode: 0o600 });
     const resolvedTags =
@@ -1195,7 +1221,12 @@ export function createApp(options = {}) {
             referenceCount: documents.filter(
               (document) => !document.opportunityId,
             ).length,
+            updateStatus: updateChecker.getStatusSync(),
           });
+        }
+        if (path === "/api/updates/check" && (method === "GET" || method === "POST")) {
+          const status = await updateChecker.checkForUpdates(true);
+          return json(res, status);
         }
         if (path === "/api/opportunities" && method === "POST") {
           try{return json(res,jobIntake.create(await readBody(req)),201);}catch(e){if(Number.isInteger(e.status)&&e.status>=400&&e.status<600)fail(e.status,e.message);throw e;}
@@ -1704,6 +1735,113 @@ export function createApp(options = {}) {
             retainedOriginals: retained,
           });
         }
+        const organizeMatch = path.match(/^\/api\/opportunities\/([^/]+)\/organize-folders$/);
+        if (organizeMatch && method === "POST") {
+          const opportunity = getRecord(organizeMatch[1]);
+          const allDocs = getDocuments();
+          const oppDocs = allDocs.filter((d) => d.opportunityId === opportunity.id);
+          const planned = [];
+          for (const doc of oppDocs) {
+            const targetRelPath = buildOpportunityDocumentPath({
+              documentsSubdir: settings().documentsSubdir,
+              opportunity,
+              documentId: doc.id,
+              name: doc.name,
+              kind: doc.kind,
+              status: doc.status,
+              category: doc.category,
+            });
+            if (doc.relativePath === targetRelPath) continue;
+            const source = documentPath(doc);
+            try {
+              if (!statSync(source).isFile()) throw Error("not a file");
+            } catch {
+              fail(404, `Document file for ${doc.name} is unavailable.`);
+            }
+            planned.push({
+              doc,
+              source,
+              targetRelPath,
+              targetDir: dirname(targetRelPath),
+            });
+          }
+          if (!planned.length) {
+            return json(res, {
+              organizedCount: 0,
+              documents: oppDocs.map(publicDocument),
+            });
+          }
+          const created = [];
+          try {
+            for (const item of planned) {
+              folder(filesDir, item.targetDir);
+              item.target = safePath(filesDir, item.targetRelPath);
+              if (resolve(item.source) === resolve(item.target)) continue;
+              const bytes = readFileSync(item.source);
+              item.sourceHash = createHash("sha256").update(bytes).digest("hex");
+              let fd;
+              try {
+                fd = openSync(item.target, "wx", 0o600);
+              } catch (error) {
+                if (error.code === "EEXIST")
+                  fail(409, "A destination file already exists. Folder organization aborted.");
+                throw error;
+              }
+              created.push(item.target);
+              try {
+                writeFileSync(fd, bytes);
+                fsyncSync(fd);
+              } finally {
+                closeSync(fd);
+              }
+            }
+            db.exec("BEGIN IMMEDIATE");
+            try {
+              for (const item of planned) {
+                putDocument({
+                  ...item.doc,
+                  storageRoot: filesDir,
+                  relativePath: item.targetRelPath,
+                  revision: (item.doc.revision || 1) + 1,
+                });
+              }
+              db.exec("COMMIT");
+            } catch (error) {
+              db.exec("ROLLBACK");
+              throw error;
+            }
+          } catch (error) {
+            for (const file of created) {
+              try { unlinkSync(file); } catch {}
+            }
+            if (error instanceof HttpError) throw error;
+            fail(500, "Folder organization could not be completed. Original files were retained.");
+          }
+          let removed = 0;
+          for (const item of planned) {
+            if (resolve(item.source) === resolve(item.target)) continue;
+            const shared = allDocs.some(
+              (d) =>
+                d.id !== item.doc.id &&
+                d.storageRoot === item.doc.storageRoot &&
+                d.relativePath === item.doc.relativePath,
+            );
+            if (shared || realpathSync(item.doc.storageRoot) !== realpathSync(filesDir)) continue;
+            try {
+              const current = readFileSync(item.source);
+              if (createHash("sha256").update(current).digest("hex") === item.sourceHash) {
+                unlinkSync(item.source);
+                removed++;
+              }
+            } catch {}
+          }
+          const updatedDocs = getDocuments().filter((d) => d.opportunityId === opportunity.id);
+          return json(res, {
+            organizedCount: planned.length,
+            retainedOriginals: planned.length - removed,
+            documents: updatedDocs.map(publicDocument),
+          });
+        }
         const docMatch = path.match(/^\/api\/documents\/([^/]+)(\/content)?$/);
         if (docMatch) {
           const doc = getDocument(docMatch[1]);
@@ -2041,6 +2179,7 @@ export function createApp(options = {}) {
     server,
     db,
     scheduler: aiScheduler,
+    updateChecker,
     close: async () => {
       if (closed) return;
       closed = true;

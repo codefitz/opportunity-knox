@@ -15,8 +15,8 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [x] ~~External-assistant task-pack export/result import~~ | Complete | Export opportunity context, evidence excerpts, instructions, and JSON schema into ZIP/JSON task packs; validate, conflict-check, and preview external assistant results before applying mutations and saving document drafts with audit trail in `ai_tasks`. Separate from application-document packs and Codex runner. |
 | R8 | [x] ~~Calendar ICS export for interviews~~ | Complete | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities (single-event downloads, opportunity-scoped calendar, and global interview subscription feed); on-screen due-date queues and To-do list handle reminders. |
-| R9 | [ ] Human-readable managed folder names and stage subfolders | Open | Employer/role-labelled managed folders and stage organization; stable-ID storage, relocation and migration are complete. |
-| R12 | [ ] Explicit chat-attachment & STAR story promotion to career library | Open | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence. |
+| R9 | [x] ~~Human-readable managed folder names and stage subfolders~~ | Complete | Employer/role-labelled managed folders and stage organization; stable-ID storage, relocation and migration are complete. |
+| R12 | [x] ~~Explicit chat-attachment & STAR story promotion to career library~~ | Complete | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence; explicit copy action for chat uploads and optional title/download for STAR stories. |
 | R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Open | Headless browser rendering for JS-rendered job boards; public HTML/PDF lookup, snapshots and OCR are complete. |
 
 ## Backburner / Deferred / Will Not Do scope
@@ -63,7 +63,7 @@ These four groups are separate from unfinished implementation; they are not reas
 - [x] ~~Optional Codex CLI provider using the host’s ChatGPT sign-in, with a launcher-managed private queue, read-only ephemeral execution, bounded requests and existing review controls. Messages/selected excerpts go to OpenAI under Codex account limits; credentials remain outside Docker. User explicitly authorized this destination. Host CLI catalogue discovery and stage/elapsed progress/local process cancellation are implemented. See `CODEX_BUDDY_DESIGN.md`.~~
 
 - [x] ~~Standalone chat attachments with extraction preview, original download/reuse/deletion and documented limits. Stored separately from the career library; no silent indexing.~~
-- [ ] Optional explicit attachment-to-library copying (R12); never silently index chat uploads.
+- [x] ~~Optional explicit attachment-to-library copying (R12); never silently index chat uploads.~~
 - [x] ~~P1 standalone Buddy request controls: polled stage/elapsed progress, Cancel/retry, HTTP abort and owned Codex process termination, persisted secret-safe request diagnostics, restart interruption state, configurable AI response timeouts (30–900 seconds), HTTP response-token and source-context budgets. Existing defaults retained; no silent retries. HTTP live previews are delivered in the separate completed item below.~~
 - [x] ~~Extend interactive progress/elapsed time, cancellation and explicit retry to opportunity-specific Buddy, manual decision assessments and automatic review jobs; recover persisted request status when reopening views and reject late cancelled results before saving.~~
 - [x] ~~HTTP-provider streaming with polled live answer previews in standalone/opportunity chat; incremental SSE/NDJSON parsing, bounded responses, explicit compatibility opt-out and complete-response validation before saving. Preview text remains memory-only and is cleared on cancellation/failure/completion.~~
@@ -175,7 +175,7 @@ Proposed managed layout:
 ```
 
 - [x] ~~Keep document paths relative to the configured storage root (`opportunities/<id>/` and `references/`).~~
-- [ ] Use `<stable-id>-<company>-<role>/` folder naming with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories.
+- [x] ~~Use `<stable-id>-<company>-<role>/` folder naming with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories.~~
 - [x] ~~Report unavailable source roots/files and reject missing configured drives rather than replacing them with empty defaults. Retain previous managed roots when changing storage.~~
 - [x] ~~Dedicated relinking and guided copy-and-validate migration between managed storage roots: preview/hash checks, explicit confirmation, originals retained, stale-plan rejection, full pre-change backup and rollback/restart recovery.~~
 - [x] ~~Previewed historical JSON opportunity import with record-content hash, manifest JD hash, source ID, job reference/URL/employer-role and within-file duplicate suggestions. Explicit skip/separate/selected-field/history/stage choices, full pre-import backup, conflict checks, atomic writes, durable replay protection and source archive/report. File bytes, tasks and native offers/reviews/packs are not activated by record import; use full restore for an entire workspace.~~
