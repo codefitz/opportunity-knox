@@ -67,30 +67,26 @@ You can also choose a different port, remembered for future starts:
 
 The initial manual workflow covers opportunity capture, dated stage history and corrections, notes, repeatable interviews and communications, document uploads/downloads, reference material, and configurable storage. The app tracks the documents used for an application; recording submission does not send anything to an employer.
 
-Version 0.3 introduces the Opportunity Knox name and separate sidebar pages:
-
 - **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes, tasks, and interview/action queues. Charts and records update after changes and periodic refreshes.
 - **Opportunities:** searchable list for detailed application tracking.
-- **Kanban board:** the eight-stage drag-and-drop board on its own page.
-- **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link a task to an opportunity when useful.
-- **Career library:** a data dump for CVs, old JDs, certificates, project notes, achievements, interview notes, and other career material. Originals are stored; supported files can be prepared locally for Career Buddy retrieval. Fold the prepared and unprepared sections, and move individual or selected files between folders inside the configured library. Submitted versions remain preserved.
-- **Settings:** profile name/photo, themes, file locations, backups, and Career Buddy connections.
-
-Choose a theme in Settings, including contrasting light-and-dark options. Your theme, accent and background tint save automatically across devices; Reset colours returns to the preset colours. The profile supports PNG, JPEG and WebP photos up to 2 MB. Preferences, profile and tasks persist in the database and private backups. Browser routes use `#/dashboard`, `#/opportunities`, `#/board`, `#/todos`, `#/library` and `#/settings`.
-
-Existing installation directories, Docker project names and the `./board` command stay compatible. The default document directory remains `~/OpportunityBoard` and the Mac state directory remains `~/Library/Application Support/OpportunityBoard`.
-
-Version 0.4 adds **Career Buddy**, an optional assistant configured in Settings. Choose OpenAI, Claude, Gemini, Ollama, or a custom OpenAI-compatible API, add a key where required, choose a discovered model (or enter its ID manually), and test the connection before or after saving. In an opportunity, open the Career Buddy tab to chat, review proposed updates, ask about fit/salary/skills, and draft a CV or cover letter. Reviewable Word drafts can be saved as new versions in Documents. See [docs/CAREER_BUDDY.md](docs/CAREER_BUDDY.md) for setup, source coverage, privacy and current limits. Job-link lookup and manual tracking still work without an AI provider. The full agreed direction is recorded in [docs/PLAN.md](docs/PLAN.md), with implementation interfaces in [docs/CONTRACT.md](docs/CONTRACT.md).
-
-Record export is JSON with a document manifest; it is not a full portable document archive. The backup action creates a private database snapshot and copies managed document files into a snapshot directory under the backup subfolder selected in Settings, within the current document root. A guided restore/import and cloud-document connectors are subsequent work. Check a backup's contents before relying on it as your only recovery copy.
+- **Kanban board:** the eight-stage drag-and-drop board on its own page with stage dates, interview/communication history, and outcome tracking.
+- **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link tasks to opportunities.
+- **Career library & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click.
+- **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.
+- **Smarter job intake:** supports public URLs (HTML/PDF), pasted job text, and document uploads (PDF/DOCX/TXT/MD). Features bounded local English PDF OCR, original source snapshots, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
+- **Calendar export (RFC 5545 ICS):** export single interview events, an opportunity-specific `.ics` calendar, or subscribe to a global live interview feed across all opportunities.
+- **Document Studio:** built-in and marked DOCX template previews, PDF export, and snapshot versioning for submitted application packs.
+- **Career Buddy (optional AI):** choose OpenAI, Claude, Gemini, Ollama, or custom OpenAI-compatible endpoints. Extract job details with quote-backed evidence, review fit/salary/skills against career evidence, and generate reviewable Word drafts without modifying original files. Keep AI off whenever preferred.
+- **AI Task Scheduler & Activity:** background task queuing with persistent SQLite tracking, cooperative cancellation, restart recovery, token usage reporting, and exportable activity logs.
+- **Settings & Themes:** customizable profiles, themes (Forest, Cappuccino, Ocean, Midnight) with light/dark contrast and custom accents, storage location migration, verified backups/restores, and update checking.
 
 ## Look up a job link
 
 Add an opportunity, paste its listing URL, and choose **Fetch job details**. Dropping a job link onto the board opens a draft and starts lookup. Review the extracted company, role, location, salary, employment type, closing date, reference, contact and description before saving. Missing information stays blank. Existing opportunities can look up their saved link and preview details to fill empty fields while preserving your edits.
 
-Lookup first reads published `JobPosting` structured data and otherwise extracts the visible job content, including public LinkedIn listings. It does not require an AI key, send reference CVs, or submit an application. The draft shows its source and retrieval time. A listing which requires sign-in, blocks requests, needs JavaScript to reveal its content, or links directly to a PDF may need pasted JD text or an uploaded file instead.
+Lookup first reads published `JobPosting` structured data and otherwise extracts visible job content, including public LinkedIn listings. For single-page applications (SPAs) or JavaScript-only job boards (e.g. Workday, dynamic React/Vue boards), the engine automatically employs headless browser rendering to extract the listing, with fallback to pasted text or uploaded files if automated access is restricted.
 
-The host retrieves public HTTP(S) pages only. Private-network targets and unsafe redirects are rejected; downloads have time and size limits. These restrictions also apply when the browser itself could access a local/private site.
+The host retrieves public HTTP(S) pages only. Private-network targets, loopback addresses, and unsafe redirects are rejected with strict timeouts and bounded memory limits.
 
 ## Development
 
