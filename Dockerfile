@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-wri
 ADD --checksum=sha256:a81478bf74ed431d488f5954ba8bece10b17bdfafc24590a7048b283dcbd40f1 https://deb.debian.org/debian/pool/main/f/fonts-montserrat/fonts-montserrat_7.222-3_all.deb /tmp/montserrat.deb
 RUN dpkg -i /tmp/montserrat.deb && rm /tmp/montserrat.deb
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4318 BOARD_DATA_DIR=/data BOARD_FILES_DIR=/files/default
+ARG BOARD_BUILD_SOURCE_HASH=""
+ARG BOARD_BUILD_COMMIT=""
+ARG BOARD_BUILD_DIRTY="0"
+ENV BOARD_BUILD_SOURCE_HASH=$BOARD_BUILD_SOURCE_HASH BOARD_BUILD_COMMIT=$BOARD_BUILD_COMMIT BOARD_BUILD_DIRTY=$BOARD_BUILD_DIRTY
 WORKDIR /app
 COPY package.json ./
 COPY --from=build /app/node_modules ./node_modules

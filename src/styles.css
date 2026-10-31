@@ -4055,3 +4055,17 @@ textarea {
   .workspace-section-nav { position: static; flex-direction: row; flex-wrap: wrap; }
   .workspace-section-nav a { border: 1px solid var(--line); padding: 8px 12px; }
 }
+
+.build-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.build-version a { color: inherit; text-underline-offset: 3px; }
+.sidebar-version-tag { font-size: 10px; opacity: 1; user-select: text; }
+.sidebar-version-tag .build-version { justify-content: center; font-size: inherit; margin-bottom: 0; gap: 4px 8px; }

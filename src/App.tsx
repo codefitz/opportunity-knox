@@ -1,3 +1,4 @@
+import BuildVersion from "./components/BuildVersion";
 import WorkspaceSections from "./components/WorkspaceSections";
 import AIActivity,{type ActivityDestination} from "./components/AIActivity";
 import RecordImports from "./components/RecordImports";
@@ -384,11 +385,26 @@ export default function App() {
   useEffect(() => {
     if (session?.authenticated) {
       void load();
-      api<UpdateStatus>("/updates/check").then(
-        (status) => { if (status) setUpdateStatus(status); },
-        () => {},
-      );
     }
+  }, [session?.authenticated]);
+  useEffect(() => {
+    if (!session?.authenticated) return;
+    let active = true;
+    let checking = false;
+    const check = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const status = await api<UpdateStatus>("/updates/check");
+        if (active) setUpdateStatus(status);
+      } catch {
+        if (active) setUpdateStatus(current => current ? { ...current, checkError: "Update check unavailable." } : current);
+      } finally { checking = false; }
+    };
+    void check();
+    const interval = window.setInterval(() => void check(), 30000);
+    window.addEventListener("focus", check);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", check); };
   }, [session?.authenticated]);
   useEffect(() => {
     if (session?.authenticated && (page === "dashboard" || page === "todos"))
@@ -746,8 +762,8 @@ export default function App() {
             onClick={() => void restartBoard()}
             title={
               updateStatus?.updateAvailable
-                ? `New version ${updateStatus.latestVersion || ""} is available. Click to apply.`
-                : undefined
+                ? updateStatus.reason || "An update is available."
+                : updateStatus?.checkError || undefined
             }
           >
             <RotateCw size={14} className={restarting ? "spin" : undefined} />
@@ -755,7 +771,7 @@ export default function App() {
             {updateStatus?.updateAvailable ? (
               <span
                 className="update-indicator-pill"
-                title={`Version ${updateStatus.latestVersion || "new"} available`}
+                title={updateStatus.reason || "Update available"}
               >
                 Update
               </span>
@@ -779,11 +795,7 @@ export default function App() {
             <LogOut size={14} />
             Sign out
           </button>
-          {updateStatus?.currentVersion && (
-            <div className="sidebar-version-tag">
-              v{updateStatus.currentVersion}
-            </div>
-          )}
+          {updateStatus && <div className="sidebar-version-tag"><BuildVersion status={updateStatus} /></div>}
         </div>
       </aside>
       <div className="main-shell">
@@ -5509,6 +5521,7 @@ function SettingsPage({
           <p>Your files, preferences, and future connections.</p>
         </div>
       </div>
+      {updateStatus && <BuildVersion status={updateStatus} />}
       <WorkspaceSections label="Settings sections" sections={[
         { id: "profile", label: "Profile", content: <>
       <ProfileSettings
@@ -5764,14 +5777,16 @@ function SettingsPage({
               opportunities, documents, and active sign-in session are
               preserved.
             </p>
+            {updateStatus?.reason && <p role="status">{updateStatus.reason}</p>}
+            {updateStatus?.checkError && <p role="status">{updateStatus.checkError} Local source detection is separate.</p>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {updateStatus?.updateAvailable ? (
               <span
                 className="update-indicator-pill"
-                title={`Version ${updateStatus.latestVersion || "new"} available`}
+                title={updateStatus.reason || "Update available"}
               >
-                New version: {updateStatus.latestVersion}
+                {updateStatus.localUpdateAvailable ? "Local changes ready" : "Update available"}
               </span>
             ) : null}
             <button

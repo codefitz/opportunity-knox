@@ -209,7 +209,36 @@ def setup_token(state_dir: Path) -> str:
     return token
 
 
+def source_status(repo: Path = REPO) -> dict:
+    """Fingerprint build inputs, excluding private/runtime/generated files."""
+    paths = [repo / name for name in ("Dockerfile", "compose.yaml", "package.json", "package-lock.json", "index.html", "vite.config.ts", "tsconfig.json")]
+    for name in ("src", "server", "scripts"):
+        paths.extend(path for path in (repo / name).rglob("*")
+                     if path.is_file() and not path.is_symlink()
+                     and "__pycache__" not in path.parts and path.suffix != ".pyc")
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        if path.is_file():
+            content = path.read_bytes()
+            digest.update(path.relative_to(repo).as_posix().encode() + b"\0")
+            digest.update(str(len(content)).encode() + b"\0" + content)
+    dirty = False
+    try:
+        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                                capture_output=True, text=True, timeout=2, check=False)
+        commit = result.stdout.strip() if result.returncode == 0 else ""
+        if commit:
+            result = subprocess.run(["git", "status", "--porcelain", "--untracked-files=normal"],
+                                    cwd=repo, capture_output=True, text=True, timeout=2, check=False)
+            dirty = bool(result.stdout.strip()) if result.returncode == 0 else False
+    except (OSError, subprocess.TimeoutExpired):
+        commit = ""
+    return {"sourceHash": digest.hexdigest(), "commit": commit, "dirty": dirty, "checkedAt": time.time()}
+
+
 def compose_override(config: dict, state_dir: Path, token: str) -> dict:
+    build_source = source_status()
+    atomic_json(state_dir / "source-status.json", build_source)
     roots = config["roots"]
     vault_host = config.get("vault")
     mounts = [{"type": "bind", "source": str(state_dir), "target": "/data", "bind": {"create_host_path": False}}]
@@ -231,6 +260,7 @@ def compose_override(config: dict, state_dir: Path, token: str) -> dict:
         source_mounts.append({**source,"path":target})
     env["BOARD_SOURCE_ROOTS"]=json.dumps(source_mounts)
     override = {"services": {"board": {
+        "build": {"args": {"BOARD_BUILD_SOURCE_HASH": build_source["sourceHash"], "BOARD_BUILD_COMMIT": build_source["commit"], "BOARD_BUILD_DIRTY": "1" if build_source.get("dirty") else "0"}},
         "ports": [{"target": 4318, "published": str(config["port"]), "host_ip": config["bind"], "protocol": "tcp"}],
         "environment": env,
         "volumes": mounts,
@@ -356,8 +386,15 @@ def watch_loop(state_dir: Path, *, once: bool = False) -> int:
     request_path = state_dir / "pending-restart.json"
     heartbeat_path = state_dir / ".watcher.heartbeat"
     status_path = state_dir / "restart-status.json"
+    next_source_check = 0
     try:
         while True:
+            if time.monotonic() >= next_source_check:
+                try:
+                    atomic_json(state_dir / "source-status.json", source_status())
+                except OSError:
+                    pass  # A source file may be replaced while an editor saves it; retry next time.
+                next_source_check = time.monotonic() + 30
             heartbeat_path.touch()
             maintenance_path = state_dir / "pending-maintenance.json"
             if maintenance_path.exists():

@@ -1,8 +1,16 @@
 # Opportunity Knox
 
+[Latest stable release: v0.4.6](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current development version: v0.4.7-dev.0** (`main`)
+
 A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
 ![Cappuccino dashboard preview with fictional test opportunities](docs/preview.png)
+
+## Releases and development
+
+Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release; it can contain changes beyond v0.4.6.
+
+The sidebar and Settings show the installed version, development/release label, and short Git commit linked to GitHub. Builds made with uncommitted changes also show **+ local changes**, because the commit alone does not describe their complete source. The **Latest release** link always opens GitHub's latest published release. Build labels describe the running app, not newer code waiting on the host.
 
 ## Start the board
 
@@ -130,3 +138,9 @@ The launcher's tests use temporary folders and mocked commands. They do not star
 ### Settings and Career Hub sections
 
 Settings uses section navigation for Profile, Appearance, Files & storage, AI workflow, Recovery, Import records, Backups & export, Connections, Career Buddy, Embeddings, and Fit & decision model. Career Hub (formerly Career Library) opens on Documents, with separate Text preparation, Semantic search, Connections, and Obsidian vault sections. Switching sections preserves in-progress forms and uploads while the page remains open. Section links support refresh and browser Back/Forward; existing `#/library` links still work. On smaller screens, section navigation wraps above the content.
+
+### Update detection
+
+Launcher-built images record their source fingerprint and Git commit. The host watcher checks local build inputs every 30 seconds, including uncommitted edits, additions and deletions. The GUI checks at sign-in, every 30 seconds and on focus, so local changes normally appear within a minute without reloading. Reverting those changes clears the indicator. Private state, documents, generated files and documentation are excluded from the fingerprint. Stale host observations are not used.
+
+GitHub version/commit checks are cached for five minutes. Same-version commits are compared against the installed build; only fast-forward upstream changes count. GitHub failures are reported separately from local detection. “Local changes ready” can be applied with Update & restart. For upstream-only updates, pull the code on the host first: the launcher rebuilds local source and does not automatically pull or overwrite your working tree. Existing installations need one launcher restart to install build metadata and refresh the watcher. Images built directly without launcher build arguments have no local-source baseline.

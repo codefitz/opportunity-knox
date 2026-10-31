@@ -417,3 +417,21 @@ Deployment through the normal launcher completed with a verified full backup of 
 `npm run check` passed: production build, 248 Node tests and 39 Python launcher/helper tests. The section-navigation regression check verifies direct links, unknown-section fallback and retention of inactive panel contents.
 
 An isolated local server with a disposable account verified all eleven Settings sections and all five Career Hub sections, unsaved profile retention while switching sections, section selection after reload, browser Back/Forward, and desktop/390-pixel viewport layouts. Neither page had horizontal overflow at phone width; the browser reported no console warnings/errors. Existing `#/library` routes still open Documents. The production service, personal records, stored files and feedback statuses were not modified; these source changes have not been deployed to the running board.
+
+## Build-aware update detection — 31 October 2026
+
+`npm run check` passed: production build, 251 Node tests and 41 Python launcher/helper tests. Regression coverage includes source edits/additions/deletions and reversions, excluded runtime/private/documentation files, immutable Compose build arguments, same-version upstream fast-forward comparisons, divergent/older commits, offline local detection, stale observations, cache behaviour and shared concurrent remote checks. The six update-checker tests also passed after formatting.
+
+An isolated local preview with disposable state and simulated upstream responses verified that an unchanged baseline has no badge and a changed host observation produces the sidebar Update badge and “Local changes ready” automatically while Settings stays open, without reloading. Reverting the observation to the installed baseline cleared the badge automatically. Browser console showed no warnings or errors. Production Docker build metadata and host watcher integration still require deployment verification. Automatic approval review blocked rebuilding/restarting the live board pending explicit user approval; no live service or personal data was changed.
+
+### Live installation — 31 October 2026
+
+After explicit approval, the launcher installed the build-aware update fix on port 4318 with a verified pre-upgrade backup. A null saved `vectorIndexJob` initially exposed an idle-check crash before the service was stopped; the check now accepts null optional indexing/feedback state while still rejecting active work. The regression test and full checks passed: 251 Node tests and 42 Python launcher/helper tests.
+
+The launcher completed its rebuild/restart and reported a healthy container. Read-only runtime checks confirmed a served frontend, immutable build fingerprint, matching fresh host observation, `localCheckAvailable: true`, and a successful remote check with no update currently pending. No personal records were edited. The live GUI itself was not exercised after this installation; existing browser tabs need a reload to load the new client code.
+
+## Development build identity — 31 October 2026
+
+`npm run check` passed with version `0.4.7-dev.0`: production build, 252 Node tests and 42 Python launcher/helper tests. New coverage verifies rendered development/release labels, exact GitHub commit/latest-release targets, missing-commit handling, local-change metadata propagation and stable-over-development version comparison. Package and lockfile versions agree.
+
+A disposable local preview verified the real checkout's short Git commit, development version and local-change marker in Settings and the sidebar accessibility tree. Settings was visually checked on desktop and at a 390-pixel viewport, without horizontal overflow or browser console warnings/errors. The latest-release target was verified against GitHub's published v0.4.6 release. No production restart/deployment, release modification, commit or push was performed.

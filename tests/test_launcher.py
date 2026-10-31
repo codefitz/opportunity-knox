@@ -32,6 +32,39 @@ class LauncherTests(unittest.TestCase):
     def save(self, config):
         launcher.atomic_json(self.state / "launcher.json", config)
 
+    def test_source_fingerprint_detects_edits_additions_deletions_but_not_runtime_data(self):
+        repo = self.root / "repo"
+        (repo / "src").mkdir(parents=True)
+        source = repo / "src" / "App.tsx"
+        source.write_text("original")
+        first = launcher.source_status(repo)["sourceHash"]
+        (repo / ".local").mkdir()
+        (repo / ".local" / "private.sqlite").write_text("private")
+        (repo / "docs").mkdir()
+        (repo / "docs" / "note.md").write_text("documentation")
+        self.assertEqual(launcher.source_status(repo)["sourceHash"], first)
+        source.write_text("edited")
+        self.assertNotEqual(launcher.source_status(repo)["sourceHash"], first)
+        source.write_text("original")
+        extra = repo / "src" / "new.ts"
+        extra.write_text("new")
+        self.assertNotEqual(launcher.source_status(repo)["sourceHash"], first)
+        extra.unlink()
+        self.assertEqual(launcher.source_status(repo)["sourceHash"], first)
+        source.unlink()
+        self.assertNotEqual(launcher.source_status(repo)["sourceHash"], first)
+
+    def test_compose_records_immutable_build_baseline_and_host_observation(self):
+        config, _ = launcher.make_config(self.args(), self.state)
+        source = {"sourceHash": "a" * 64, "commit": "b" * 40, "dirty": True, "checkedAt": 123}
+        with patch.object(launcher, "source_status", return_value=source):
+            service = launcher.compose_override(config, self.state, "test")["services"]["board"]
+        self.assertEqual(service["build"]["args"]["BOARD_BUILD_SOURCE_HASH"], source["sourceHash"])
+        self.assertEqual(service["build"]["args"]["BOARD_BUILD_COMMIT"], source["commit"])
+        self.assertEqual(launcher.read_json(self.state / "source-status.json"), source)
+        self.assertNotIn("BOARD_BUILD_SOURCE_HASH", service["environment"])
+        self.assertEqual(service["build"]["args"]["BOARD_BUILD_DIRTY"], "1")
+
     def test_flags_and_default_command(self):
         self.assertEqual(launcher.parse_args([]).command, "start")
         args = self.args("--port", "9418", "--bind", "0.0.0.0", "--no-open")

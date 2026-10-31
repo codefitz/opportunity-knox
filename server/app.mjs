@@ -1254,7 +1254,7 @@ export function createApp(options = {}) {
           });
         }
         if (path === "/api/updates/check" && (method === "GET" || method === "POST")) {
-          const status = await updateChecker.checkForUpdates(true);
+          const status = await updateChecker.checkForUpdates(method === "POST");
           return json(res, status);
         }
         if (path === "/api/opportunities" && method === "POST") {

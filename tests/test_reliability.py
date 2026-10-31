@@ -12,6 +12,15 @@ class ReliabilityTests(unittest.TestCase):
  def start(self,c):self.starts.append(c);r.write(self.state/'launcher.json',c);r.write(self.state/'runtime.compose.json',{'files':c['files']})
  def plan(self,kind='migrate',**extra):
   request={'action':'preview','kind':kind,'destination':str(self.dest),'requestId':str(uuid.uuid4()),**extra};r.preview(self.state,self.config,request);return r.read(self.state/'maintenance'/('plan-'+request['requestId']+'.json'))
+ def test_idle_accepts_null_optional_jobs_but_blocks_active_work(self):
+  db=r.connection(self.state)
+  db.executemany('INSERT INTO config VALUES(?,?)', [('vectorIndexJob','null'),('feedbackInbox','null')]);db.commit();db.close()
+  r.idle(self.state)
+  for status in ('running','cancelling'):
+   db=r.connection(self.state);db.execute('UPDATE config SET data=? WHERE key=?',(json.dumps({'status':status}),'vectorIndexJob'));db.commit();db.close()
+   with self.assertRaisesRegex(ValueError,'Stop library indexing first'):r.idle(self.state)
+  db=r.connection(self.state);db.execute('UPDATE config SET data=? WHERE key=?',('null','vectorIndexJob'));db.execute('UPDATE config SET data=? WHERE key=?',(json.dumps({'items':[{'reviewStatus':'running'}]}),'feedbackInbox'));db.commit();db.close()
+  with self.assertRaisesRegex(ValueError,'Finish feedback reviews first'):r.idle(self.state)
  def test_copy_verifies_originals_submitted_versions_and_retains_portable_backup(self):
   plan=self.plan();result=r.install(self.state,self.config,plan,self.stop,self.start);db=r.connection(self.state);doc=r.documents(db)[0];db.close();new=self.starts[-1];self.assertEqual(self.path.read_bytes(),b'Fictional original');self.assertEqual(doc['status'],'submitted');self.assertEqual(doc['id'],self.id);self.assertEqual(doc['revision'],2);self.assertEqual(r.resolve_document(doc,new).read_bytes(),b'Fictional original');self.assertTrue((Path(new['files'])/'backups'/result['backup']/'board.sqlite').exists());self.assertEqual(r.read(self.state/'maintenance'/'transaction.json')['state'],'committed')
  def test_changed_inputs_are_rejected_before_stopping(self):

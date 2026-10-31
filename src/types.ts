@@ -127,6 +127,12 @@ export type Appearance = {
 };
 export type Profile = { name: string; avatarUrl: string; revision: number };
 export type UpdateStatus = {
+  localUpdateAvailable?: boolean;
+  localCheckAvailable?: boolean;
+  currentCommit?: string;
+  buildDirty?: boolean;
+  latestCommit?: string;
+  checkError?: string;
   updateAvailable: boolean;
   currentVersion: string;
   latestVersion: string;

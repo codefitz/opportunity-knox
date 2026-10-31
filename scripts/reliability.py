@@ -189,8 +189,8 @@ def idle(state):
         tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if 'buddy_requests' in tables and any(not r.get('finishedAt') for r in rows(db,'buddy_requests')):raise ValueError('Finish or cancel active AI requests before changing the workspace.')
         if 'opportunity_automation' in tables and any(r.get('state') in ('queued','running','cancelling') for r in rows(db,'opportunity_automation')):raise ValueError('Finish or cancel automatic reviews first.')
-        if config_value(db,'vectorIndexJob',{}).get('status') in ('running','cancelling'):raise ValueError('Stop library indexing first.')
-        if any(r.get('reviewStatus')=='running' for r in config_value(db,'feedbackInbox',{}).get('items',[])):raise ValueError('Finish feedback reviews first.')
+        if (config_value(db,'vectorIndexJob',{}) or {}).get('status') in ('running','cancelling'):raise ValueError('Stop library indexing first.')
+        if any(r.get('reviewStatus')=='running' for r in (config_value(db,'feedbackInbox',{}) or {}).get('items',[])):raise ValueError('Finish feedback reviews first.')
     finally:db.close()
 
 def process_request(state,config,request,stop,start):

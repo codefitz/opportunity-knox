@@ -292,3 +292,11 @@ Settings → Semantic search now discovers embedding models from OpenAI, Ollama 
 ## Settings sections and Career Hub — 31 October 2026
 
 Settings and Career Hub now use shared, responsive section navigation rather than one long pane. Career Library is renamed Career Hub throughout the interface; existing library routes and stored folder names are retained. Documents is the Hub default, with preparation, semantic search, connections and Obsidian separated. Panels remain mounted across section changes to preserve drafts and ongoing work. Section URLs support browser history and direct links, including opportunity/AI activity links to Career Buddy configuration.
+
+## Build-aware update detection — 31 October 2026
+
+The launcher records immutable source/commit build metadata and publishes host-side source fingerprint observations through the existing private state mount. The GUI polls separately from board refresh, including while Settings is open. Local edits are detected without a version bump or repository mount; remote checks use versions and fast-forward commit comparisons with a five-minute cache. Update messages distinguish local rebuilds from upstream changes requiring a host pull. No automatic source pulls or upgrades were added.
+
+## Development build identity — 31 October 2026
+
+Main now identifies as `0.4.7-dev.0`, with `v0.4.6` retained as the published stable release. Sidebar and Settings show the running version, development/release label, linked short build commit and optional uncommitted-changes marker, plus a latest-release link. Launcher Docker metadata records commit and dirty state; direct Node development runs capture their Git identity at startup. README distinguishes stable releases from main development. A stable release supersedes its same-numbered development prerelease.

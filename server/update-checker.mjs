@@ -1,13 +1,10 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Compares two semver strings (e.g. "0.4.5" and "0.4.6").
- * Returns 1 if b > a, -1 if b < a, 0 if equal or invalid.
+ * A stable release supersedes a prerelease with the same numeric version.
  */
 export function isNewerVersion(current, latest) {
   if (!current || !latest) return false;
@@ -21,7 +18,9 @@ export function isNewerVersion(current, latest) {
     if (numB > numA) return true;
     if (numB < numA) return false;
   }
-  return false;
+  return (
+    cleanA.split("+")[0].includes("-") && !cleanB.split("+")[0].includes("-")
+  );
 }
 
 /**
@@ -29,52 +28,58 @@ export function isNewerVersion(current, latest) {
  */
 export function createUpdateChecker(options = {}) {
   const repoDir = options.repoDir || process.cwd();
-  const ttlMs = options.ttlMs ?? 60 * 60 * 1000; // 1 hour cache
+  const ttlMs = options.ttlMs ?? 5 * 60 * 1000; // Cache remote checks; local changes are checked every request.
   const fetcher = options.fetcher || globalThis.fetch;
   const githubRepo = options.githubRepo || "codefitz/opportunity-knox";
 
+  // Direct Node development runs have Git; Docker uses immutable launcher metadata.
+  let localCommit = "",
+    localDirty = false;
+  if (
+    options.buildCommit === undefined &&
+    !process.env.BOARD_BUILD_COMMIT &&
+    existsSync(join(repoDir, ".git"))
+  ) {
+    try {
+      const git = (args) =>
+        execFileSync("git", args, {
+          cwd: repoDir,
+          encoding: "utf8",
+          timeout: 2000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+      localCommit = git(["rev-parse", "HEAD"]);
+      localDirty = Boolean(
+        git(["status", "--porcelain", "--untracked-files=normal"]),
+      );
+    } catch {}
+  }
+  const buildHash =
+    options.buildHash ?? process.env.BOARD_BUILD_SOURCE_HASH ?? "";
+  const buildCommit =
+    options.buildCommit ?? process.env.BOARD_BUILD_COMMIT ?? localCommit;
+  const buildDirty =
+    options.buildDirty ??
+    (process.env.BOARD_BUILD_DIRTY
+      ? process.env.BOARD_BUILD_DIRTY === "1"
+      : localDirty);
+  const sourceStatusPath =
+    options.sourceStatusPath ||
+    join(process.env.BOARD_DATA_DIR || ".local/state", "source-status.json");
+  let remoteError = "";
+  let inFlight = null;
   let cachedStatus = null;
   let cacheExpiry = 0;
 
   function getCurrentVersion() {
     try {
-      const pkg = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf8"));
+      const pkg = JSON.parse(
+        readFileSync(join(repoDir, "package.json"), "utf8"),
+      );
       return pkg.version || "0.0.0";
     } catch {
       return "0.0.0";
     }
-  }
-
-  async function checkGitAhead() {
-    try {
-      // Check if git working directory has commits upstream that can be seen locally
-      const { stdout: localRev } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-        cwd: repoDir,
-        timeout: 2000,
-      });
-      const { stdout: remoteRev } = await execFileAsync(
-        "git",
-        ["rev-parse", "--verify", "origin/main"],
-        {
-          cwd: repoDir,
-          timeout: 2000,
-        },
-      );
-      if (localRev.trim() && remoteRev.trim() && localRev.trim() !== remoteRev.trim()) {
-        const { stdout: counts } = await execFileAsync(
-          "git",
-          ["rev-list", "--count", "HEAD..origin/main"],
-          { cwd: repoDir, timeout: 2000 },
-        );
-        const behind = parseInt(counts.trim(), 10);
-        if (Number.isFinite(behind) && behind > 0) {
-          return { behind, remoteRev: remoteRev.trim().slice(0, 7) };
-        }
-      }
-    } catch {
-      // Git not available or not cloned
-    }
-    return null;
   }
 
   async function checkGitHubRelease() {
@@ -88,7 +93,11 @@ export function createUpdateChecker(options = {}) {
         },
         signal: AbortSignal.timeout(3000),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status !== 404)
+          remoteError = `Update server returned HTTP ${res.status}.`;
+        return null;
+      }
       const data = await res.json();
       if (data && data.tag_name) {
         return {
@@ -99,7 +108,7 @@ export function createUpdateChecker(options = {}) {
         };
       }
     } catch {
-      // Offline, network timeout, rate-limited, or blocked by sandbox
+      remoteError = "Could not check GitHub for updates.";
     }
     return null;
   }
@@ -112,7 +121,10 @@ export function createUpdateChecker(options = {}) {
         headers: { "User-Agent": "OpportunityKnox-UpdateChecker" },
         signal: AbortSignal.timeout(3000),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        remoteError = `Update server returned HTTP ${res.status}.`;
+        return null;
+      }
       const data = await res.json();
       if (data && data.version) {
         return {
@@ -121,7 +133,7 @@ export function createUpdateChecker(options = {}) {
         };
       }
     } catch {
-      // Offline, network timeout, rate-limited, or blocked by sandbox
+      remoteError = "Could not check GitHub for updates.";
     }
     return null;
   }
@@ -137,77 +149,138 @@ export function createUpdateChecker(options = {}) {
         },
         signal: AbortSignal.timeout(3000),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        remoteError = `Update server returned HTTP ${res.status}.`;
+        return null;
+      }
       const data = await res.json();
       if (data && data.sha) {
         return {
           sha: data.sha,
           message: data.commit?.message?.split("\n")[0] || "",
-          htmlUrl: data.html_url || `https://github.com/${githubRepo}/commits/main`,
+          htmlUrl:
+            data.html_url || `https://github.com/${githubRepo}/commits/main`,
         };
       }
     } catch {
-      // Offline, network timeout, rate-limited, or blocked by sandbox
+      remoteError = "Could not check GitHub for updates.";
     }
     return null;
   }
 
-  async function checkForUpdates(force = false) {
+  function withLocalStatus(status) {
+    let local = null;
+    try {
+      local = JSON.parse(readFileSync(sourceStatusPath, "utf8"));
+    } catch {}
+    const fresh =
+      local &&
+      Number.isFinite(local.checkedAt) &&
+      Date.now() - local.checkedAt * 1000 < 120_000;
+    const localUpdateAvailable = Boolean(
+      buildHash &&
+      fresh &&
+      /^[a-f0-9]{64}$/.test(local.sourceHash) &&
+      local.sourceHash !== buildHash,
+    );
+    return {
+      ...status,
+      updateAvailable: localUpdateAvailable || status.updateAvailable,
+      localUpdateAvailable,
+      currentCommit: buildCommit,
+      buildDirty,
+      localCheckAvailable: Boolean(buildHash && fresh),
+      reason: localUpdateAvailable
+        ? "Local code has changed. Update & restart to rebuild this board."
+        : status.reason,
+    };
+  }
+
+  async function checkRemoteUpdates() {
     const now = Date.now();
-    if (!force && cachedStatus && now < cacheExpiry) {
-      return cachedStatus;
-    }
-
     const currentVersion = getCurrentVersion();
-    let latestVersion = currentVersion;
-    let updateAvailable = false;
-    let releaseUrl = "";
-    let reason = "";
-
-    // 1. Try checking GitHub release
-    const ghRelease = await checkGitHubRelease();
-    if (ghRelease && isNewerVersion(currentVersion, ghRelease.version)) {
-      updateAvailable = true;
-      latestVersion = ghRelease.version;
-      releaseUrl = ghRelease.releaseUrl;
-      reason = `New version ${ghRelease.version} is available.`;
-    }
-
-    // 2. Try checking upstream raw package.json if no release tag was published
-    if (!updateAvailable) {
-      const ghPkg = await checkGitHubPackage();
-      if (ghPkg && isNewerVersion(currentVersion, ghPkg.version)) {
-        updateAvailable = true;
-        latestVersion = ghPkg.version;
-        releaseUrl = ghPkg.releaseUrl;
-        reason = `New version ${ghPkg.version} is available on GitHub.`;
-      }
-    }
-
-    // 3. Try checking git commits behind origin/main if local git exists
-    if (!updateAvailable) {
-      const gitStatus = await checkGitAhead();
-      if (gitStatus && gitStatus.behind > 0) {
-        updateAvailable = true;
-        reason = `${gitStatus.behind} new update(s) available from git.`;
-      }
-    }
-
-    cachedStatus = {
-      updateAvailable,
+    let status = {
+      updateAvailable: false,
       currentVersion,
-      latestVersion,
-      releaseUrl,
-      reason,
+      latestVersion: currentVersion,
+      releaseUrl: "",
+      reason: "",
+    };
+    remoteError = "";
+    const release = await checkGitHubRelease();
+    const pkg =
+      release && isNewerVersion(currentVersion, release.version)
+        ? null
+        : await checkGitHubPackage();
+    const latest =
+      release && isNewerVersion(currentVersion, release.version)
+        ? release
+        : pkg;
+    if (latest && isNewerVersion(currentVersion, latest.version)) {
+      status = {
+        ...status,
+        updateAvailable: true,
+        latestVersion: latest.version,
+        releaseUrl: latest.releaseUrl,
+        reason: `Version ${latest.version} is available on GitHub. Pull the updated code on the host before rebuilding.`,
+      };
+    }
+    if (!status.updateAvailable && buildCommit) {
+      const latestCommit = await checkGitHubCommit();
+      if (latestCommit && latestCommit.sha !== buildCommit) {
+        try {
+          const res = await fetcher(
+            `https://api.github.com/repos/${githubRepo}/compare/${encodeURIComponent(buildCommit)}...${encodeURIComponent(latestCommit.sha)}`,
+            {
+              headers: {
+                "User-Agent": "OpportunityKnox-UpdateChecker",
+                Accept: "application/vnd.github.v3+json",
+              },
+              signal: AbortSignal.timeout(3000),
+            },
+          );
+          if (!res.ok)
+            remoteError = `Could not compare installed and upstream commits (HTTP ${res.status}).`;
+          else {
+            const comparison = await res.json();
+            // Only fast-forward updates: a different/older branch is not an installable update.
+            if (comparison.status === "ahead" && comparison.ahead_by > 0) {
+              status = {
+                ...status,
+                updateAvailable: true,
+                latestCommit: latestCommit.sha,
+                releaseUrl: latestCommit.htmlUrl,
+                reason: `${comparison.ahead_by} newer commit(s) on GitHub. Pull the updated code on the host before rebuilding.`,
+              };
+            }
+          }
+        } catch {
+          remoteError = "Could not compare installed and upstream commits.";
+        }
+      }
+    }
+    cachedStatus = {
+      ...status,
+      checkError: remoteError,
       checkedAt: new Date(now).toISOString(),
     };
     cacheExpiry = now + ttlMs;
-
     return cachedStatus;
   }
 
+  async function checkForUpdates(force = false) {
+    if (force || !cachedStatus || Date.now() >= cacheExpiry) {
+      if (!inFlight)
+        inFlight = checkRemoteUpdates().finally(() => {
+          inFlight = null;
+        });
+      await inFlight;
+    }
+    return withLocalStatus(cachedStatus);
+  }
+
   function getStatusSync() {
-    return (
+    return withLocalStatus(
       cachedStatus || {
         updateAvailable: false,
         currentVersion: getCurrentVersion(),
@@ -215,7 +288,7 @@ export function createUpdateChecker(options = {}) {
         releaseUrl: "",
         reason: "",
         checkedAt: null,
-      }
+      },
     );
   }
 
