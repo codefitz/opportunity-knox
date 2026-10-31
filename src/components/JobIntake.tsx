@@ -194,7 +194,7 @@ export default function JobIntake({
       {useAI && (
         <p className="buddy-muted">
           Only the extracted job text goes to your configured Career Buddy
-          provider. Career Library evidence is not included.
+          provider. Career Hub evidence is not included.
         </p>
       )}
       <button

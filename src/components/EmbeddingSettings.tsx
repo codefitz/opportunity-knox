@@ -231,7 +231,7 @@ export default function EmbeddingSettings({
           : "local SQLite";
       setNotice(
         result.provider === "builtin"
-          ? `Embedding settings saved. Local MiniLM indexing with ${backendLabel} is ready in the Career Library.`
+          ? `Embedding settings saved. Local MiniLM indexing with ${backendLabel} is ready in the Career Hub.`
           : `Embedding settings saved (${result.model || result.provider} with ${backendLabel}). Saving does not start indexing or send documents.`,
       );
     } catch (err) {
@@ -651,7 +651,7 @@ export default function EmbeddingSettings({
           Model discovery checks the endpoint’s model list, and capability
           testing sends a short fictional phrase to verify embedding output,
           vector dimensions, and optional vector store reachability. Indexing in
-          the Career Library uses the saved embedding provider and vector store
+          the Career Hub uses the saved embedding provider and vector store
           backend only when you explicitly start an indexing job.
         </p>
         {error && (

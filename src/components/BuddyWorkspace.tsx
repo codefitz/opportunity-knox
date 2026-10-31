@@ -287,7 +287,7 @@ export default function BuddyWorkspace({
                   setPending(null);
                 }}
               />
-              Use career library — automatically find relevant evidence
+              Use Career Hub — automatically find relevant evidence
             </label>
             <p className="buddy-muted">
               When checked, Buddy chooses relevant library/folder/vault sources
@@ -298,7 +298,7 @@ export default function BuddyWorkspace({
             <details>
               <summary>CV template and document sources</summary>
               <label className="field">
-                <span>Template from configured career library or vault</span>
+                <span>Template from configured Career Hub or vault</span>
                 <input
                   aria-label="Find a template by name or configured folder"
                   placeholder="Find a template by name or configured folder"
@@ -422,7 +422,7 @@ export default function BuddyWorkspace({
               <p>
                 Chat attachments are stored privately with the board and
                 included in full backups. They are not added to or indexed in
-                the career library. Deleting a file does not remove conversation
+                the Career Hub. Deleting a file does not remove conversation
                 text already saved in history.
               </p>
               {state?.attachments?.map((a) => (
@@ -455,7 +455,7 @@ export default function BuddyWorkspace({
                       type="button"
                       className="button secondary small"
                       disabled={busy}
-                      title="Promote this attachment into the Career library as reusable reference material"
+                      title="Promote this attachment into the Career Hub as reusable reference material"
                       onClick={async () => {
                         setBusy(true);
                         try {
@@ -618,7 +618,7 @@ export default function BuddyWorkspace({
                       </p>
                       {m.proposal.star && !m.appliedAt && (
                         <label className="field" style={{ marginTop: "8px", marginBottom: "8px" }}>
-                          <span>Story title (optional file name in Career library)</span>
+                          <span>Story title (optional file name in Career Hub)</span>
                           <input
                             type="text"
                             maxLength={100}

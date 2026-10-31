@@ -1,3 +1,4 @@
+import WorkspaceSections from "./components/WorkspaceSections";
 import AIActivity,{type ActivityDestination} from "./components/AIActivity";
 import RecordImports from "./components/RecordImports";
 import OpportunityBriefing from "./components/OpportunityBriefing";
@@ -119,7 +120,7 @@ const PAGE_LABELS: Record<Page, string> = {
   opportunities: "Opportunities",
   board: "Kanban board",
   todos: "To-do list",
-  library: "Career library",
+  library: "Career Hub",
   buddy: "Career Buddy",
   activity: "AI activity",
   settings: "Settings",
@@ -317,8 +318,9 @@ export default function App() {
       .then(setSession)
       .catch((e) => setBootError(displayError(e)));
   }, []);
-  function navigate(next: Page) {
-    if (window.location.hash !== `#/${next}`) window.location.hash = `/${next}`;
+  function navigate(next: Page, section?: string) {
+    const hash = `#/${next}${section ? `?section=${section}` : ""}`;
+    if (window.location.hash !== hash) window.location.hash = hash;
     setPage(next);
   }
   useEffect(() => {
@@ -682,7 +684,7 @@ export default function App() {
               },
               { id: "board", label: "Kanban board", icon: LayoutGrid },
               { id: "todos", label: "To-do list", icon: ListTodo },
-              { id: "library", label: "Career library", icon: FolderOpen },
+              { id: "library", label: "Career Hub", icon: FolderOpen },
               { id: "buddy", label: "Career Buddy", icon: Sparkles },
               { id: "activity", label: "AI activity", icon: Clock3 },
               { id: "settings", label: "Settings", icon: Settings2 },
@@ -1163,7 +1165,7 @@ export default function App() {
             )}
           </main>
         )}
-        {page === "activity" && <AIActivity timezone={settings?.timezone||"Europe/London"} onError={report} onOpen={(destination:ActivityDestination)=>{if(destination.type==="opportunity"&&destination.id)void openOpportunity(destination.id,destination.tab);else if(destination.type==="buddy"){localStorage.setItem("knox-buddy-conversation",destination.id||"legacy");navigate("buddy");}else if(destination.type==="intake"){setNewUrl("");setNewFile(null);setNewText("");setNewOpen(true);}else if(destination.type==="feedback")window.dispatchEvent(new Event("knox-feedback-inbox"));else navigate("settings");}}/>}
+        {page === "activity" && <AIActivity timezone={settings?.timezone||"Europe/London"} onError={report} onOpen={(destination:ActivityDestination)=>{if(destination.type==="opportunity"&&destination.id)void openOpportunity(destination.id,destination.tab);else if(destination.type==="buddy"){localStorage.setItem("knox-buddy-conversation",destination.id||"legacy");navigate("buddy");}else if(destination.type==="intake"){setNewUrl("");setNewFile(null);setNewText("");setNewOpen(true);}else if(destination.type==="feedback")window.dispatchEvent(new Event("knox-feedback-inbox"));else navigate("settings", "career-buddy");}}/>}
         {page === "buddy" && <BuddyWorkspace onError={report} onChanged={()=>void load(true)} />}
         {page === "library" && (
           <Library
@@ -1226,7 +1228,7 @@ export default function App() {
           onReload={() => void openOpportunity(selected.id)}
           onConfigureBuddy={() => {
             setSelected(null);
-            navigate("settings");
+            navigate("settings", "career-buddy");
             requestAnimationFrame(() =>
               document
                 .getElementById("career-buddy-settings")
@@ -3433,7 +3435,7 @@ function Documents({
               ? "Move library file"
               : `Move ${moveDocuments.length} library files`
           }
-          subtitle="Choose a folder within your configured Career Library location."
+          subtitle="Choose a folder within your configured Career Hub location."
           onClose={() => {
             if (!moving) setMoveDocuments(null);
           }}
@@ -4470,7 +4472,7 @@ function ObsidianVaultPanel({
                 className="button secondary small"
                 disabled={Boolean(busy)}
                 onClick={() => void handleSyncFromVault()}
-                title="Import new or edited Markdown notes and files from your Obsidian vault into your Career Library"
+                title="Import new or edited Markdown notes and files from your Obsidian vault into your Career Hub"
               >
                 {busy === "sync" ? (
                   <LoaderCircle size={14} className="spin" />
@@ -4484,7 +4486,7 @@ function ObsidianVaultPanel({
                 className="button secondary small"
                 disabled={Boolean(busy) || totalDocs === 0 || Boolean(obsidian?.readOnly)}
                 onClick={() => void handleImportToVault()}
-                title="Export existing Career Library sources into your Obsidian vault"
+                title="Export existing Career Hub sources into your Obsidian vault"
               >
                 {busy === "export" ? (
                   <LoaderCircle size={14} className="spin" />
@@ -4740,7 +4742,7 @@ function ObsidianVaultPanel({
                   onChange={(e) => setImportExisting(e.target.checked)}
                 />
                 <span>
-                  Import existing Career Library sources into this vault right
+                  Import existing Career Hub sources into this vault right
                   away ({totalDocs} document{totalDocs === 1 ? "" : "s"})
                 </span>
               </label>
@@ -4766,7 +4768,7 @@ function ObsidianVaultPanel({
                   />
                   <span>
                     Import existing notes and attachments from this Obsidian
-                    vault into your Career Library
+                    vault into your Career Hub
                   </span>
                 </label>
               )}
@@ -4949,7 +4951,10 @@ function Library({
         e.preventDefault();
         setPageDragOver(false);
         void collectDroppedFiles(e.dataTransfer).then((items) => {
-          if (items.length) setDroppedQueue(items);
+          if (items.length) {
+            window.location.hash = "/library?section=documents";
+            setDroppedQueue(items);
+          }
           else
             onError(
               new Error(
@@ -4963,7 +4968,7 @@ function Library({
         <div>
           <div className="eyebrow">BUILT ON YOUR EXPERIENCE</div>
           <h1>
-            Your career library<span className="heading-dot">.</span>
+            Career Hub<span className="heading-dot">.</span>
           </h1>
           <p>
             Bring your career material together. Give Career Buddy the evidence
@@ -4974,130 +4979,8 @@ function Library({
           {docs.length} document{docs.length === 1 ? "" : "s"}
         </Badge>
       </div>
-      <div className="library-intro-panel">
-        <div>
-          <FolderOpen size={24} />
-          <h2>Your career, in its own words.</h2>
-          <p>
-            Drop in CVs, old job descriptions, project notes, achievements,
-            certificates, interview notes, articles, or entire folders of
-            career-related evidence. This is your source library; you can select
-            what Career Buddy reads for each conversation.
-          </p>
-        </div>
-        <div className="library-index-state">
-          <span className="badge green">
-            <Check size={12} />
-            Stored originals
-          </span>
-          <span className="badge muted">Local text preparation</span>
-          <p>
-            PDF, DOCX, PPTX, HTML, RTF, captions (.vtt/.srt), and text files can
-            be prepared locally as text chunks. Career Buddy selects excerpts by
-            matching words and, for indexed sources, meaning. Select sources for semantic indexing below. Selected
-            excerpts are sent only when you message Career Buddy. Scanned PDFs
-            need OCR first; originals stay unchanged.
-          </p>
-        </div>
-      </div>
-      <VectorIndex onError={onError} refreshKey={connectionRevision} />
-      <div className="buddy-library-tools">
-        <p>
-          {docs.filter((doc) => extraction[doc.id]?.status === "ready").length}{" "}
-          of {docs.length} documents have readable text ready. Preparation is
-          local and needs no API key.
-        </p>
-        <div className="library-tool-actions">
-          <button
-            type="button"
-            className="button secondary small"
-            disabled={preparing || resetting || clearing || !docs.length}
-            onClick={() => void prepare(false)}
-          >
-            {preparing ? (
-              <LoaderCircle size={15} className="spin" />
-            ) : (
-              <Sparkles size={15} />
-            )}{" "}
-            {preparing ? "Preparing text…" : "Prepare library text"}
-          </button>
-          <button
-            type="button"
-            className="button secondary small"
-            disabled={preparing || resetting || clearing || !docs.length}
-            onClick={() => void prepare(true)}
-            title="Clear cached text chunks and re-prepare all library documents from scratch"
-          >
-            <RotateCw size={15} className={preparing ? "spin" : ""} />
-            Reset &amp; re-prepare
-          </button>
-          {docs.some((doc) => extraction[doc.id]?.status === "ready") && (
-            <button
-              type="button"
-              className="button secondary small"
-              disabled={preparing || resetting || clearing}
-              onClick={() => void resetPrepared()}
-              title="Clear prepared text cache so sources move back to Unprepared"
-            >
-              {resetting ? "Resetting…" : "Reset prepared"}
-            </button>
-          )}
-          {docs.some((doc) => doc.status !== "submitted") &&
-            (confirmClearAll ? (
-              <div className="library-clear-confirm">
-                <span>
-                  Clear{" "}
-                  {docs.filter((doc) => doc.status !== "submitted").length}{" "}
-                  library document
-                  {docs.filter((doc) => doc.status !== "submitted").length === 1
-                    ? ""
-                    : "s"}
-                  ?
-                </span>
-                <button
-                  type="button"
-                  className="button danger small"
-                  disabled={clearing}
-                  onClick={() => void clearLibrary()}
-                >
-                  {clearing ? "Clearing…" : "Confirm clear all"}
-                </button>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  disabled={clearing}
-                  onClick={() => setConfirmClearAll(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="button secondary small danger-text"
-                disabled={preparing || resetting || clearing}
-                onClick={() => setConfirmClearAll(true)}
-              >
-                <Trash2 size={15} />
-                Clear all
-              </button>
-            ))}
-        </div>
-      </div>
-      <DocumentConnections onError={onError} onChanged={()=>{setConnectionRevision(v=>v+1);void load();}} onRestart={onRestart} restarting={restarting} />
-      <ObsidianVaultPanel
-        obsidian={obsidian}
-        totalDocs={docs.length}
-        preparedDocsCount={
-          docs.filter((doc) => extraction[doc.id]?.status === "ready").length
-        }
-        timezone={timezone}
-        restarting={restarting}
-        onRestart={onRestart}
-        onReload={load}
-        onNotice={onNotice}
-        onError={onError}
-      />
+      <WorkspaceSections label="Career Hub sections" sections={[
+        { id: "documents", label: "Documents", content: <>
       <div className="content-panel">
         <div className="library-browse-bar">
           <div className="search-input library-search">
@@ -5393,6 +5276,144 @@ function Library({
           career evidence establish your experience.
         </p>
       </div>
+        </> },
+        { id: "preparation", label: "Text preparation", content: <>
+      <div className="library-intro-panel">
+        <div>
+          <FolderOpen size={24} />
+          <h2>Your career, in its own words.</h2>
+          <p>
+            Drop in CVs, old job descriptions, project notes, achievements,
+            certificates, interview notes, articles, or entire folders of
+            career-related evidence. This is your source library; you can select
+            what Career Buddy reads for each conversation.
+          </p>
+        </div>
+        <div className="library-index-state">
+          <span className="badge green">
+            <Check size={12} />
+            Stored originals
+          </span>
+          <span className="badge muted">Local text preparation</span>
+          <p>
+            PDF, DOCX, PPTX, HTML, RTF, captions (.vtt/.srt), and text files can
+            be prepared locally as text chunks. Career Buddy selects excerpts by
+            matching words and, for indexed sources, meaning. Select sources for semantic indexing below. Selected
+            excerpts are sent only when you message Career Buddy. Scanned PDFs
+            need OCR first; originals stay unchanged.
+          </p>
+        </div>
+      </div>
+      <div className="buddy-library-tools">
+        <p>
+          {docs.filter((doc) => extraction[doc.id]?.status === "ready").length}{" "}
+          of {docs.length} documents have readable text ready. Preparation is
+          local and needs no API key.
+        </p>
+        <div className="library-tool-actions">
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={preparing || resetting || clearing || !docs.length}
+            onClick={() => void prepare(false)}
+          >
+            {preparing ? (
+              <LoaderCircle size={15} className="spin" />
+            ) : (
+              <Sparkles size={15} />
+            )}{" "}
+            {preparing ? "Preparing text…" : "Prepare library text"}
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={preparing || resetting || clearing || !docs.length}
+            onClick={() => void prepare(true)}
+            title="Clear cached text chunks and re-prepare all library documents from scratch"
+          >
+            <RotateCw size={15} className={preparing ? "spin" : ""} />
+            Reset &amp; re-prepare
+          </button>
+          {docs.some((doc) => extraction[doc.id]?.status === "ready") && (
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={preparing || resetting || clearing}
+              onClick={() => void resetPrepared()}
+              title="Clear prepared text cache so sources move back to Unprepared"
+            >
+              {resetting ? "Resetting…" : "Reset prepared"}
+            </button>
+          )}
+          {docs.some((doc) => doc.status !== "submitted") &&
+            (confirmClearAll ? (
+              <div className="library-clear-confirm">
+                <span>
+                  Clear{" "}
+                  {docs.filter((doc) => doc.status !== "submitted").length}{" "}
+                  library document
+                  {docs.filter((doc) => doc.status !== "submitted").length === 1
+                    ? ""
+                    : "s"}
+                  ?
+                </span>
+                <button
+                  type="button"
+                  className="button danger small"
+                  disabled={clearing}
+                  onClick={() => void clearLibrary()}
+                >
+                  {clearing ? "Clearing…" : "Confirm clear all"}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={clearing}
+                  onClick={() => setConfirmClearAll(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button secondary small danger-text"
+                disabled={preparing || resetting || clearing}
+                onClick={() => setConfirmClearAll(true)}
+              >
+                <Trash2 size={15} />
+                Clear all
+              </button>
+            ))}
+        </div>
+      </div>
+
+        </> },
+        { id: "search", label: "Semantic search", content: <>
+      <VectorIndex onError={onError} refreshKey={connectionRevision} />
+
+        </> },
+        { id: "connections", label: "Connections", content: <>
+      <DocumentConnections onError={onError} onChanged={()=>{setConnectionRevision(v=>v+1);void load();}} onRestart={onRestart} restarting={restarting} />
+
+        </> },
+        { id: "obsidian", label: "Obsidian vault", content: <>
+      <ObsidianVaultPanel
+        obsidian={obsidian}
+        totalDocs={docs.length}
+        preparedDocsCount={
+          docs.filter((doc) => extraction[doc.id]?.status === "ready").length
+        }
+        timezone={timezone}
+        restarting={restarting}
+        onRestart={onRestart}
+        onReload={load}
+        onNotice={onNotice}
+        onError={onError}
+      />
+
+        </> },
+      ]} />
     </main>
   );
 }
@@ -5488,12 +5509,17 @@ function SettingsPage({
           <p>Your files, preferences, and future connections.</p>
         </div>
       </div>
+      <WorkspaceSections label="Settings sections" sections={[
+        { id: "profile", label: "Profile", content: <>
       <ProfileSettings
         profile={profile}
         onSaved={onProfileSaved}
         onError={onError}
         onNotice={onNotice}
       />
+
+        </> },
+        { id: "appearance", label: "Appearance", content: <>
       <ThemeSettings
         appearance={appearance}
         onChange={onAppearanceChange}
@@ -5505,6 +5531,9 @@ function SettingsPage({
         failed={appearanceFailed}
         dirty={appearanceDirty}
       />
+
+        </> },
+        { id: "storage", label: "Files & storage", content: <>
       <form onSubmit={save}>
         <section className="settings-section">
           <div className="settings-section-heading">
@@ -5570,7 +5599,7 @@ function SettingsPage({
             <Field
               label="New host document root (optional)"
               wide
-              hint="Enter an absolute folder path on the host, save, then choose Update & restart. Use Reliability & recovery below to copy or reconnect existing files."
+              hint="Enter an absolute folder path on the host, save, then choose Update & restart. Use the Recovery section to copy or reconnect existing files."
             >
               <input
                 value={form.pendingHostPath || ""}
@@ -5621,9 +5650,21 @@ function SettingsPage({
           </div>
         </section>
       </form>
+
+        </> },
+        { id: "workflow", label: "AI workflow", content: <>
       <AIWorkflowSettings onError={onError}/>
+
+        </> },
+        { id: "recovery", label: "Recovery", content: <>
       <ReliabilitySettings onError={onError} timezone={settings.timezone}/>
+
+        </> },
+        { id: "imports", label: "Import records", content: <>
       <RecordImports timezone={settings.timezone} onImported={onImported}/>
+
+        </> },
+        { id: "backups", label: "Backups & export", content: <>
       <section className="settings-section">
         <div className="settings-section-heading">
           <ShieldCheck size={21} />
@@ -5638,7 +5679,7 @@ function SettingsPage({
             <p>
               Save a consistent database snapshot and managed documents in your
               configured backup subfolder. This includes account data and Career
-              Buddy API keys; keep it private. Use Reliability & recovery above to activate a verified backup.
+              Buddy API keys; keep it private. Use the Recovery section to activate a verified backup.
             </p>
           </div>
           <button
@@ -5745,11 +5786,25 @@ function SettingsPage({
           </div>
         </div>
       </section>
+
+        </> },
+        { id: "connections", label: "Connections", content: <>
       <DocumentConnections onError={onError} onRestart={onRestart} restarting={restarting} />
+
+        </> },
+        { id: "career-buddy", label: "Career Buddy", content: <>
       <CareerBuddySettings onError={onError} />
+
+        </> },
+        { id: "embeddings", label: "Embeddings", content: <>
       <EmbeddingSettings onError={onError} />
+
+        </> },
+        { id: "decisions", label: "Fit & decision model", content: <>
       <FitCriteria onError={onError} />
       <CareerBuddySettings decision onError={onError} />
+        </> },
+      ]} />
     </main>
   );
 }

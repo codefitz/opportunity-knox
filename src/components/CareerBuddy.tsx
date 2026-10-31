@@ -403,7 +403,7 @@ export default function CareerBuddy({
         </p>
         {state.documents.length === 0 ? (
           <p className="buddy-muted">
-            Add a CV or career evidence in the Career library or this
+            Add a CV or career evidence in the Career Hub or this
             opportunity’s Documents tab.
           </p>
         ) : (
@@ -1060,7 +1060,7 @@ function Reply({
                 " · " +
                   ({
                     "not-indexed":
-                      "Selected sources have no saved vectors. Index them in the Career Library to enable meaning-based matches.",
+                      "Selected sources have no saved vectors. Index them in the Career Hub to enable meaning-based matches.",
                     "external-provider":
                       "Local semantic search requires the built-in embedding provider in Settings.",
                     "model-unavailable":

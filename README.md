@@ -71,7 +71,7 @@ The initial manual workflow covers opportunity capture, dated stage history and 
 - **Opportunities:** searchable list for detailed application tracking.
 - **Kanban board:** the eight-stage drag-and-drop board on its own page with stage dates, interview/communication history, and outcome tracking.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link tasks to opportunities.
-- **Career library & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click.
+- **Career Hub & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click.
 - **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.
 - **Smarter job intake:** supports public URLs (HTML/PDF), pasted job text, and document uploads (PDF/DOCX/TXT/MD). Features bounded local English PDF OCR, original source snapshots, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
 - **Calendar export (RFC 5545 ICS):** export single interview events, an opportunity-specific `.ics` calendar, or subscribe to a global live interview feed across all opportunities.
@@ -126,3 +126,7 @@ python3 -m unittest discover -s tests -p test_launcher.py
 ```
 
 The launcher's tests use temporary folders and mocked commands. They do not start Docker or read career documents. Real application data, reference CVs, credentials, and backups should never be committed.
+
+### Settings and Career Hub sections
+
+Settings uses section navigation for Profile, Appearance, Files & storage, AI workflow, Recovery, Import records, Backups & export, Connections, Career Buddy, Embeddings, and Fit & decision model. Career Hub (formerly Career Library) opens on Documents, with separate Text preparation, Semantic search, Connections, and Obsidian vault sections. Switching sections preserves in-progress forms and uploads while the page remains open. Section links support refresh and browser Back/Forward; existing `#/library` links still work. On smaller screens, section navigation wraps above the content.

@@ -209,7 +209,7 @@ export default function ApplicationPacks({
               ))}
               {!data?.documents.length && (
                 <p>
-                  Upload documents below or add them to Career Library first.
+                  Upload documents below or add them to Career Hub first.
                 </p>
               )}
             </fieldset>

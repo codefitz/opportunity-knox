@@ -288,3 +288,7 @@ Optional exact provider/requested-model rates are user-entered, currency-specifi
 Settings → Semantic search now discovers embedding models from OpenAI, Ollama and custom OpenAI-compatible endpoints (`POST /api/buddy/embedding-models`), filtering out chat, image, speech and reranker entries while keeping manual model ID entry available. Capability testing (`POST /api/buddy/embedding-test`) works before or after saving for both the built-in local MiniLM model and external providers, sending a short fictional phrase to `/embeddings` or `/api/embed` and verifying non-zero finite vectors and their dimensions. Stored keys are retained only when provider and base URL match. Neither discovery nor capability testing starts vector indexing or sends career documents; external provider indexing remains R2.
 
 </details>
+
+## Settings sections and Career Hub — 31 October 2026
+
+Settings and Career Hub now use shared, responsive section navigation rather than one long pane. Career Library is renamed Career Hub throughout the interface; existing library routes and stored folder names are retained. Documents is the Hub default, with preparation, semantic search, connections and Obsidian separated. Panels remain mounted across section changes to preserve drafts and ongoing work. Section URLs support browser history and direct links, including opportunity/AI activity links to Career Buddy configuration.

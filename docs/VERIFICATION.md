@@ -411,3 +411,9 @@ Deployment through the normal launcher completed with a verified full backup of 
   - Accessible modal dialogs for task action selection, custom instruction prompt, source summary, and ZIP download.
   - Result import modal with response pasting/file upload, validation & preview diff inspection, and one-click application.
 - Live Docker container rebuild and browser verification have not been rerun in this step.
+
+## Settings sections and Career Hub — 31 October 2026
+
+`npm run check` passed: production build, 248 Node tests and 39 Python launcher/helper tests. The section-navigation regression check verifies direct links, unknown-section fallback and retention of inactive panel contents.
+
+An isolated local server with a disposable account verified all eleven Settings sections and all five Career Hub sections, unsaved profile retention while switching sections, section selection after reload, browser Back/Forward, and desktop/390-pixel viewport layouts. Neither page had horizontal overflow at phone width; the browser reported no console warnings/errors. Existing `#/library` routes still open Documents. The production service, personal records, stored files and feedback statuses were not modified; these source changes have not been deployed to the running board.

@@ -4016,3 +4016,42 @@ textarea {
 .intake-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:14px; }
 
 .job-intake .intake-actions .button.primary:hover { background:var(--green); color:var(--on-accent); }
+
+/* Shared section navigation for Settings and Career Hub. */
+.workspace-sections {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.workspace-section-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 24px;
+}
+.workspace-section-nav a {
+  padding: 11px 14px;
+  border-radius: 7px;
+  color: var(--ink-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.workspace-section-nav a:hover,
+.workspace-section-nav a[aria-current="page"] {
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+.workspace-section-nav a[aria-current="page"] { font-weight: 650; }
+.workspace-section-nav a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.workspace-section-content { min-width: 0; }
+.workspace-section-content > [hidden] { display: none !important; }
+.workspace-section-title { margin: 0 0 20px; font-size: 19px; }
+.workspace-section-content p { line-height: 1.7; }
+@media (max-width: 1100px) {
+  .workspace-sections { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .workspace-section-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .workspace-section-nav a { border: 1px solid var(--line); padding: 8px 12px; }
+}

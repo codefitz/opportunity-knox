@@ -586,7 +586,7 @@ export default function DocumentConnections({
                         setNotice(
                           result.unchanged
                             ? "This version is already imported."
-                            : "Google Docs snapshot imported into the Career Library. The original is unchanged.",
+                            : "Google Docs snapshot imported into the Career Hub. The original is unchanged.",
                         );
                       })
                     }
