@@ -1,4 +1,5 @@
 import {createAIActivity,publicRates} from "./ai-activity.mjs";
+import {createAIScheduler} from "./ai-scheduler.mjs";
 import {createRecordImports} from "./record-imports.mjs";
 import {createOpportunitySummaries} from "./opportunity-summary.mjs";
 import {createAIWorkflow} from "./ai-workflow.mjs";
@@ -375,7 +376,7 @@ export function createApp(options = {}) {
   );
   const db = new DatabaseSync(join(dataDir, "board.sqlite"));
   db.exec(
-    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);",
+    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS ai_tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);",
   );
   const getConfig = (key) => {
     const row = db.prepare("SELECT data FROM config WHERE key=?").get(key);
@@ -743,7 +744,7 @@ export function createApp(options = {}) {
       const snapshot = new DatabaseSync(join(destination, "board.sqlite"));
       try {
         snapshot.exec(
-          "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_requests (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
+          "CREATE TABLE records (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE config (key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_text (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE document_vectors (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE decision_assessments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_messages (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachments (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE standalone_attachment_originals (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE opportunity_automation (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE buddy_requests (id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE ai_tasks (id TEXT PRIMARY KEY,data TEXT NOT NULL);",
         );
         for (const table of [
           "records",
@@ -759,6 +760,7 @@ export function createApp(options = {}) {
           "standalone_attachment_originals",
           "opportunity_automation",
           "buddy_requests",
+          "ai_tasks",
         ]) {
           const rows = db.prepare(`SELECT * FROM ${table}`).all();
           const key = table === "config" ? "key" : "id";
@@ -808,6 +810,7 @@ export function createApp(options = {}) {
   const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
+  const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
   const buddy = createCareerBuddy({
     db,
@@ -823,6 +826,7 @@ export function createApp(options = {}) {
     buddyFetch: options.buddyFetch,
     embeddingFn: options.embeddingFn,
     automationEnabled:options.automationEnabled,
+    scheduler:aiScheduler,
     createOpportunity,putTask,
   });
   const feedback=createFeedback({getConfig,putConfig,fetcher:options.buddyFetch,requests:buddy.requests});
@@ -998,6 +1002,7 @@ export function createApp(options = {}) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
         if(reliability.applying()&&!['GET','HEAD'].includes(method)&&!path.startsWith('/api/reliability/')&&path!=='/api/logout')fail(503,"Workspace maintenance is in progress. Wait for it to finish.");
         try {if(await aiActivity.handle(path,method,req,res,{json,readBody}))return;
+        if(await aiScheduler.handle(path,method,req,res,{json,readBody}))return;
         if(await recordImports.handle(path,method,req,res,{json,readBody}))return;
         if(await summaries.handle(path,method,req,res,{json,readBody}))return;
         if(await aiWorkflow.handle(path,method,req,res,{json,readBody}))return;
@@ -1835,6 +1840,7 @@ export function createApp(options = {}) {
             opportunityBriefings:summaries.export(),
             recordImports:recordImports.exportReports(),
             aiActivity:aiActivity.exportRequests(),
+            aiTasks:aiScheduler.exportTasks(),
             aiUsageRates:publicRates(getConfig),
             buddyWorkspace:buddy.exportWorkspace(),
             buddyAttachments:buddy.exportAttachments(),
@@ -1991,10 +1997,11 @@ export function createApp(options = {}) {
   return {
     server,
     db,
+    scheduler: aiScheduler,
     close: async () => {
       if (closed) return;
       closed = true;
-      feedback.close();backupSchedule.close();
+      aiScheduler.close();feedback.close();backupSchedule.close();
       await new Promise((done, reject) =>
         server.listening
           ? server.close((err) => (err ? reject(err) : done()))

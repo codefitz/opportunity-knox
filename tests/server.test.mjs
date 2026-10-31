@@ -3432,3 +3432,77 @@ test('active AI activity can cancel a request without retrying or publishing lat
 test('feedback reviews and local intake join activity without leaking text; usage snapshots survive full backups',async t=>{
  const f=await fixture(t,{buddyFetch:async()=>Response.json({usage:{prompt_tokens:30,completion_tokens:10},choices:[{finish_reason:'stop',message:{content:JSON.stringify(buddyReply({reply:JSON.stringify({summary:'Fictional suggestion',priority:'low',improvements:[],questions:[]})}))}}]})});await f.setup();await enableBuddy(f);const item=(await f.request('/api/feedback',{method:'POST',body:{text:'PRIVATE FICTIONAL FEEDBACK TEXT',page:'activity',requestId:'activity-feedback'}})).data.item;assert.equal((await f.request('/api/feedback/'+item.id+'/review',{method:'POST',body:{confirm:true}})).status,200);await f.request('/api/job-intake',{method:'POST',body:{kind:'text',text:'Fictional job opportunity with sufficient readable content for local extraction.',useAI:false,ocr:false,requestId:'activity-local'}});const report=(await f.request('/api/ai-activity')).data;assert.equal(report.items.find(r=>r.kind==='feedback').usage.inputTokens,30);assert.equal(report.items.find(r=>r.kind==='local-intake').usage,null);assert.equal(JSON.stringify(report).includes('PRIVATE FICTIONAL'),false);const b=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(b.status,200);const snapshot=new DatabaseSync(join(f.options.filesDir,'backups',b.data.name,'board.sqlite'));try{const logs=snapshot.prepare('SELECT data FROM buddy_requests').all().map(r=>JSON.parse(r.data));assert.equal(logs.length,2);assert.equal(logs.find(r=>r.kind==='feedback').usage.outputTokens,10);}finally{snapshot.close();}
 });
+
+test('universal AI task scheduler manages background tasks, supports cancel/retry, survives restart with interruption, and is included in backups and export',async t=>{
+ const f=await fixture(t);await f.setup();
+ assert.equal((await f.request('/api/ai-tasks',{auth:false})).status,401);
+ assert.equal((await f.request('/api/ai-tasks/unknown',{auth:false})).status,401);
+
+ const initialTasks=(await f.request('/api/ai-tasks')).data;
+ assert.equal(initialTasks.total,0);
+ assert.equal(initialTasks.totals.total,0);
+
+ // Manually enqueue a test task via scheduler
+ const task=f.app.scheduler.enqueue({
+   kind:'embedding-index',
+   label:'Manual test embedding batch',
+   payload:{ids:['opp-1','opp-2']},
+ });
+ const taskId=task.id;
+ assert.ok(taskId);
+
+ let tasks=(await f.request('/api/ai-tasks')).data;
+ assert.equal(tasks.total,1);
+ assert.equal(tasks.items[0].id,taskId);
+ assert.equal(tasks.items[0].status,'queued');
+ assert.equal(tasks.items[0].subject,'Manual test embedding batch');
+ assert.equal(tasks.items[0].canCancel,true);
+
+ // Single task lookup
+ const single=(await f.request('/api/ai-tasks/'+taskId)).data;
+ assert.equal(single.id,taskId);
+ assert.equal(single.status,'queued');
+
+ // Cancel the task
+ const cancelRes=await f.request('/api/ai-tasks/'+taskId+'/cancel',{method:'POST',body:{}});
+ assert.equal(cancelRes.status,200);
+ assert.equal(cancelRes.data.status,'cancelled');
+
+ tasks=(await f.request('/api/ai-tasks?status=cancelled')).data;
+ assert.equal(tasks.total,1);
+ assert.equal(tasks.items[0].canRetry,true);
+
+ // Export includes aiTasks safely
+ const exp=(await f.request('/api/export')).data;
+ assert.ok(Array.isArray(exp.aiTasks));
+ assert.equal(exp.aiTasks.length,1);
+ assert.equal(exp.aiTasks[0].id,taskId);
+
+ // Full backup includes ai_tasks table
+ const b=await f.request('/api/backup',{method:'POST',body:{}});
+ assert.equal(b.status,200);
+ const snapshot=new DatabaseSync(join(f.options.filesDir,'backups',b.data.name,'board.sqlite'));
+ try {
+   const backupRows=snapshot.prepare('SELECT id, data FROM ai_tasks').all();
+   assert.equal(backupRows.length,1);
+   assert.equal(backupRows[0].id,taskId);
+ } finally {
+   snapshot.close();
+ }
+
+ // Enqueue another task and verify restart interruption
+ const runningTask=f.app.scheduler.enqueue({
+   kind:'opportunity-automation',
+   subject:'Test automation job',
+   payload:{},
+ });
+ const runningTaskId=runningTask.id;
+ f.app.scheduler.setRunning(runningTaskId);
+
+ await f.restart();
+ await f.login();
+
+ const restarted=(await f.request('/api/ai-tasks/'+runningTaskId)).data;
+ assert.equal(restarted.status,'interrupted');
+ assert.equal(restarted.canRetry,true);
+});

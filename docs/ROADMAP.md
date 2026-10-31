@@ -13,9 +13,10 @@
 - [x] ~~Smarter job intake with source passages/snapshots/OCR, independent AI workflow switches, and saved dated/stale-aware opportunity briefings.~~
 - [x] ~~Historical JSON import with duplicate review, selective merges, pre-import backup, atomic writes and preserved source reports.~~
 - [x] ~~AI activity with per-attempt history, prompt/model metadata, reported usage, optional saved-rate estimates, cancellation and workflow review/retry.~~
+- [x] ~~Universal persisted AI task scheduler for background jobs (embeddings, opportunity automation, deferred work) with cooperative cancellation, interruption handling, and UI monitoring.~~
 - [x] ~~Global private feedback inbox, optional advisory AI review, and export.~~
 
-Latest implementation verification: **213 Node tests + 39 launcher/helper tests (252 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
+Latest implementation verification: **220 Node tests + 39 launcher/helper tests (259 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
 
 ## Remaining work
 
@@ -24,8 +25,8 @@ The same **13 work areas** appear in the plan. Optional/account-dependent items 
 | ID | Remaining scope | Status / dependency | Completed boundary |
 | --- | --- | --- | --- |
 | R1 | [x] ~~External embedding capability checks and model discovery~~ | Complete | Separate from completed chat discovery and built-in MiniLM. |
-| R2 | [ ] External embedding indexing and optional vector backends | Open | Follow R1; local SQLite vectors and hybrid retrieval are complete. |
-| R3 | [ ] Universal persisted AI task scheduler | Open | Runnable/deferred jobs and embedding-job coverage; activity, usage, prompt versions and rate estimates are complete. |
+| R2 | [x] ~~External embedding indexing and optional vector backends~~ | Complete | External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with SQLite metadata and boundary validation. |
+| R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [ ] External-assistant task-pack export/result import | Open | Separate from the completed Codex provider and application-document packs. |
 | R5 | [ ] Codex live output/token accounting and remote cancellation acknowledgement | Open / provider-dependent | Current helper returns final text; local process cancellation is complete. Remote compute/billing termination cannot be assumed. |
 | R6 | [ ] Live cloud-document references and native editing | Deferred / account-dependent | Google configuration/search/snapshot connector is complete; live account verification is V2. |

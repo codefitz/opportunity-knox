@@ -18,7 +18,7 @@ Use [PLAN.md — Remaining work](PLAN.md#remaining-work) and [ROADMAP.md](ROADMA
 | # | Status | Original unchecked scope | Completed scope / remaining reference |
 | --- | --- | --- | --- |
 | 1 | Complete | ~~External embedding capability tests/model discovery~~ | [x] ~~Embedding-specific model discovery and fictional-text capability/dimension checks (`POST /api/buddy/embedding-models`, `POST /api/buddy/embedding-test`).~~ |
-| 2 | Open | External embedding indexing/custom vector database | [ ] **Remaining:** R2. Repeated scope refers to the same canonical work area. |
+| 2 | Complete | ~~External embedding indexing/custom vector database~~ | [x] ~~External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with local SQLite chunk/hash validation, selection scoping, and secret-safe settings.~~ |
 | 3 | Partial | Token streaming/cold-load timing/provider cancellation acknowledgement | [x] ~~HTTP live previews/timings and owned Codex process-termination acknowledgement.~~ **Remaining:** R5. |
 | 4 | Complete | ~~Stage/tag/deadline/overdue toolbar filters~~ | [x] ~~Shared list/Kanban filters, counts, removable selections and validation.~~ |
 | 5 | Complete | ~~Identification application-route field~~ | [x] ~~Editable application route in creation/Overview/export/Summary; submitted packs retain their recorded route.~~ |
@@ -40,16 +40,16 @@ Use [PLAN.md — Remaining work](PLAN.md#remaining-work) and [ROADMAP.md](ROADMA
 | 21 | Complete | ~~Independent AI toggles for stages 1–3~~ | [x] ~~Independent stage 1–3 switches and automatic fit/tag policy checks.~~ |
 | 22 | Complete | ~~Stage 1 AI field extraction/passages/snapshots/OCR~~ | [x] ~~Reviewed grounded JD extraction, passage/page quotes, original/text/report snapshots and bounded local PDF OCR.~~ |
 | 23 | Open | Arbitrary unmarked template/cross-engine fidelity | [ ] **Remaining:** R7. Repeated scope refers to the same canonical work area. |
-| 24 | Partial | Background scheduler/prompt versions/usage/cost/lifecycle | [x] ~~Persistent lifecycle controls, unified activity, per-attempt history, prompt versions/hashes, reported tokens and saved-rate estimates.~~ **Remaining:** R3. |
+| 24 | Complete | ~~Background scheduler/prompt versions/usage/cost/lifecycle~~ | [x] ~~Universal persisted AI scheduler (`ai_tasks`), background task queue/retry/cancel/interrupted-on-restart, unified activity, per-attempt history, prompt versions/hashes, reported tokens and saved-rate estimates.~~ |
 | 25 | Open | External-assistant task-pack export/result import | [ ] **Remaining:** R4. Repeated scope refers to the same canonical work area. |
 | 26 | Complete | ~~Scheduled/pre-upgrade backups/portable restore~~ | [x] ~~Opt-in scheduled and verified pre-upgrade backups, portable activation/reconciliation and rollback.~~ |
 | 27 | Open | Remote HTTPS/VPN deployment | [ ] **Remaining:** R10/V1. Repeated scope refers to the same canonical work area. |
-| 28 | Partial | AI task table/reference profiles/templates/criteria | [x] ~~Lifecycle records, saved criteria/templates and request usage/cost/prompt-version records.~~ **Remaining:** R3/R11. |
+| 28 | Partial | AI task table/reference profiles/templates/criteria | [x] ~~Universal `ai_tasks` SQLite table and scheduler, lifecycle records, saved criteria/templates and request usage/cost/prompt-version records.~~ **Remaining:** R11. |
 | 29 | Complete | ~~Existing-workflow integration parent phase~~ | [x] ~~Defined existing-workflow phase, including historical JSON import and portable restore.~~ |
 | 30 | Complete | ~~Historical import/in-place attachment/deduplication/restore verification~~ | [x] ~~Read-only in-place sources, isolated/portable restore checks and reviewed historical JSON matching.~~ |
 | 31 | Partial | AI integration parent phase | [x] ~~Provider/retrieval/chat/drafting, controls, intake, assessments and request activity.~~ **Remaining:** R4/R7. |
 | 32 | Partial | Stage 1/per-stage controls/templates/PDF/task packs | [x] ~~Reviewed intake/OCR, stage controls, built-in/marked layouts and PDF export.~~ **Remaining:** R4/R7. |
-| 33 | Partial | Optional extensions parent phase | [x] ~~Dashboard, local vectors/hybrid retrieval, read-only sources, standalone Buddy/history, Google snapshot connector, activity reporting and external embedding discovery/capability checks.~~ **Remaining:** R2/R6/R8 and V2/V3. |
+| 33 | Partial | Optional extensions parent phase | [x] ~~Dashboard, local vectors/hybrid retrieval, read-only sources, standalone Buddy/history, Google snapshot connector, activity reporting, external embedding discovery/capability checks, and external embedding indexing/vector backends.~~ **Remaining:** R6/R8 and V2/V3. |
 | 34 | Complete | ~~Clean-installation guided restore acceptance~~ | [x] ~~Fictional clean-install Docker restore with login, records, files and exact submitted-byte verification.~~ |
 | 35 | Choice | Production host/access-method decision | **Pending user choice:** R10/V1. Local hosting is complete. |
 | 36 | Partial | Storage source/copy/cloud choices | [x] ~~Managed/read-only source architecture, configuration and verified migration/relinking.~~ **Remaining:** R6/V3. |

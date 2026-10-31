@@ -415,7 +415,7 @@ export function createCareerBuddy(ctx) {
       );
     return [...new Set(value)];
   };
-  const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn,buddyFetch:ctx.buddyFetch});
+  const vectors = createVectorIndex({db,getDocuments,documentPath,indexDocuments,getConfig,putConfig,embed:ctx.embeddingFn,buddyFetch:ctx.buddyFetch,scheduler:ctx.scheduler});
   const requests=createBuddyRequests(db,{getConfig});ctx={...ctx,requests};
   const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});

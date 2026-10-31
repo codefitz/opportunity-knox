@@ -11,8 +11,8 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | ID | Remaining scope | Status / dependency | Completed boundary |
 | --- | --- | --- | --- |
 | R1 | [x] ~~External embedding capability checks and model discovery~~ | Complete | Separate from completed chat discovery and built-in MiniLM. |
-| R2 | [ ] External embedding indexing and optional vector backends | Open | Follow R1; local SQLite vectors and hybrid retrieval are complete. |
-| R3 | [ ] Universal persisted AI task scheduler | Open | Runnable/deferred jobs and embedding-job coverage; activity, usage, prompt versions and rate estimates are complete. |
+| R2 | [x] ~~External embedding indexing and optional vector backends~~ | Complete | External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with SQLite metadata and boundary validation. |
+| R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
 | R4 | [ ] External-assistant task-pack export/result import | Open | Separate from the completed Codex provider and application-document packs. |
 | R5 | [ ] Codex live output/token accounting and remote cancellation acknowledgement | Open / provider-dependent | Current helper returns final text; local process cancellation is complete. Remote compute/billing termination cannot be assumed. |
 | R6 | [ ] Live cloud-document references and native editing | Deferred / account-dependent | Google configuration/search/snapshot connector is complete; live account verification is V2. |
@@ -45,7 +45,7 @@ These four groups are separate from unfinished implementation; they are not reas
 - [x] ~~Independent decision-model settings and a saved required/preferred criteria profile. Opportunity Fit assessment records met/unmet/unknown results, evidence IDs, follow-up questions and a reviewable recommendation; retains criteria/model snapshots and marks changed inputs out of date. No automatic stage/outcome changes.~~
 - [x] ~~Semantic search step 2: persistent SQLite vectors from the bundled MiniLM model, explicit library/read-only source selection, background progress, cancellation, retry, restart persistence, source-change invalidation and removal/reset cleanup. No automatic indexing or original-file changes.~~
 - [x] ~~Semantic search step 3: combine local semantic and keyword retrieval in Career Buddy, scoped to selected sources, with passage references, visible fallback reasons, source freshness checks and fictional retrieval quality tests. Library list filtering remains metadata-only.~~
-- [ ] External embedding endpoint indexing and optional custom vector database integration. The initial built-in vector store needs no additional service.
+- [x] ~~External embedding endpoint indexing and optional custom vector database integration. The initial built-in vector store needs no additional service.~~
 - [x] ~~Connect an existing Obsidian vault, including a read-only host mount; explicitly sync eligible files into the Career Library when desired. Connecting alone does not automatically import files or make the vault searchable by Career Buddy.~~
 - [x] ~~Select files from a read-only vault for in-place Career Buddy use; selected file text is cached in the board and refreshed when changed. Removing a selection clears its text cache.~~
 - [x] ~~Independently mounted read-only general directories/multiple roots, folder browsing, explicit selections and cache cleanup.~~
@@ -192,7 +192,7 @@ Proposed managed layout:
 - [x] ~~Record provider/model, source coverage, and prompt context on Career Buddy messages; keep API keys server-side and out of record exports.~~
 - [x] ~~Persist Buddy request lifecycle/diagnostics, automatic review queue/state and host Codex queue; progress/cancel/retry controls and interrupted-on-restart handling. These are workflow-specific mechanisms.~~
 - [x] ~~Unified AI request activity page, per-attempt history, explicit workflow review/retry links, prompt versions/system fingerprints, provider-reported token counters and optional saved-rate cost estimates. Covers Buddy chat/drafting, fit assessments, tags, summaries, intake, feedback reviews and inference connection tests. See AI_ACTIVITY.md.~~
-- [ ] Unified persisted scheduler for all AI task types, including embedding jobs and deferred runnable work. The activity/request registry does not implement that scheduler.
+- [x] ~~Unified persisted scheduler for all AI task types, including embedding jobs, opportunity automation, and deferred runnable work. Backed by persistent `ai_tasks` SQLite store, cooperative cancellation/retry, restart interruption, backup/export safety, and UI status view.~~
 - [ ] External-assistant task-pack export and result import.
 
 ## Launcher and first-run experience
@@ -257,8 +257,8 @@ The normal user interface is the web app, packaged with a host launcher so Docke
    - [x] ~~Stage 1 reviewed JD extraction with source passages, snapshots and bounded local PDF OCR.~~
    - [ ] Arbitrary-template fidelity and external-assistant task-pack exchange.
 4. [ ] **Optional extensions:**
-   - [x] ~~Dashboard statistics, local SQLite vectors/hybrid retrieval, Obsidian/directory sources, standalone Buddy/history sidebar and Google Docs setup/snapshot connector.~~
-   - [ ] Calendar/email/reminders, additional reporting, external vector backends/cloud providers and live Google app authorization (deferred).
+   - [x] ~~Dashboard statistics, local SQLite vectors/hybrid retrieval, Obsidian/directory sources, standalone Buddy/history sidebar, external embedding indexing/optional vector backends, and Google Docs setup/snapshot connector.~~
+   - [ ] Calendar/email/reminders, additional reporting, and live Google app authorization (deferred).
 
 ## Acceptance examples
 

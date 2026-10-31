@@ -346,3 +346,23 @@ Deployment through the normal launcher completed with a verified full backup of 
 ## External embedding capability checks and model discovery — 30 October 2026
 
 `npm run check` passes: production TypeScript/Vite build, 213 Node tests and 39 launcher/helper tests. Fictional-provider unit and API tests cover OpenAI/Ollama/custom embedding model discovery (`POST /api/buddy/embedding-models`), filtering out chat, speech, image and reranker models, embedding model suggestions, custom model fallback when IDs do not contain `embed`, secret redaction from model IDs/labels/errors, and capability testing (`POST /api/buddy/embedding-test`) against `/embeddings` and `/api/embed` with fictional text, vector dimension/normalization reporting, invalid/NaN/zero-norm rejection, same-endpoint stored-key retention, cleared keys on provider/URL change, and unchanged saved settings/vector index when testing unsaved drafts. Live Docker container rebuild and browser verification have not been rerun in this step.
+
+## External embedding indexing and optional vector backends — 30 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 217 Node tests and 39 launcher/helper tests (256 total). Fictional-provider unit, vector index and server integration tests cover:
+- Embedding settings and capability testing with optional external vector store backends (`qdrant` and `custom` HTTP vector stores alongside built-in `sqlite`), private network validation, URL/collection sanitization, and secret-safe API key storage excluded from browser state, settings and `/api/export`.
+- Explicit library and read-only source indexing with external embedding providers (`openai`, `ollama`, `custom`) and dynamic vector dimensions (8–16384), automatic L2 unit normalization, source freshness checks, and chunk hash verification.
+- Optional external vector store integration with Qdrant and custom HTTP backends: collection auto-creation/dimension checks, raw text exclusion (storing only hashes and IDs in the external vector store), client-side boundary and selection-scoped retrieval filtering, chunk hash tamper rejection, and remote point deletion/cleanup on source clear.
+- Full hybrid retrieval and candidate source selection in Career Buddy (`/api/buddy/workspace` and `/api/opportunities/{id}/buddy`) combining external vector search scores with keyword ranking.
+- Live Docker container rebuild and browser verification have not been rerun in this step.
+
+## Universal persisted AI task scheduler — 31 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 220 Node tests and 39 launcher/helper tests (259 total). Fictional-provider unit, scheduler and server integration tests cover:
+- Persistent SQLite table `ai_tasks(id TEXT PRIMARY KEY, data TEXT NOT NULL)` storing background tasks with lifecycle statuses (`queued`, `running`, `cancelling`, `completed`, `completed-with-errors`, `failed`, `cancelled`, `interrupted`).
+- Non-auto-restart rule: on startup, all incomplete tasks (`queued`, `running`, `cancelling`) transition strictly to `interrupted`, with no silent work replay.
+- Unified task management endpoints: `GET /api/ai-tasks`, `GET /api/ai-tasks/:id`, `POST /api/ai-tasks/:id/cancel` (cooperative AbortController abortion), and `POST /api/ai-tasks/:id/retry` (runner dispatch with backoff/retry count increments).
+- Full integration with background workers: vector embedding indexing batches (`server/vector-index.mjs`) and opportunity automation workflows (`server/opportunity-automation.mjs`).
+- Complete data safety: `ai_tasks` snapshot inclusion in `/api/backup`, table copy into portable/isolated restores, and secret-safe sanitization (`apiKey`, `vectorApiKey`, `secret` stripped) in `/api/export`.
+- User interface: "Scheduled & background tasks" pane in AI Activity view (`src/components/AIActivity.tsx`), displaying task kind, subject, badges, phase/progress, enqueued/started/finished timestamps, error diagnostics, and Cancel/Retry controls with 5-second polling.
+- Live Docker container rebuild and browser verification have not been rerun in this step.

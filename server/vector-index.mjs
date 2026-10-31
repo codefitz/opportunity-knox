@@ -37,6 +37,7 @@ export function createVectorIndex({
   putConfig,
   embed = embedLocal,
   buddyFetch,
+  scheduler,
 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS document_vectors (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TRIGGER IF NOT EXISTS vectors_text_deleted AFTER DELETE ON document_text BEGIN DELETE FROM document_vectors WHERE id=OLD.id; END;
@@ -51,6 +52,14 @@ export function createVectorIndex({
     job.status = "interrupted";
     job.finishedAt = new Date().toISOString();
     save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
   }
   const get = (id) => {
     const row = db
@@ -491,6 +500,14 @@ export function createVectorIndex({
         if (job.status === "cancelling" || stopping) break;
         item.status = "running";
         save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
         try {
           const doc = getDocuments().find(
             (d) => d.id === item.id && !d.opportunityId,
@@ -515,6 +532,14 @@ export function createVectorIndex({
             item.chunks = existing.vectors.length;
             if (existing.dimensions) job.dimensions = existing.dimensions;
             save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
             continue;
           }
           remove(doc.id);
@@ -528,6 +553,14 @@ export function createVectorIndex({
           item.totalChunks = text.chunks.length;
           item.chunks = 0;
           save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
           for (let offset = 0; offset < text.chunks.length; offset += 2) {
             if (job.status === "cancelling" || stopping) break;
             const chunks = text.chunks.slice(offset, offset + 2);
@@ -550,11 +583,27 @@ export function createVectorIndex({
             );
             item.chunks = vectors.length;
             save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
             await new Promise((resolve) => setImmediate(resolve));
           }
           if (job.status === "cancelling" || stopping) {
             item.status = "cancelled";
             save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
             break;
           }
           const latest = activeState();
@@ -619,6 +668,14 @@ export function createVectorIndex({
           if (job.status === "cancelling" || stopping || signal?.aborted) {
             item.status = "cancelled";
             save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
             break;
           }
           item.status = "failed";
@@ -628,6 +685,14 @@ export function createVectorIndex({
               : "Could not create vectors. Check the embedding and vector store test in Settings and source availability, then retry.";
         }
         save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
       }
       const cancelled = job.status === "cancelling" || stopping;
       for (const item of job.items)
@@ -640,6 +705,14 @@ export function createVectorIndex({
           : "completed";
       job.finishedAt = new Date().toISOString();
       save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
     } finally {
       running = null;
       controller = null;
@@ -688,9 +761,31 @@ export function createVectorIndex({
         chunks: 0,
       })),
     };
+    try {
+      scheduler?.enqueue({
+        id: job.id,
+        kind: "embedding-index",
+        priority: "normal",
+        payload: { documentIds: [...new Set(ids)], model: active.modelKey },
+      });
+      scheduler?.setRunning(job.id, controller);
+    } catch {}
     save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
     running = new Promise((resolve) => setImmediate(resolve)).then(run); // return before inference starts
     return status();
+    scheduler?.registerRunner("embedding-index", (task) => {
+      if (task.payload?.documentIds?.length) {
+        start(task.payload.documentIds);
+      }
+    });
   }
   return {
     status,
@@ -702,6 +797,14 @@ export function createVectorIndex({
         job.status = "cancelling";
         controller?.abort();
         save();
+    try {
+      scheduler?.updateProgress(job.id, {
+        current: job.items.filter((i) => i.status === "indexed").length,
+        total: job.items.length,
+        detail: `${job.items.filter((i) => i.status === "indexed").length} of ${job.items.length} sources indexed`,
+        status: job.status,
+      });
+    } catch {}
       }
       return status();
     },

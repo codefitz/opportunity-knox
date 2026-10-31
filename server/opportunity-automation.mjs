@@ -2,7 +2,7 @@ import {workflowSettings} from "./ai-workflow.mjs";
 import {randomUUID} from "node:crypto";
 import { defaultBuddy, callProvider, BUDDY_SCHEMA } from "./buddy-provider.mjs";
 export function createOpportunityAutomation(ctx, decisions, parseOutput) {
-  const { db, getConfig, getRecord, putRecord, buddyFetch } = ctx;
+  const { db, getConfig, getRecord, putRecord, buddyFetch, scheduler } = ctx;
   db.exec(
     "CREATE TABLE IF NOT EXISTS opportunity_automation(id TEXT PRIMARY KEY,data TEXT NOT NULL)",
   );
@@ -39,6 +39,9 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
         cancelled.delete(id);
         let state = { state: "running", tags: "pending", fit: "pending",startedAt:new Date().toISOString() };
         save(id, state);
+        try {
+          scheduler?.setRunning("automation:" + id);
+        } catch {}
         try {
           let record = getRecord(id),
             c = getConfig("careerBuddy") || defaultBuddy();
@@ -151,8 +154,20 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
             ? "completed-with-errors"
             : "completed";
           save(id, state);
+          try {
+            scheduler?.finish("automation:" + id, {
+              status: state.state,
+              result: { tags: state.tags, fit: state.fit },
+            });
+          } catch {}
         } catch {
           save(id, { ...state,...(cancelled.has(id)?{tags:state.tags==="completed"?"completed":"cancelled",fit:state.fit==="completed"?"completed":"cancelled"}:{}), state: cancelled.has(id)?"cancelled":"failed",finishedAt:new Date().toISOString() });
+          try {
+            scheduler?.finish("automation:" + id, {
+              status: cancelled.has(id) ? "cancelled" : "failed",
+              error: cancelled.has(id) ? "Cancelled by user" : "Failed during automation execution",
+            });
+          } catch {}
         }finally{activeRequests.delete(id);}
       }
     } finally {
@@ -166,8 +181,24 @@ export function createOpportunityAutomation(ctx, decisions, parseOutput) {
     )
       return;
     save(id, { state: "queued", tags: "pending", fit: "pending" });
+    try {
+      scheduler?.enqueue({
+        id: "automation:" + id,
+        kind: "opportunity-automation",
+        targetId: id,
+        priority: "high",
+        payload: { opportunityId: id, options },
+      });
+    } catch {}
     jobs.set(id, options);
     if (!running) running = new Promise((r) => setImmediate(r)).then(drain);
+    try {
+      scheduler?.registerRunner("opportunity-automation", (task) => {
+        if (task.targetId) {
+          schedule(task.targetId, task.payload?.options || {});
+        }
+      });
+    } catch {}
   }
   return {
     schedule,

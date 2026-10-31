@@ -8,6 +8,37 @@ export type ActivityDestination = {
   id?: string;
   tab?: string;
 };
+type TaskRow = {
+  id: string;
+  kind: string;
+  status: string;
+  subject: string;
+  progress: {
+    phase?: string;
+    completed?: number;
+    total?: number;
+    percent?: number;
+  } | null;
+  retryCount: number;
+  lastError: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  canCancel: boolean;
+  canRetry: boolean;
+};
+type TaskResult = {
+  items: TaskRow[];
+  total: number;
+  totals: {
+    total: number;
+    active: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    interrupted: number;
+  };
+};
 type Row = {
   id: string;
   originalRequestId: string | null;
@@ -91,6 +122,22 @@ const kinds: Record<string, string> = {
   feedback: "Feedback review",
   "connection-test": "Connection test",
 };
+const taskKindLabels: Record<string, string> = {
+  "embedding-index": "Vector embedding indexing",
+  "opportunity-automation": "Opportunity automation",
+  "deferred-fit": "Deferred fit assessment",
+  "deferred-briefing": "Deferred briefing",
+};
+const taskStatusLabels: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  cancelling: "Cancelling",
+  completed: "Completed",
+  "completed-with-errors": "Completed with errors",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+};
 const count = (v: number | undefined) =>
   v === undefined ? "Not reported" : v.toLocaleString();
 const amount = (value: number, currency: string) =>
@@ -111,6 +158,9 @@ export default function AIActivity({
 }) {
   const [result, setResult] = useState<Result | null>(null),
     [rates, setRates] = useState<Rates | null>(null),
+    [taskResult, setTaskResult] = useState<TaskResult | null>(null),
+    [taskStatus, setTaskStatus] = useState("all"),
+    [taskKind, setTaskKind] = useState("all"),
     [error, setError] = useState(""),
     [status, setStatus] = useState("all"),
     [kind, setKind] = useState("all"),
@@ -130,9 +180,48 @@ export default function AIActivity({
   };
   const loadRates = () =>
     api<Rates>("/ai-activity/rates").then(setRates).catch(report);
+  const loadTasks = async () => {
+    try {
+      const v = await api<TaskResult>(
+        "/ai-tasks?" +
+          new URLSearchParams({
+            status: taskStatus,
+            kind: taskKind,
+            limit: "50",
+          }),
+      );
+      setTaskResult(v);
+    } catch (e) {
+      report(e);
+    }
+  };
   useEffect(() => {
     void loadRates();
   }, []);
+  useEffect(() => {
+    let live = true;
+    const poll = async () => {
+      try {
+        const v = await api<TaskResult>(
+          "/ai-tasks?" +
+            new URLSearchParams({
+              status: taskStatus,
+              kind: taskKind,
+              limit: "50",
+            }),
+        );
+        if (live) setTaskResult(v);
+      } catch (e) {
+        if (live) report(e);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 5000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [taskStatus, taskKind, refresh]);
   useEffect(() => {
     let live = true;
     let inFlight = false;
@@ -211,6 +300,221 @@ export default function AIActivity({
           Refresh activity
         </button>
       </div>
+      <section className="settings-section">
+        <div className="section-header">
+          <div>
+            <h2>Scheduled & background tasks</h2>
+            <p>
+              Persistent asynchronous jobs including vector embedding batches,
+              opportunity automation workflows, and deferred evaluations.
+              Interrupted jobs do not restart automatically.
+            </p>
+          </div>
+        </div>
+
+        <div className="activity-filters">
+          <label className="field">
+            Task status
+            <select
+              aria-label="Filter background task status"
+              value={taskStatus}
+              onChange={(e) => setTaskStatus(e.target.value)}
+            >
+              {[
+                ["all", "All statuses"],
+                ["active", "Active (Queued / Running)"],
+                ["queued", "Queued"],
+                ["running", "Running"],
+                ["completed", "Completed"],
+                ["failed", "Failed"],
+                ["interrupted", "Interrupted"],
+                ["cancelled", "Cancelled"],
+              ].map(([v, t]) => (
+                <option key={v} value={v}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Task kind
+            <select
+              aria-label="Filter background task kind"
+              value={taskKind}
+              onChange={(e) => setTaskKind(e.target.value)}
+            >
+              {[
+                ["all", "All task kinds"],
+                ["embedding-index", "Vector embedding indexing"],
+                ["opportunity-automation", "Opportunity automation"],
+                ["deferred-fit", "Deferred fit assessment"],
+                ["deferred-briefing", "Deferred briefing"],
+              ].map(([v, t]) => (
+                <option key={v} value={v}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {taskResult?.totals && (
+          <div className="activity-stats">
+            <div>
+              <strong>{taskResult.totals.total}</strong>
+              <span>Total tasks</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.active}</strong>
+              <span>Active</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.completed}</strong>
+              <span>Completed</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.failed}</strong>
+              <span>Failed</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.interrupted}</strong>
+              <span>Interrupted</span>
+            </div>
+          </div>
+        )}
+
+        <div className="activity-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Task & subject</th>
+                <th>Status & progress</th>
+                <th>Enqueued / Started</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!taskResult?.items.length ? (
+                <tr>
+                  <td colSpan={4}>No matching background tasks found.</td>
+                </tr>
+              ) : (
+                taskResult.items.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <strong>
+                        {taskKindLabels[row.kind] || row.kind}
+                      </strong>
+                      <span>{row.subject}</span>
+                      <span className="activity-hash">ID: {row.id}</span>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          ["running", "queued"].includes(row.status)
+                            ? "blue"
+                            : ["completed", "completed-with-errors"].includes(
+                                row.status,
+                              )
+                            ? "green"
+                            : ["failed", "interrupted"].includes(row.status)
+                            ? "red"
+                            : "gray"
+                        }`}
+                      >
+                        {taskStatusLabels[row.status] || row.status}
+                      </span>
+                      {row.progress && (
+                        <span>
+                          {row.progress.phase
+                            ? `${row.progress.phase} `
+                            : ""}
+                          {row.progress.completed !== undefined &&
+                          row.progress.total !== undefined
+                            ? `(${row.progress.completed} / ${row.progress.total})`
+                            : row.progress.percent !== undefined
+                            ? `(${row.progress.percent}%)`
+                            : ""}
+                        </span>
+                      )}
+                      {row.lastError && (
+                        <span className="field-error">{row.lastError}</span>
+                      )}
+                      {row.retryCount > 0 && (
+                        <span>Retried {row.retryCount} times</span>
+                      )}
+                    </td>
+                    <td>
+                      <div>
+                        {formatDate(row.enqueuedAt, timezone)}
+                      </div>
+                      {row.finishedAt && (
+                        <span>
+                          Finished: {formatDate(row.finishedAt, timezone)}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {row.canCancel && (
+                        <button
+                          type="button"
+                          className="button secondary small"
+                          disabled={busy === "task-" + row.id}
+                          onClick={async () => {
+                            setBusy("task-" + row.id);
+                            setError("");
+                            try {
+                              await api(
+                                `/ai-tasks/${encodeURIComponent(row.id)}/cancel`,
+                                json({}),
+                              );
+                              void loadTasks();
+                            } catch (e) {
+                              report(e);
+                            } finally {
+                              setBusy("");
+                            }
+                          }}
+                        >
+                          Cancel task
+                        </button>
+                      )}
+                      {row.canRetry && (
+                        <button
+                          type="button"
+                          className="button secondary small"
+                          disabled={busy === "task-" + row.id}
+                          onClick={async () => {
+                            setBusy("task-" + row.id);
+                            setError("");
+                            try {
+                              await api(
+                                `/ai-tasks/${encodeURIComponent(row.id)}/retry`,
+                                json({}),
+                              );
+                              void loadTasks();
+                            } catch (e) {
+                              report(e);
+                            } finally {
+                              setBusy("");
+                            }
+                          }}
+                        >
+                          Retry task
+                        </button>
+                      )}
+                      {!row.canCancel && !row.canRetry && (
+                        <span>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="settings-section">
         <p>
           Recorded requests appear here as they start. Earlier records may lack
@@ -543,6 +847,221 @@ export default function AIActivity({
           </>
         )}
       </section>
+      <section className="settings-section">
+        <div className="section-header">
+          <div>
+            <h2>Scheduled & background tasks</h2>
+            <p>
+              Persistent asynchronous jobs including vector embedding batches,
+              opportunity automation workflows, and deferred evaluations.
+              Interrupted jobs do not restart automatically.
+            </p>
+          </div>
+        </div>
+
+        <div className="activity-filters">
+          <label className="field">
+            Task status
+            <select
+              aria-label="Filter background task status"
+              value={taskStatus}
+              onChange={(e) => setTaskStatus(e.target.value)}
+            >
+              {[
+                ["all", "All statuses"],
+                ["active", "Active (Queued / Running)"],
+                ["queued", "Queued"],
+                ["running", "Running"],
+                ["completed", "Completed"],
+                ["failed", "Failed"],
+                ["interrupted", "Interrupted"],
+                ["cancelled", "Cancelled"],
+              ].map(([v, t]) => (
+                <option key={v} value={v}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Task kind
+            <select
+              aria-label="Filter background task kind"
+              value={taskKind}
+              onChange={(e) => setTaskKind(e.target.value)}
+            >
+              {[
+                ["all", "All task kinds"],
+                ["embedding-index", "Vector embedding indexing"],
+                ["opportunity-automation", "Opportunity automation"],
+                ["deferred-fit", "Deferred fit assessment"],
+                ["deferred-briefing", "Deferred briefing"],
+              ].map(([v, t]) => (
+                <option key={v} value={v}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {taskResult?.totals && (
+          <div className="activity-stats">
+            <div>
+              <strong>{taskResult.totals.total}</strong>
+              <span>Total tasks</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.active}</strong>
+              <span>Active</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.completed}</strong>
+              <span>Completed</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.failed}</strong>
+              <span>Failed</span>
+            </div>
+            <div>
+              <strong>{taskResult.totals.interrupted}</strong>
+              <span>Interrupted</span>
+            </div>
+          </div>
+        )}
+
+        <div className="activity-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Task & subject</th>
+                <th>Status & progress</th>
+                <th>Enqueued / Started</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!taskResult?.items.length ? (
+                <tr>
+                  <td colSpan={4}>No matching background tasks found.</td>
+                </tr>
+              ) : (
+                taskResult.items.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <strong>
+                        {taskKindLabels[row.kind] || row.kind}
+                      </strong>
+                      <span>{row.subject}</span>
+                      <span className="activity-hash">ID: {row.id}</span>
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          ["running", "queued"].includes(row.status)
+                            ? "blue"
+                            : ["completed", "completed-with-errors"].includes(
+                                row.status,
+                              )
+                            ? "green"
+                            : ["failed", "interrupted"].includes(row.status)
+                            ? "red"
+                            : "gray"
+                        }`}
+                      >
+                        {taskStatusLabels[row.status] || row.status}
+                      </span>
+                      {row.progress && (
+                        <span>
+                          {row.progress.phase
+                            ? `${row.progress.phase} `
+                            : ""}
+                          {row.progress.completed !== undefined &&
+                          row.progress.total !== undefined
+                            ? `(${row.progress.completed} / ${row.progress.total})`
+                            : row.progress.percent !== undefined
+                            ? `(${row.progress.percent}%)`
+                            : ""}
+                        </span>
+                      )}
+                      {row.lastError && (
+                        <span className="field-error">{row.lastError}</span>
+                      )}
+                      {row.retryCount > 0 && (
+                        <span>Retried {row.retryCount} times</span>
+                      )}
+                    </td>
+                    <td>
+                      <div>
+                        {formatDate(row.enqueuedAt, timezone)}
+                      </div>
+                      {row.finishedAt && (
+                        <span>
+                          Finished: {formatDate(row.finishedAt, timezone)}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {row.canCancel && (
+                        <button
+                          type="button"
+                          className="button secondary small"
+                          disabled={busy === "task-" + row.id}
+                          onClick={async () => {
+                            setBusy("task-" + row.id);
+                            setError("");
+                            try {
+                              await api(
+                                `/ai-tasks/${encodeURIComponent(row.id)}/cancel`,
+                                json({}),
+                              );
+                              void loadTasks();
+                            } catch (e) {
+                              report(e);
+                            } finally {
+                              setBusy("");
+                            }
+                          }}
+                        >
+                          Cancel task
+                        </button>
+                      )}
+                      {row.canRetry && (
+                        <button
+                          type="button"
+                          className="button secondary small"
+                          disabled={busy === "task-" + row.id}
+                          onClick={async () => {
+                            setBusy("task-" + row.id);
+                            setError("");
+                            try {
+                              await api(
+                                `/ai-tasks/${encodeURIComponent(row.id)}/retry`,
+                                json({}),
+                              );
+                              void loadTasks();
+                            } catch (e) {
+                              report(e);
+                            } finally {
+                              setBusy("");
+                            }
+                          }}
+                        >
+                          Retry task
+                        </button>
+                      )}
+                      {!row.canCancel && !row.canRetry && (
+                        <span>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="settings-section">
         <div className="settings-section-heading">
           <Activity size={21} />
