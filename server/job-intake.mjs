@@ -22,6 +22,7 @@ import {
 } from "./buddy-provider.mjs";
 import { parseBuddyOutput } from "./career-buddy.mjs";
 import { readJobPDF } from "./job-intake-pdf.mjs";
+import { renderJobPageWithBrowser } from "./job-browser-render.mjs";
 const fail = (status, message) => {
   throw Object.assign(new Error(message), { status });
 };
@@ -450,19 +451,42 @@ export function createJobIntake(ctx) {
               ? "job-listing.pdf"
               : "job-listing.html";
           if (page.contentType !== "application/pdf") {
+            let workingHtml = page.html;
             try {
-              const parsed = parseJobPage(page.html, { url: page.url });
+              const parsed = parseJobPage(workingHtml, { url: page.url });
               parsedFields = parsed.fields;
               warnings.push(...parsed.warnings);
               sourceMethod = parsed.method;
             } catch (e) {
               if (["JOB_PAGE_BLOCKED", "JOB_PAGE_AMBIGUOUS"].includes(e.code))
                 throw e;
-              warnings.push(
-                "The page could not be parsed automatically; check the extracted text carefully.",
-              );
+              if (e.code === "JOB_PAGE_JS_REQUIRED") {
+                // Attempt headless browser rendering if available
+                try {
+                  task.progress("rendering-page");
+                  const rendered = await renderJobPageWithBrowser(page.url, {
+                    runner: ctx.browserRunner,
+                    signal: task.signal,
+                  });
+                  workingHtml = rendered.html;
+                  bytes = Buffer.from(workingHtml);
+                  const renderedParsed = parseJobPage(workingHtml, { url: page.url });
+                  parsedFields = renderedParsed.fields;
+                  warnings.push(
+                    "Listing was rendered with a headless browser; verify details against the listing.",
+                    ...renderedParsed.warnings,
+                  );
+                  sourceMethod = "browser-rendered";
+                } catch (renderError) {
+                  throw renderError;
+                }
+              } else {
+                warnings.push(
+                  "The page could not be parsed automatically; check the extracted text carefully.",
+                );
+              }
             }
-            const $ = load(page.html);
+            const $ = load(workingHtml);
             const structured = $('script[type="application/ld+json"]')
               .map((_, el) => $(el).text())
               .get()

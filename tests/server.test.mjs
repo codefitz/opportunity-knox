@@ -3883,3 +3883,59 @@ test("R12: promote chat attachment and STAR profile story to career library", as
   assert.match(starContent.data.toString(), /## Situation\nLegacy database migration/);
   assert.match(starContent.data.toString(), /## Result\nReduced failover latency by 90%/);
 });
+
+test("R13: job lookup falls back to browser rendering for JavaScript SPA listings", async (t) => {
+  const spaHtml = '<!doctype html><html><head><title>Modern Careers</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>';
+  const renderedHtml = `<!doctype html><html><head><title>Modern Careers</title></head><body>
+    <main>
+      <h1>Cloud Native Architect</h1>
+      <span class="company-name">Fictional Cloud Systems</span>
+      <span data-testid="job-location">Cambridge, UK</span>
+      <article>
+        <h2>About the role</h2>
+        <p>Help our fictional team build reliable distributed cloud systems.</p>
+        <h2>Responsibilities</h2>
+        <ul><li>Design cloud platforms.</li><li>Improve system architecture.</li></ul>
+        <p>Applicants should bring extensive distributed systems experience.</p>
+      </article>
+    </main>
+  </body></html>`;
+
+  const browserRunner = async (cmd, args) => {
+    if (args[0] === "--version") {
+      return { stdout: "Chromium 130.0.0.0" };
+    }
+    if (args.includes("--dump-dom")) {
+      return { stdout: renderedHtml };
+    }
+    return { stdout: "" };
+  };
+
+  const f = await fixture(t, {
+    intakePageFetcher: async (url) => ({
+      url,
+      html: spaHtml,
+      bytes: Buffer.from(spaHtml),
+      contentType: "text/html",
+    }),
+    browserRunner,
+  });
+  await f.setup();
+
+  // Test /api/job-intake with SPA listing
+  const intakeRes = await f.request("/api/job-intake", {
+    method: "POST",
+    body: {
+      kind: "url",
+      url: "https://jobs.example.test/spa/role",
+      useAI: false,
+      ocr: false,
+      requestId: "test-spa-intake-1",
+    },
+  });
+  assert.equal(intakeRes.status, 200);
+  assert.equal(intakeRes.data.fields.role, "Cloud Native Architect");
+  assert.equal(intakeRes.data.fields.company, "Fictional Cloud Systems");
+  assert.ok(intakeRes.data.warnings.some((w) => /headless browser/i.test(w)));
+});
+

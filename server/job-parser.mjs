@@ -22,6 +22,47 @@ export class JobPageParseError extends Error {
   }
 }
 function unreadable(message, code) { throw new JobPageParseError(message, 422, code); }
+
+/**
+ * Detect whether an HTML document looks like a client-side JavaScript shell / SPA
+ * where main content is rendered dynamically in the browser rather than server-side.
+ */
+export function isJavaScriptShell(html) {
+  if (typeof html !== 'string') return false;
+  // If it's very large, it likely has substantive static content
+  if (html.length > 500_000) return false;
+  const $ = load(html);
+  
+  // Explicit noscript warning or message
+  const noscriptText = $('noscript').text().toLowerCase();
+  if (/(?:you need to enable javascript|javascript is required|enable javascript to run this app|requires javascript)/i.test(noscriptText)) {
+    return true;
+  }
+
+  // Classic SPA root mounts with little or no static inner text
+  const rootSelectors = ['#root', '#app', '#__next', '#__nuxt', '#app-root', '#application', '[data-reactroot]', 'workday-app'];
+  for (const sel of rootSelectors) {
+    const el = $(sel);
+    if (el.length > 0) {
+      const text = plain(el.text());
+      if (text.length < 150) return true;
+    }
+  }
+
+  // Check overall body text length excluding scripts/styles
+  const bodyClone = $('body').clone();
+  bodyClone.find('script,style,noscript,svg').remove();
+  const bodyText = plain(bodyClone.text());
+  const scriptCount = $('script[src]').length;
+
+  // If there are external script bundles and almost no visible body text (< 200 chars)
+  if (scriptCount >= 1 && bodyText.length < 200) {
+    return true;
+  }
+
+  return false;
+}
+
 function normaliseText(text) {
   return String(text ?? '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').replace(/\0/g, '')
     .split('\n').map(line => line.replace(/[\t\f\v ]+/g, ' ').trim()).join('\n')
@@ -289,7 +330,15 @@ export function parseJobPage(html, { url } = {}) {
     fields = fallbackFields($, warnings); method = 'page-content';
     warnings.push('Details were read from the page content. Please check them against the listing.');
   }
-  if (!fields.role || genericTitle.test(fields.role) || !fields.description || fields.description.length < 100) unreadable('A useful job description could not be found on this page. Open the individual listing or upload/paste the description instead.');
+  if (!fields.role || genericTitle.test(fields.role) || !fields.description || fields.description.length < 100) {
+    if (isJavaScriptShell(html)) {
+      unreadable(
+        'This job listing appears to require JavaScript to render. Open the listing in your browser and paste its text or upload the job description.',
+        'JOB_PAGE_JS_REQUIRED',
+      );
+    }
+    unreadable('A useful job description could not be found on this page. Open the individual listing or upload/paste the description instead.');
+  }
   if (!fields.company) warnings.push('The employer could not be identified. Enter it manually.');
   fields.url = sourceUrl;
   const output = {};

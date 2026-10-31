@@ -21,6 +21,7 @@ import {
   isOpportunityDocumentOrganized,
 } from "./managed-folders.mjs";
 import { createUpdateChecker } from "./update-checker.mjs";
+import { renderJobPageWithBrowser, detectBrowserExecutable } from "./job-browser-render.mjs";
 import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
@@ -336,15 +337,43 @@ function writeAtomic(path, data) {
 
 /** Creates an unbound HTTP server. Call server.listen(), and await close() to release server and SQLite. */
 export function createApp(options = {}) {
+  const browserRunner = options.browserRunner;
   const lookupJob =
     options.jobLookup ||
     (async (url) => {
       const page = await fetchJobPage(url);
-      return {
-        ...parseJobPage(page.html, { url: page.url }),
-        sourceUrl: url,
-        resolvedUrl: page.url,
-      };
+      try {
+        const parsed = parseJobPage(page.html, { url: page.url });
+        return {
+          ...parsed,
+          sourceUrl: url,
+          resolvedUrl: page.url,
+        };
+      } catch (parseError) {
+        if (parseError.code === "JOB_PAGE_JS_REQUIRED") {
+          // Attempt headless browser rendering if available
+          try {
+            const rendered = await renderJobPageWithBrowser(page.url, {
+              runner: browserRunner,
+            });
+            const renderedParsed = parseJobPage(rendered.html, { url: page.url });
+            return {
+              ...renderedParsed,
+              method: "browser-rendered",
+              sourceUrl: url,
+              resolvedUrl: page.url,
+              warnings: [
+                "Listing was rendered with a headless browser; verify details against the listing.",
+                ...(renderedParsed.warnings || []),
+              ],
+            };
+          } catch (renderError) {
+            // Propagate the original or rendering error
+            throw renderError;
+          }
+        }
+        throw parseError;
+      }
     });
   let activeJobLookups = 0;
   const dataDir = resolve(
@@ -865,7 +894,7 @@ export function createApp(options = {}) {
   const recordImports=createRecordImports({db,getConfig,putConfig,listRecords,getRecord,putRecord,getDocuments,listTasks,createBackup});
   const summaries=createOpportunitySummaries({getConfig,putConfig,getRecord,getDocuments,listTasks,listRecords,requests:buddy.requests,buddyFetch:options.buddyFetch});
   const aiWorkflow=createAIWorkflow({getConfig,putConfig});
-  const jobIntake=createJobIntake({dataDir,db,getConfig,requests:buddy.requests,saveDocument,getDocument,getDocuments,getRecord,putRecord,fullRecord,addEvent,documentPath,createOpportunity,pageFetcher:options.intakePageFetcher,extractor:options.intakeExtractor,pdfExtractor:options.intakePDF,buddyFetch:options.buddyFetch,onCreated:id=>queueMicrotask(()=>buddy.automate(id))});
+  const jobIntake=createJobIntake({dataDir,db,getConfig,requests:buddy.requests,saveDocument,getDocument,getDocuments,getRecord,putRecord,fullRecord,addEvent,documentPath,createOpportunity,pageFetcher:options.intakePageFetcher,extractor:options.intakeExtractor,pdfExtractor:options.intakePDF,browserRunner:options.browserRunner,buddyFetch:options.buddyFetch,onCreated:id=>queueMicrotask(()=>buddy.automate(id))});
   obsidian = createObsidianIntegration({
     dataDir,
     filesDir,

@@ -17,7 +17,7 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | R8 | [x] ~~Calendar ICS export for interviews~~ | Complete | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities (single-event downloads, opportunity-scoped calendar, and global interview subscription feed); on-screen due-date queues and To-do list handle reminders. |
 | R9 | [x] ~~Human-readable managed folder names and stage subfolders~~ | Complete | Employer/role-labelled managed folders and stage organization; stable-ID storage, relocation and migration are complete. |
 | R12 | [x] ~~Explicit chat-attachment & STAR story promotion to career library~~ | Complete | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence; explicit copy action for chat uploads and optional title/download for STAR stories. |
-| R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Open | Headless browser rendering for JS-rendered job boards; public HTML/PDF lookup, snapshots and OCR are complete. |
+| R13 | [x] ~~Browser-rendered intake for JavaScript-only job pages~~ | Complete | Headless browser rendering for JS-rendered job boards (SPAs) with isolated temp user-data-dir, 15s budget, auto-detection across Chrome/Chromium/Brave/Edge, and clear fallback when blocked or unavailable. |
 
 ## Backburner / Deferred / Will Not Do scope
 
@@ -188,7 +188,7 @@ Proposed managed layout:
 - [x] ~~Independent stage 1–3 AI switches, separate automatic fit/tag controls, conflict-safe saved settings and server enforcement; local tools remain available.~~
 - [x] ~~Stage 1 deterministic public URL lookup (`JobPosting` structured data + visible HTML) with source provenance and fallback to pasted text or uploaded document.~~
 - [x] ~~Stage 1 reviewed intake for public links (HTML/PDF), pasted text and PDF/DOCX/text/HTML uploads: optional grounded AI fields, supporting passage/page quotes, missing information/uncertainties, full original-source snapshots and bounded local English OCR for scanned PDF pages. Saving creates the opportunity and source/text/report documents atomically; typed fields are preserved. See JOB_INTAKE.md.~~
-- [ ] Optional browser-rendered intake for JavaScript-only listings (R13); current fallback is pasted text or uploaded source.
+- [x] ~~Optional browser-rendered intake for JavaScript-only listings (R13); current fallback is pasted text or uploaded source.~~
 - [x] ~~Stage 2 fit, salary, and skills evaluation in Career Buddy against selected reference evidence, separating supported matches from gaps and questions while leaving decisions to the user.~~
 - [x] ~~User-defined persistent fit criteria profile for Stage 2 reviews, with revision conflicts and assessment snapshots.~~
 - [x] ~~Stage 3 CV and cover letter drafting in Career Buddy using selected career evidence, saving editable `.docx` and `.md` versions without overwriting submitted files.~~

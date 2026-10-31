@@ -17,7 +17,7 @@
 - [x] ~~External-assistant task-pack export (ZIP/JSON) and result import with schema validation, conflict preview, audit task recording, and Word draft generation.~~
 - [x] ~~Global private feedback inbox, optional advisory AI review, and export.~~
 
-Latest implementation verification: **235 Node tests + 39 launcher/helper tests (274 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
+Latest implementation verification: **247 Node tests + 39 launcher/helper tests (286 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
 
 ## Remaining work
 
@@ -32,7 +32,7 @@ The same **13 work areas** appear in the plan. Optional/account-dependent items 
 | R8 | [x] ~~Calendar ICS export for interviews~~ | Complete | Standard iCalendar (.ics) event and feed export for interviews and scheduled activities (single-event downloads, opportunity-scoped calendar, and global interview subscription feed); on-screen due-date queues and To-do list handle reminders. |
 | R9 | [x] ~~Human-readable managed folder names and stage subfolders~~ | Complete | Saves opportunity documents under `<stable-id>-<company>-<role>/` formatted folder names with `job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, and `correspondence/` subdirectories; includes `POST /api/opportunities/:id/organize-folders` for transparent migration of existing files with hash verification and rollback protection, plus UI organize action. |
 | R12 | [x] ~~Explicit chat-attachment & STAR story promotion to career library~~ | Complete | Promote STAR profile stories and chat attachments directly into the Career library as reusable reference evidence; explicit copy action for chat uploads and optional title/download for STAR stories. |
-| R13 | [ ] Browser-rendered intake for JavaScript-only job pages | Open | Headless browser rendering for JS-rendered job boards; public HTML/PDF lookup, snapshots and OCR are complete. |
+| R13 | [x] ~~Browser-rendered intake for JavaScript-only job pages~~ | Complete | Headless browser rendering for JS-rendered job boards (SPAs) with isolated temp user-data-dir, 15s budget, auto-detection across Chrome/Chromium/Brave/Edge, and clear fallback when blocked or unavailable. |
 
 ## Backburner / Deferred / Will Not Do scope
 
@@ -86,7 +86,7 @@ Version 0.3 implements: Opportunity Knox branding; Forest/Cappuccino/Ocean/Midni
 - [x] ~~Configured-root browsing, multiple read-only reference roots, communication direction/channels and explicit dated review decisions.~~
 - [x] ~~Reviewed JD extraction, built-in/marked templates, PDF export and local vector/hybrid retrieval. Arbitrary-template fidelity is R7.~~
 - [x] ~~Bounded local English PDF OCR and original HTML/PDF source snapshots in reviewed intake.~~
-- [ ] Browser-rendered JavaScript-only job pages (R13).
+- [x] ~~Browser-rendered JavaScript-only job pages (R13).~~
 - [x] ~~Application-pack approval, submission metadata, linked history and preserved submitted versions.~~
 - [x] ~~Portable backup/restore activation and managed-document reconciliation; historical JSON import is record-only and retains source archives.~~
 - [ ] Production remote HTTPS/VPN hosting (R10/V1).

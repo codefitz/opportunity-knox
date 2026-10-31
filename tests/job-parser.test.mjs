@@ -107,3 +107,16 @@ test('an optional sign-in modal does not hide an otherwise public job', () => {
   const result=parse(page(`<main><h1>Security Verification Engineer</h1><article>${description}</article></main><section><h2>Sign in</h2><p>Sign in for more features.</p></section>`));
   assert.equal(result.fields.role,'Security Verification Engineer'); assert.match(result.fields.description,/architecture experience/);
 });
+
+test('JavaScript SPA shell without description throws JOB_PAGE_JS_REQUIRED', () => {
+  const spaShell = page('<div id="root"></div><script src="/static/bundle.js"></script>', '<title>Fictional Careers</title>');
+  assert.throws(
+    () => parse(spaShell),
+    (e) => {
+      assert.equal(e.status, 422);
+      assert.equal(e.code, 'JOB_PAGE_JS_REQUIRED');
+      assert.match(e.message, /JavaScript to render/i);
+      return true;
+    },
+  );
+});
