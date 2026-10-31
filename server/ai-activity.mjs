@@ -8,7 +8,7 @@ export const activityKinds = {
   summary: "Opportunity briefing",
   intake: "AI job intake",
   "local-intake": "Local job reading",
-  feedback: "Feedback review",
+  feedback: "Feedback AI",
   "connection-test": "Connection test",
   "external-assistant": "External assistant task",
 };

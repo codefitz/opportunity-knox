@@ -1,3 +1,4 @@
+import {createWorkspaceActions} from "./workspace-actions.mjs";
 import {createAIActivity,publicRates} from "./ai-activity.mjs";
 import {createAIScheduler} from "./ai-scheduler.mjs";
 import {createRecordImports} from "./record-imports.mjs";
@@ -432,6 +433,8 @@ export function createApp(options = {}) {
         "INSERT INTO config(key,data) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
       )
       .run(key, JSON.stringify(data));
+  if (!getConfig("uploadWorkspaceId")) putConfig("uploadWorkspaceId", randomUUID());
+  let activeWrites = 0;
   const getRecord = (id) => {
     const row = db.prepare("SELECT data FROM records WHERE id=?").get(id);
     if (!row) fail(404, "Opportunity not found.");
@@ -913,6 +916,10 @@ export function createApp(options = {}) {
     deleteSourceCache: (id) => db.prepare("DELETE FROM document_text WHERE id=?").run(id),
     fail,
   });
+  const workspaceActions = createWorkspaceActions({db,getConfig,putConfig,settings,dataDir,createBackup,
+    otherWrites:()=>activeWrites>1,
+    invalidate:({reset,documentIds})=>{studio.invalidate(reset?null:documentIds);if(reset)buddy.resetWorkspace();},
+  });
   async function readBody(req) {
     if (!(req.headers["content-type"] || "").startsWith("application/json"))
       fail(415, "Send JSON content.");
@@ -941,11 +948,16 @@ export function createApp(options = {}) {
     res.end(JSON.stringify(data));
   };
   const server = createServer(async (req, res) => {
+    const trackedWrite = ['POST','PATCH','DELETE'].includes(req.method) || req.url?.startsWith('/api/connections/google/callback');
+    if (trackedWrite) activeWrites++;
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("Cache-Control", "no-store");
     try {
+      const workspaceId=getConfig("uploadWorkspaceId");
+      res.setHeader("X-Board-Workspace",workspaceId);
       const parsed = new URL(req.url, "http://localhost");
+      if (['POST','PATCH','DELETE'].includes(req.method) && req.headers['x-board-workspace'] && req.headers['x-board-workspace'] !== workspaceId) fail(409,"The workspace was reset. Reload before saving changes.");
       const path = parsed.pathname;
       const method = req.method;
       if (!["GET", "HEAD", "POST", "PATCH", "DELETE"].includes(method))
@@ -1061,7 +1073,8 @@ export function createApp(options = {}) {
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
         if(reliability.applying()&&!['GET','HEAD'].includes(method)&&!path.startsWith('/api/reliability/')&&path!=='/api/logout')fail(503,"Workspace maintenance is in progress. Wait for it to finish.");
-        try {if(await aiActivity.handle(path,method,req,res,{json,readBody}))return;
+        try {if(await workspaceActions.handle(path,method,req,res,{json,readBody}))return;
+        if(await aiActivity.handle(path,method,req,res,{json,readBody}))return;
         if(await aiScheduler.handle(path,method,req,res,{json,readBody}))return;
         if(await recordImports.handle(path,method,req,res,{json,readBody}))return;
         if(await summaries.handle(path,method,req,res,{json,readBody}))return;
@@ -2201,6 +2214,8 @@ export function createApp(options = {}) {
         );
       else res.end();
       if (!(error instanceof HttpError)) console.error(error);
+    } finally {
+      if (trackedWrite) activeWrites--;
     }
   });
   let closed = false;

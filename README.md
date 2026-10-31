@@ -73,6 +73,12 @@ You can also choose a different port, remembered for future starts:
 
 ## Workspace features
 
+Feedback uses one private submission form without visible history. Select **Also prepare a GitHub issue** before submitting to let Career Buddy fill out an editable issue draft. Feedback saves privately first; review and submit the optional issue on GitHub.
+
+Open an opportunity to **Delete opportunity**, or use **Clear all opportunities** above the list/Kanban board. Clear-all includes completed and filtered-out records. Both remove associated board history and links while keeping Career Hub, standalone chats, unlinked tasks, profile and settings.
+
+**Settings → Reset workspace** starts a fresh board while keeping your profile name/photo, sign-in and storage locations. It clears opportunities, tasks, Career Hub links, conversations, feedback, preferences and saved AI/connection credentials. Every action shows its scope, requires a typed confirmation and creates a verified private full backup first. Existing files, external originals and earlier backups stay on disk; recover records through **Settings → Recovery**. See [deletion and reset details](docs/WORKSPACE_RESET.md).
+
 The initial manual workflow covers opportunity capture, dated stage history and corrections, notes, repeatable interviews and communications, document uploads/downloads, reference material, and configurable storage. The app tracks the documents used for an application; recording submission does not send anything to an employer.
 
 - **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes, tasks, and interview/action queues. Charts and records update after changes and periodic refreshes.
@@ -137,7 +143,7 @@ The launcher's tests use temporary folders and mocked commands. They do not star
 
 ### Settings and Career Hub sections
 
-Settings uses section navigation for Profile, Appearance, Files & storage, AI workflow, Recovery, Import records, Backups & export, Connections, Career Buddy, Embeddings, and Fit & decision model. Career Hub (formerly Career Library) opens on Documents, with separate Text preparation, Semantic search, Connections, and Obsidian vault sections. Switching sections preserves in-progress forms and uploads while the page remains open. Section links support refresh and browser Back/Forward; existing `#/library` links still work. On smaller screens, section navigation wraps above the content.
+Settings uses section navigation for Profile, Appearance, Files & storage, AI workflow, Recovery, Import records, Backups & export, Reset workspace, Connections, Career Buddy, Embeddings, and Fit & decision model. Career Hub (formerly Career Library) opens on Documents, with separate Text preparation, Semantic search, Connections, and Obsidian vault sections. Switching sections preserves in-progress forms and uploads while the page remains open. Section links support refresh and browser Back/Forward; existing `#/library` links still work. On smaller screens, section navigation wraps above the content.
 
 ### Update detection
 

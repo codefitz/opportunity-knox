@@ -42,7 +42,7 @@ These four groups are separate from unfinished implementation; they are not reas
 
 ## Feature Requests
 
-- [x] ~~Global Feedback button/text box, private persistent inbox and JSON export, Open/Planned/Done tracking, and optional advisory AI review using only feedback/page context. Failed/cancelled/interrupted reviews preserve originals; no automatic application changes.~~
+- [x] ~~Single-pane Feedback form without visible history; private backend storage/export and optional opt-in AI-assisted GitHub issue drafting at submission time. Originals and historical reviews preserved; editable issue drafts require user review and submission on GitHub.~~
 
 - [x] ~~Separate embedding provider, endpoint, model and server-side API key configuration from Career Buddy chat settings (OpenAI, Ollama and custom compatible endpoints). No embedding requests or indexing are triggered by saving.~~
 - [x] ~~Bundle a pinned, checksum-verified local MiniLM embedding model in Docker with offline CPU inference and a fictional-text self-test. Use it by default for new embedding configurations; preserve saved external providers.~~
@@ -330,3 +330,10 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] ~~Keep-existing-layout rendering, explicit marked-template insertion, editable draft text, actual page count/target warnings, page images, PDF/Word downloads and reviewed new-draft saves.~~
 - [x] ~~Bundled local renderer/fonts, bounded private previews, source revision checks and unchanged submitted originals.~~
 - [ ] Native Google Docs editing, arbitrary unmarked template reconstruction and guaranteed cross-engine pagination. Preserve source-system PDF copies where fidelity matters.
+
+## Opportunity deletion and workspace reset — 31 October 2026
+
+- [x] Individual opportunity deletion and clear-all controls, including associated records, with explicit scope previews and typed confirmation.
+- [x] Reset the workspace while preserving profile, sign-in and storage locations; clear preferences and saved connection/AI credentials.
+- [x] Mandatory verified full backup, atomic database removal, stale-preview/client protection and active-work guards. Retain physical files and external originals; document recovery and exact scope in [WORKSPACE_RESET.md](WORKSPACE_RESET.md).
+- [x] Automated regression checks and browser verification on disposable fictional data. Live deployment remains separate.

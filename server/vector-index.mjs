@@ -788,6 +788,7 @@ export function createVectorIndex({
     });
   }
   return {
+    forgetJob() { if (running) throw invalid("Wait for indexing to stop before resetting.",409); job=null; },
     status,
     search,
     selectSources,

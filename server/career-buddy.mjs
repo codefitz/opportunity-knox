@@ -428,6 +428,7 @@ export function createCareerBuddy(ctx) {
   });
   return {
     requests,
+    resetWorkspace:()=>vectors.forgetJob(),
     assistantPacks,
     automate:automation.schedule,
     exportAssessments: decisions.exportAssessments,

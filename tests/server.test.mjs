@@ -42,9 +42,10 @@ async function fixture(t, extras = {}) {
   });
   async function request(
     path,
-    { method = "GET", body, auth = true, headers = {}, binary = false } = {},
+    { method = "GET", body, auth = true, headers = {}, binary = false, signal } = {},
   ) {
     const response = await fetch(base + path, {
+      signal,
       method,
       headers: {
         ...(auth && cookie ? { Cookie: cookie } : {}),
@@ -3160,7 +3161,7 @@ test('pack submission is atomic when a reviewed file becomes unavailable',async 
 
 test('feedback is private, idempotent, persistent and included in exports/backups',async t=>{
  const f=await fixture(t);await f.setup();const body={text:'Fictional dashboard suggestion.',page:'dashboard',requestId:'fictional-feedback'};
- assert.equal((await f.request('/api/feedback',{auth:false})).status,401);const first=await f.request('/api/feedback',{method:'POST',body});assert.equal(first.status,201);assert.equal(first.data.item.reviewStatus,'not-reviewed');assert.equal((await f.request('/api/feedback',{method:'POST',body})).data.item.id,first.data.item.id);
+ assert.equal((await f.request('/api/feedback',{auth:false})).status,401);const first=await f.request('/api/feedback',{method:'POST',body});assert.equal(first.status,201);assert.equal(first.data.item.reviewStatus,undefined);assert.equal((await f.request('/api/feedback',{method:'POST',body})).data.item.id,first.data.item.id);
  assert.equal((await f.request('/api/feedback',{method:'POST',body:{...body,text:'Different fictional text'}})).status,409);assert.equal((await f.request('/api/feedback',{method:'POST',body:{...body,page:'https://private.example/?token=secret'}})).status,400);
  const url='/api/feedback/'+first.data.item.id;const updated=await f.request(url,{method:'PATCH',body:{revision:1,status:'planned'}});assert.equal(updated.status,200);assert.equal((await f.request(url,{method:'PATCH',body:{revision:1,status:'done'}})).status,409);
  assert.match(JSON.stringify((await f.request('/api/export')).data.feedback),/Fictional dashboard/);assert.match(JSON.stringify((await f.request('/api/feedback/export')).data),/Fictional dashboard/);
@@ -3169,17 +3170,55 @@ test('feedback is private, idempotent, persistent and included in exports/backup
  await f.restart();await f.login();assert.equal((await f.request('/api/feedback')).data.items[0].status,'planned');assert.equal((await f.request('/api/feedback')).data.items[0].reviewStatus,'interrupted');
 });
 
-test('feedback AI review receives only submitted feedback/page and cannot apply changes',async t=>{
- let supplied;const f=await fixture(t,{buddyFetch:async(_,opts)=>{supplied=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:JSON.stringify({summary:'Fictional filter improvement',priority:'medium',improvements:['Add a visible filter.'],questions:['Which view?']})}));}});await f.setup();await enableBuddy(f);await f.request('/api/opportunities',{method:'POST',body:{...opportunity,description:'Private career text must not be sent.'}});
- const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Improve dashboard filters.',page:'dashboard',requestId:'ai-feedback'}})).data.item;const route='/api/feedback/'+item.id+'/review';assert.equal((await f.request(route,{method:'POST',body:{}})).status,400);
- const review=await f.request(route,{method:'POST',body:{confirm:true}});assert.equal(review.status,200);assert.deepEqual(supplied,{page:'dashboard',feedback:'Improve dashboard filters.'});assert.equal(review.data.item.review.priority,'medium');assert.equal(review.data.item.status,'open');assert.equal(review.data.item.reviewStatus,'completed');
+test('plain feedback does not use AI; legacy review endpoints stay disabled and historical reviews survive',async t=>{
+ let calls=0;const f=await fixture(t,{buddyFetch:async()=>{calls++;throw Error('Must not call AI');}});
+ await f.setup();await enableBuddy(f);
+ const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Private fictional feedback.',page:'settings',requestId:'no-ai-feedback'}})).data.item;
+ assert.equal((await f.request('/api/feedback')).data.aiAvailable,undefined);
+ for(const action of ['review','cancel'])assert.equal((await f.request('/api/feedback/'+item.id+'/'+action,{method:'POST',body:{confirm:true}})).status,410);
+ assert.equal(calls,0);assert.equal((await f.request('/api/ai-activity')).data.items.length,0);
+ const inbox=JSON.parse(f.app.db.prepare("SELECT data FROM config WHERE key='feedbackInbox'").get().data);
+ inbox.items[0].reviewStatus='completed';inbox.items[0].review={summary:'Historical review retained.',priority:'low',improvements:[],questions:[]};
+ f.app.db.prepare("UPDATE config SET data=? WHERE key='feedbackInbox'").run(JSON.stringify(inbox));
+ await f.restart();await f.login();const saved=(await f.request('/api/feedback')).data.items[0];
+ assert.equal(saved.text,item.text);assert.equal(saved.review.summary,'Historical review retained.');
+ assert.match(JSON.stringify((await f.request('/api/feedback/export')).data),/Historical review retained/);
 });
 
-test('cancelled and malformed AI feedback reviews preserve original feedback',async t=>{
- let release,started;const ready=new Promise(r=>started=r);const f=await fixture(t,{buddyFetch:async()=>{started();await new Promise(r=>release=r);return buddyResponse(buddyReply({reply:'not valid review JSON'}));}});await f.setup();await enableBuddy(f);
- const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Fictional feedback retained.',page:'settings',requestId:'cancel-feedback'}})).data.item;const route='/api/feedback/'+item.id;
- const pending=f.request(route+'/review',{method:'POST',body:{confirm:true}});await ready;await f.request(route+'/cancel',{method:'POST',body:{}});release();assert.equal((await pending).status,499);let saved=(await f.request('/api/feedback')).data.items[0];assert.equal(saved.text,item.text);assert.equal(saved.reviewStatus,'cancelled');
- const second=f.request(route+'/review',{method:'POST',body:{confirm:true}});for(let i=0;i<50;i++){if((await f.request('/api/feedback')).data.items[0].reviewStatus==='running')break;await new Promise(r=>setTimeout(r,5));}release();assert.equal((await second).status,502);saved=(await f.request('/api/feedback')).data.items[0];assert.equal(saved.reviewStatus,'failed');assert.equal(saved.text,item.text);
+test('GitHub issue AI drafting is opt-in, feedback-only, validated and never changes the saved feedback',async t=>{
+ let calls=0,supplied,invalid=false;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{calls++;supplied=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);return buddyResponse(buddyReply({reply:invalid?'not JSON':JSON.stringify({title:'Improve settings spacing',body:'## Problem\nSettings labels need clearer spacing.\n\n## Reproduction\nNot provided.'})}));}});
+ await f.setup();
+ const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Improve settings labels.',page:'settings',requestId:'github-opt-in'}})).data.item;
+ assert.equal(calls,0);
+ const path='/api/feedback/'+item.id+'/issue-draft';
+ assert.equal((await f.request(path,{method:'POST',auth:false,body:{confirm:true,requestId:'no-auth'}})).status,401);
+ assert.equal((await f.request(path,{method:'POST',body:{requestId:'no-confirm'}})).status,400);
+ assert.equal((await f.request(path,{method:'POST',body:{confirm:true,requestId:'no-provider'}})).status,400);
+ assert.equal(calls,0);await enableBuddy(f);
+ await f.request('/api/opportunities',{method:'POST',body:{...opportunity,description:'Private career data must not enter the issue prompt.'}});
+ const result=await f.request(path,{method:'POST',body:{confirm:true,requestId:'github-draft'}});
+ assert.equal(result.status,200);assert.equal(result.data.draft.title,'Improve settings spacing');
+ assert.deepEqual(supplied,{feedback:'Improve settings labels.',page:'settings'});
+ assert.deepEqual((await f.request('/api/feedback')).data.items[0],item);
+ invalid=true;assert.equal((await f.request(path,{method:'POST',body:{confirm:true,requestId:'bad-github-draft'}})).status,502);
+ assert.deepEqual((await f.request('/api/feedback')).data.items[0],item);
+ const activity=(await f.request('/api/ai-activity')).data.items;
+ assert.ok(activity.some(r=>r.kind==='feedback'&&r.stage==='completed'));
+ assert.ok(activity.some(r=>r.kind==='feedback'&&r.stage==='failed'));
+});
+
+test('cancelled GitHub issue drafting cannot publish a late result or remove private feedback',async t=>{
+ let entered,release;const ready=new Promise(resolve=>entered=resolve);
+ const f=await fixture(t,{buddyFetch:async()=>{entered();await new Promise(resolve=>release=resolve);return buddyResponse(buddyReply({reply:JSON.stringify({title:'Late draft',body:'Never publish this result.'})}));}});
+ await f.setup();await enableBuddy(f);
+ const item=(await f.request('/api/feedback',{method:'POST',body:{text:'Keep this private feedback.',page:'dashboard',requestId:'github-cancel-feedback'}})).data.item;
+ const pending=f.request('/api/feedback/'+item.id+'/issue-draft',{method:'POST',body:{confirm:true,requestId:'cancel-github-draft'}});
+ await ready;
+ assert.equal((await f.request('/api/buddy/requests/cancel-github-draft',{method:'POST',body:{cancel:true}})).status,200);
+ release();assert.equal((await pending).status,499);
+ assert.deepEqual((await f.request('/api/feedback')).data.items[0],item);
+ assert.equal((await f.request('/api/ai-activity?status=cancelled')).data.total,1);
 });
 
 test("communications retain direction, custom channels, follow-ups and scoped document links across edits and restart", async t => {
@@ -3430,8 +3469,17 @@ test('activity retains failed and retried attempts without replaying prompts whe
 test('active AI activity can cancel a request without retrying or publishing late results',async t=>{
  let entered,release,calls=0;const started=new Promise(r=>entered=r);const f=await fixture(t,{buddyFetch:async()=>{calls++;entered();await new Promise(r=>release=r);return buddyResponse(buddyReply());}});await f.setup();await enableBuddy(f);const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;const pending=buddyChat(f,op.id,{requestId:'activity-cancel'});await started;const active=(await f.request('/api/ai-activity?status=active')).data;assert.equal(active.total,1);assert.equal(active.items[0].finishedAt,null);assert.equal((await f.request('/api/buddy/requests/activity-cancel',{method:'POST',body:{cancel:true}})).status,200);release();assert.equal((await pending).status,499);assert.equal((await f.request('/api/ai-activity?status=cancelled')).data.total,1);assert.equal(calls,1);assert.equal((await f.request('/api/opportunities/'+op.id+'/buddy')).data.messages.length,0);
 });
-test('feedback reviews and local intake join activity without leaking text; usage snapshots survive full backups',async t=>{
- const f=await fixture(t,{buddyFetch:async()=>Response.json({usage:{prompt_tokens:30,completion_tokens:10},choices:[{finish_reason:'stop',message:{content:JSON.stringify(buddyReply({reply:JSON.stringify({summary:'Fictional suggestion',priority:'low',improvements:[],questions:[]})}))}}]})});await f.setup();await enableBuddy(f);const item=(await f.request('/api/feedback',{method:'POST',body:{text:'PRIVATE FICTIONAL FEEDBACK TEXT',page:'activity',requestId:'activity-feedback'}})).data.item;assert.equal((await f.request('/api/feedback/'+item.id+'/review',{method:'POST',body:{confirm:true}})).status,200);await f.request('/api/job-intake',{method:'POST',body:{kind:'text',text:'Fictional job opportunity with sufficient readable content for local extraction.',useAI:false,ocr:false,requestId:'activity-local'}});const report=(await f.request('/api/ai-activity')).data;assert.equal(report.items.find(r=>r.kind==='feedback').usage.inputTokens,30);assert.equal(report.items.find(r=>r.kind==='local-intake').usage,null);assert.equal(JSON.stringify(report).includes('PRIVATE FICTIONAL'),false);const b=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(b.status,200);const snapshot=new DatabaseSync(join(f.options.filesDir,'backups',b.data.name,'board.sqlite'));try{const logs=snapshot.prepare('SELECT data FROM buddy_requests').all().map(r=>JSON.parse(r.data));assert.equal(logs.length,2);assert.equal(logs.find(r=>r.kind==='feedback').usage.outputTokens,10);}finally{snapshot.close();}
+test('local intake joins activity without feedback text; snapshots survive full backups',async t=>{
+ const f=await fixture(t);await f.setup();
+ await f.request('/api/feedback',{method:'POST',body:{text:'PRIVATE FICTIONAL FEEDBACK TEXT',page:'activity',requestId:'activity-feedback'}});
+ await f.request('/api/job-intake',{method:'POST',body:{kind:'text',text:'Fictional job opportunity with sufficient readable content for local extraction.',useAI:false,ocr:false,requestId:'activity-local'}});
+ const report=(await f.request('/api/ai-activity')).data;
+ assert.equal(report.items.find(r=>r.kind==='local-intake').usage,null);
+ assert.equal(report.items.some(r=>r.kind==='feedback'),false);
+ assert.equal(JSON.stringify(report).includes('PRIVATE FICTIONAL'),false);
+ const b=await f.request('/api/backup',{method:'POST',body:{}});assert.equal(b.status,200);
+ const snapshot=new DatabaseSync(join(f.options.filesDir,'backups',b.data.name,'board.sqlite'));
+ try{const logs=snapshot.prepare('SELECT data FROM buddy_requests').all().map(r=>JSON.parse(r.data));assert.equal(logs.length,1);assert.equal(logs[0].kind,'local-intake');}finally{snapshot.close();}
 });
 
 test('universal AI task scheduler manages background tasks, supports cancel/retry, survives restart with interruption, and is included in backups and export',async t=>{
@@ -3939,3 +3987,129 @@ test("R13: job lookup falls back to browser rendering for JavaScript SPA listing
   assert.ok(intakeRes.data.warnings.some((w) => /headless browser/i.test(w)));
 });
 
+
+async function actionPreview(f,action,opportunityId){return f.request('/api/workspace-actions/preview',{method:'POST',body:{action,opportunityId}});}
+async function actionApply(f,preview,extra={}){return f.request('/api/workspace-actions/apply',{method:'POST',body:{planId:preview.planId,confirmation:preview.phrase,confirm:true,...extra}});}
+function putTestRow(f,table,id,value){f.app.db.prepare(`INSERT INTO ${table}(id,data) VALUES (?,?)`).run(id,JSON.stringify({id,...value}));}
+function testConfig(f,key,value){f.app.db.prepare('INSERT INTO config(key,data) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run(key,JSON.stringify(value));}
+
+test('individual deletion previews exact scope, requires confirmation and preserves files and full backup',async t=>{
+ const f=await fixture(t);await f.setup();
+ const first=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const other=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Fictional Other'}})).data;
+ async function upload(opportunityId,status='draft'){return(await f.request('/api/documents',{method:'POST',body:{opportunityId,name:'evidence.txt',kind:'reference',status,contentBase64:Buffer.from('Exact fictional submitted bytes').toString('base64')}})).data;}
+ const doc=await upload(first.id,'submitted'),library=await upload('');
+ const stored=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data),original=join(stored.storageRoot,stored.relativePath);
+ putTestRow(f,'tasks','linked',{title:'Linked task',opportunityId:first.id});putTestRow(f,'tasks','unlinked',{title:'Unlinked task',opportunityId:''});
+ putTestRow(f,'buddy_messages','chat',{opportunityId:first.id});putTestRow(f,'decision_assessments','assessment',{opportunityId:first.id});
+ putTestRow(f,'buddy_requests','finished',{conversationId:'opportunity:'+first.id,finishedAt:'2026-01-01'});
+ putTestRow(f,'buddy_requests','standalone',{conversationId:'standalone:keep',finishedAt:'2026-01-01'});
+ testConfig(f,'opportunitySummary:'+first.id,{text:'Old summary'});
+ assert.equal((await f.request('/api/workspace-actions/preview',{method:'POST',auth:false,body:{action:'delete-opportunity',opportunityId:first.id}})).status,401);
+ const preview=await actionPreview(f,'delete-opportunity',first.id);assert.equal(preview.status,200);assert.equal(preview.data.counts.find(v=>v.label==='Opportunities').count,1);
+ assert.equal((await actionApply(f,preview.data,{confirmation:'wrong'})).status,400);
+ const result=await actionApply(f,preview.data);assert.equal(result.status,200,result.data.error);
+ assert.equal((await f.request('/api/opportunities/'+first.id)).status,404);assert.equal((await f.request('/api/opportunities/'+other.id)).status,200);
+ assert.equal(f.app.db.prepare('SELECT id FROM tasks WHERE id=?').get('linked'),undefined);assert.ok(f.app.db.prepare('SELECT id FROM tasks WHERE id=?').get('unlinked'));
+ assert.equal(f.app.db.prepare('SELECT id FROM buddy_messages WHERE id=?').get('chat'),undefined);assert.equal(f.app.db.prepare('SELECT id FROM decision_assessments').all().length,0);
+ assert.equal(f.app.db.prepare('SELECT id FROM buddy_requests').all().length,1);
+ assert.equal((await f.request('/api/documents')).data.documents.some(d=>d.id===library.id),true);
+ assert.equal(readFileSync(original,'utf8'),'Exact fictional submitted bytes');
+ const snapshot=new DatabaseSync(join(result.data.backup.location,'board.sqlite'));assert.ok(snapshot.prepare('SELECT id FROM records WHERE id=?').get(first.id));snapshot.close();
+ assert.equal(readFileSync(join(result.data.backup.location,'documents',doc.id),'utf8'),'Exact fictional submitted bytes');
+ assert.equal((await actionApply(f,preview.data)).status,409);
+ await f.restart();await f.login();assert.equal((await f.request('/api/opportunities/'+first.id)).status,404);
+});
+
+test('clear all includes completed opportunities and preserves library, settings and unlinked tasks',async t=>{
+ const f=await fixture(t);await f.setup();
+ const a=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const b=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,company:'Fictional Completed'}})).data;
+ const raw=JSON.parse(f.app.db.prepare('SELECT data FROM records WHERE id=?').get(b.id).data);raw.stage='outcome';raw.outcome='rejected';f.app.db.prepare('UPDATE records SET data=? WHERE id=?').run(JSON.stringify(raw),b.id);
+ putTestRow(f,'tasks','keep',{opportunityId:''});putTestRow(f,'tasks','remove',{opportunityId:a.id});
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'library.txt',kind:'reference',contentBase64:Buffer.from('Keep this library source').toString('base64')}})).data;
+ const preview=await actionPreview(f,'clear-opportunities');assert.equal(preview.data.counts.find(c=>c.label==='Opportunities').count,2);assert.doesNotMatch(preview.data.keeps,/Other opportunities/);assert.match(preview.data.removes,/^All opportunities/);
+ assert.equal((await actionApply(f,preview.data)).status,200);
+ assert.equal((await f.request('/api/board')).data.opportunities.length,0);assert.ok(f.app.db.prepare('SELECT id FROM tasks WHERE id=?').get('keep'));
+ assert.equal((await f.request('/api/documents')).data.documents[0].id,doc.id);
+});
+
+test('workspace reset preserves exact profile, sign-in, storage and backups while clearing app data and old clients',async t=>{
+ const f=await fixture(t,{embeddingFn:async texts=>texts.map(()=>[1,...Array(383).fill(0)]),documentConvert:async()=>({pages:1,pdf:Buffer.from('%PDF-fictional')})});await f.setup();
+ await f.request('/api/opportunities',{method:'POST',body:opportunity});
+ const profile={name:'Fictional Profile',revision:7,image:{mime:'image/png',base64:'fictional-avatar'}};testConfig(f,'profile',profile);
+ testConfig(f,'settings',{theme:'midnight',timezone:'America/New_York',documentsSubdir:'kept-applications',referenceSubdir:'kept-library',backupSubdir:'kept-backups'});
+ testConfig(f,'careerBuddy',{enabled:true,apiKey:'fictional-secret'});testConfig(f,'googleDocuments',{refreshToken:'fictional-token'});testConfig(f,'feedbackInbox',{items:[{text:'Saved feedback'}]});
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'original.txt',kind:'reference',contentBase64:Buffer.from('Keep physical original').toString('base64')}})).data;
+ const stored=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);
+ await f.request('/api/buddy/vector-index',{method:'POST',body:{documentIds:[doc.id]}});
+ for(let i=0;i<100;i++){if((await f.request('/api/buddy/vector-index')).data.job.status==='completed')break;await new Promise(resolve=>setTimeout(resolve,5));}
+ assert.equal((await f.request('/api/buddy/vector-index')).data.job.status,'completed');
+ const {layoutDraft}=await import('../server/document-layout.mjs');const word=await layoutDraft('Fictional reset CV','Fictional document source','classic');
+ const studioSource=(await f.request('/api/documents',{method:'POST',body:{name:'reset-source.docx',kind:'cv',contentBase64:word.toString('base64')}})).data;
+ const rendered=await f.request('/api/document-studio/preview',{method:'POST',body:{documentId:studioSource.id,revision:studioSource.revision,layout:'original',pageTarget:2}});assert.equal(rendered.status,200);
+ putTestRow(f,'standalone_messages','history',{role:'user',content:'Clear chat history'});
+ putTestRow(f,'tasks','task',{title:'Clear me'});
+ const oldId=(await f.request('/api/uploads/workspace')).data.id;
+ const intake=await f.request('/api/job-intake',{method:'POST',body:{kind:'text',text:'Fictional job listing with enough content to prepare a local source preview.',useAI:false,ocr:false,requestId:'before-reset'}});
+ assert.equal(intake.status,200);
+ const preview=await actionPreview(f,'reset-workspace');assert.equal(preview.status,200,preview.data.error);
+ const result=await actionApply(f,preview.data);assert.equal(result.status,200,result.data.error);
+ assert.notEqual(result.response.headers.get('x-board-workspace'),oldId);
+ assert.equal((await f.request('/api/session')).data.authenticated,true);
+ assert.deepEqual(JSON.parse(f.app.db.prepare("SELECT data FROM config WHERE key='profile'").get().data),profile);
+ assert.equal((await f.request('/api/board')).data.opportunities.length,0);assert.equal((await f.request('/api/documents')).data.documents.length,0);
+ for(const table of ['tasks','standalone_messages','buddy_requests','ai_tasks','document_vectors'])assert.equal(f.app.db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n,0);
+ for(const key of ['careerBuddy','googleDocuments','feedbackInbox'])assert.equal(f.app.db.prepare('SELECT data FROM config WHERE key=?').get(key),undefined);
+ const settings=(await f.request('/api/board')).data.settings;assert.equal(settings.theme,'forest');assert.equal(settings.timezone,'Europe/London');assert.equal(settings.backupSubdir,'kept-backups');
+ assert.equal(readFileSync(join(stored.storageRoot,stored.relativePath),'utf8'),'Keep physical original');assert.ok(existsSync(join(result.data.backup.location,'board.sqlite')));
+ const stale=await f.request('/api/opportunities',{method:'POST',headers:{'X-Board-Workspace':oldId},body:opportunity});assert.equal(stale.status,409);
+ assert.equal((await f.request('/api/buddy/vector-index')).data.job,null);
+ assert.equal((await f.request('/api/job-intake/'+intake.data.id+'/source')).status,409);
+ assert.equal((await f.request(rendered.data.pdfUrl)).status,404);
+ await f.restart();await f.login();assert.equal((await f.request('/api/board')).data.profile.name,profile.name);
+});
+
+test('destructive actions reject stale previews and abort unchanged if a required backup cannot verify files',async t=>{
+ const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const stale=await actionPreview(f,'delete-opportunity',op.id);testConfig(f,'a-new-setting',{changed:true});assert.equal((await actionApply(f,stale.data)).status,409);
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'missing.txt',kind:'reference',opportunityId:op.id,contentBase64:Buffer.from('Original bytes').toString('base64')}})).data;
+ const stored=JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);rmSync(join(stored.storageRoot,stored.relativePath));
+ const preview=await actionPreview(f,'delete-opportunity',op.id);assert.equal((await actionApply(f,preview.data)).status,409);
+ assert.equal((await f.request('/api/opportunities/'+op.id)).status,200);assert.equal((await f.request('/api/documents')).data.documents.length,1);
+});
+
+test('destructive actions block active work and rollback all rows on database failure',async t=>{
+ const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ putTestRow(f,'buddy_requests','active',{conversationId:'opportunity:'+op.id,finishedAt:null});assert.equal((await actionPreview(f,'clear-opportunities')).status,409);
+ f.app.db.prepare('DELETE FROM buddy_requests WHERE id=?').run('active');
+ putTestRow(f,'ai_tasks','queued',{status:'queued'});assert.equal((await actionPreview(f,'reset-workspace')).status,409);f.app.db.prepare('DELETE FROM ai_tasks WHERE id=?').run('queued');
+ putTestRow(f,'tasks','linked-rollback',{opportunityId:op.id});
+ f.app.db.exec("CREATE TRIGGER fail_test_delete BEFORE DELETE ON tasks BEGIN SELECT RAISE(ABORT,'fictional failure'); END");
+ const preview=await actionPreview(f,'clear-opportunities');assert.equal((await actionApply(f,preview.data)).status,500);
+ assert.ok(f.app.db.prepare('SELECT id FROM records WHERE id=?').get(op.id));assert.ok(f.app.db.prepare('SELECT id FROM tasks WHERE id=?').get('linked-rollback'));
+});
+
+test('destructive apply waits for another HTTP write to finish before taking its backup',async t=>{
+ const f=await fixture(t);await f.setup();await f.request('/api/opportunities',{method:'POST',body:opportunity});
+ const preview=await actionPreview(f,'clear-opportunities');
+ const {request}=await import('node:http');
+ let closed;const entered=new Promise(resolve=>f.app.server.once('request',(_req,res)=>{closed=new Promise(done=>res.once('close',done));setImmediate(resolve);}));
+ const slow=request(f.base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'}});slow.on('error',()=>{});slow.write('{"password":');
+ await entered;
+ try{assert.equal((await actionApply(f,preview.data)).status,409);}finally{slow.destroy();await closed;}
+ assert.equal((await actionApply(f,preview.data)).status,200);
+});
+
+test('reset remains blocked while disconnected document processing is still running',async t=>{
+ let entered,release;const ready=new Promise(resolve=>entered=resolve);
+ const f=await fixture(t,{documentConvert:async()=>{entered();await new Promise(resolve=>release=resolve);return {pages:1,pdf:Buffer.from('%PDF-fictional')};}});await f.setup();
+ const {layoutDraft}=await import('../server/document-layout.mjs');const bytes=await layoutDraft('Fictional cancelled rendering','Fictional source','classic');
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'cancelled.docx',kind:'cv',contentBase64:bytes.toString('base64')}})).data;
+ const controller=new AbortController();
+ const pending=f.request('/api/document-studio/preview',{method:'POST',signal:controller.signal,body:{documentId:doc.id,revision:doc.revision,layout:'original',pageTarget:2}});
+ await ready;controller.abort();await assert.rejects(pending,error=>error.name==='AbortError');
+ try{assert.equal((await actionPreview(f,'reset-workspace')).status,409);}finally{release();}
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal((await actionPreview(f,'reset-workspace')).status,200);
+});

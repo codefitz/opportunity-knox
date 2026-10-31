@@ -435,3 +435,33 @@ The launcher completed its rebuild/restart and reported a healthy container. Rea
 `npm run check` passed with version `0.4.7-dev.0`: production build, 252 Node tests and 42 Python launcher/helper tests. New coverage verifies rendered development/release labels, exact GitHub commit/latest-release targets, missing-commit handling, local-change metadata propagation and stable-over-development version comparison. Package and lockfile versions agree.
 
 A disposable local preview verified the real checkout's short Git commit, development version and local-change marker in Settings and the sidebar accessibility tree. Settings was visually checked on desktop and at a 390-pixel viewport, without horizontal overflow or browser console warnings/errors. The latest-release target was verified against GitHub's published v0.4.6 release. No production restart/deployment, release modification, commit or push was performed.
+
+## Restart connection handling — 31 October 2026
+
+Production build, 253 Node tests and 42 Python launcher/helper tests passed. The new API regression check distinguishes transport failures and HTTP 502/503/504 from validation, authentication, conflicts, HTTP 500, ordinary programming errors and cancellation, retaining the original error message and cancellation identity.
+
+A disposable browser/server simulation held a board refresh, accepted a restart and then deliberately dropped the pending connection while health checks returned HTTP 503. The page kept its restart notice without a red “Failed to fetch” banner and automatically refreshed after host success. A rejected restart request still displayed its error. A separate simulated host failure displayed the specific error and cleared the progress notice. These are isolated simulation results; the production board was not restarted or deployed.
+
+## Simplified feedback — 31 October 2026
+
+`npm run check` passed: production build, 253 Node tests and 42 Python launcher/helper tests. Feedback HTTP tests cover authenticated private saves, duplicate/conflicting request IDs, page validation, status revision conflicts, persistence, JSON/full-backup inclusion, disabled legacy AI endpoints with zero provider calls, and historical-review preservation. Issue-draft tests verify fixed repository routing, encoded text/page round trips and complete copy/paste fallback for long Unicode feedback.
+
+A disposable local browser workspace verified the sign-in restriction, one-pane form without AI controls, collapsed saved history, draft/original-page retention after navigating and reopening, simulated HTTP 503 save failure with text retention, successful retry producing one entry, saved status persistence after reload, and GitHub preview/fixed prefilled draft URL without opening or publishing the issue. Desktop and 390-pixel layouts were visually checked without horizontal overflow; the browser console had no warnings or errors. Production feedback, statuses and service were not modified or deployed.
+
+## Feedback submission opt-in — 31 October 2026
+
+The final feedback UI supersedes the earlier collapsible-history version: no feedback history, status or export controls are rendered or fetched. `npm run check` passed: production build, 256 Node tests and 42 Python launcher/helper tests. Added coverage verifies explicit AI consent/authentication, disabled-provider handling, feedback/page-only prompts, valid/invalid draft handling, unchanged private feedback, activity recording, cancellation without late results, and edited title/body encoding into a fixed GitHub draft URL.
+
+An isolated browser/server workspace with fictional feedback and a mock provider verified: plain saves make no AI call; existing history is neither requested nor shown; selecting GitHub before submission saves privately then fills an editable AI issue draft; edits reach the draft URL; cancellation and provider failure retain editable manual drafts; the GitHub choice resets after each successful submission. The form was visually checked on desktop and at 390 pixels without horizontal overflow. No real AI account was used, GitHub was not opened or posted to, and the production service/data were not modified or deployed.
+
+## Settings typography and spacing — 31 October 2026
+
+`npm run check` passed: production build, 256 Node tests and 42 Python launcher/helper tests. This change is scoped CSS plus a class on the shared DocumentConnections section; no settings values or connection behaviour changed.
+
+A disposable browser workspace verified expanded Google Docs setup instructions, field spacing, list separation and redirect URL wrapping. Computed styles confirmed 16px section headings, 13px body/labels/inputs, 1.7 body line height and 10px separation between numbered steps. Appearance and Career Buddy panels were visually checked on desktop. All eleven Settings sections were checked at a 390-pixel viewport without horizontal overflow; Google Docs was rechecked after making narrow-screen forms single-column. Career Hub's connection panel was verified to share the same heading/label styles. The browser console had no warnings/errors. No Google connection, credentials, production setting or live service was changed; deployment remains separate.
+
+## Opportunity deletion and workspace reset — 31 October 2026
+
+`npm run check` passed: production build, 264 Node tests and 42 Python launcher/helper tests. New coverage verifies individual/bulk scope, completed records, exact profile and authentication retention, default preferences, retained storage locations/files, backup contents and submitted bytes, restart persistence, confirmation and single-use plans, stale previews/tabs/intake, active requests/tasks, disconnected document processing, unavailable backup files and transactional rollback. Reset also invalidates real document previews and the completed in-memory vector-job view.
+
+An isolated browser/server workspace with fictional records verified cancel/wrong-phrase protection, individual deletion, clear-all while a search hid other records, and full reset. Associated records were removed, unrelated library/tasks survived opportunity deletion, and full reset left the profile signed in with an empty board/library/tasks and default Europe/London preferences. A recovery-backup receipt was displayed; original submitted/reference files and all three action backups remained on disk. The clear-all confirmation had no horizontal overflow at a 390-pixel viewport, and Escape from an individual confirmation kept the underlying opportunity details open. Production service, personal records, feedback and source documents were not modified; these changes have not been deployed.

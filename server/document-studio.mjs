@@ -102,7 +102,13 @@ export function createDocumentStudio({
   }
   const timer = setInterval(clean, 60000);
   timer.unref();
+  function invalidate(documentIds = null) {
+    for (const [id,preview] of previews) if (!documentIds || documentIds.includes(preview.sourceId)) {
+      rmSync(preview.folder,{recursive:true,force:true});previews.delete(id);
+    }
+  }
   return {
+    invalidate,
     close() {
       clearInterval(timer);
       for (const p of previews.values())

@@ -3940,7 +3940,7 @@ textarea {
 
 .application-packs{padding:20px;margin-bottom:24px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.application-packs details{padding:16px 0;border-top:1px solid var(--line)}.application-packs summary{cursor:pointer;font-weight:600}.application-packs .form-grid{margin:16px 0}.application-packs small{overflow-wrap:anywhere}.pack-text{white-space:pre-wrap;line-height:1.65;margin:16px 0}
 
-.feedback-launcher{position:fixed;right:0;top:50%;z-index:2000;writing-mode:vertical-rl;padding:14px 9px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;background:var(--surface);color:var(--ink);font-weight:600;cursor:pointer;box-shadow:0 2px 8px #0002}.feedback-dialog{width:min(700px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--surface);color:var(--ink)}.feedback-dialog::backdrop{background:#0007}.feedback-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.feedback-dialog .library-tool-actions{margin:16px 0}.feedback-entry{border-top:1px solid var(--line);padding:18px 0}.feedback-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}.feedback-error{color:var(--danger,#a32929)}.feedback-dialog .check-label{margin-top:16px}
+.feedback-launcher{position:fixed;right:0;top:50%;z-index:2000;writing-mode:vertical-rl;padding:14px 9px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;background:var(--surface);color:var(--ink);font-weight:600;cursor:pointer;box-shadow:0 2px 8px #0002}.feedback-dialog{width:min(700px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--surface);color:var(--ink)}.feedback-dialog::backdrop{background:#0007}.feedback-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.feedback-dialog .library-tool-actions{margin:16px 0}.feedback-entry{border-top:1px solid var(--line);padding:18px 0}.feedback-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}.feedback-error{color:var(--danger,#a32929)}
 
 .feedback-dialog{overflow-wrap:anywhere;overscroll-behavior:contain}
 
@@ -4069,3 +4069,124 @@ textarea {
 .build-version a { color: inherit; text-underline-offset: 3px; }
 .sidebar-version-tag { font-size: 10px; opacity: 1; user-select: text; }
 .sidebar-version-tag .build-version { justify-content: center; font-size: inherit; margin-bottom: 0; gap: 4px 8px; }
+
+.feedback-dialog p { line-height: 1.65; margin: 12px 0; }
+.feedback-issue { margin-top: 20px; padding: 18px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 10px; }
+.feedback-issue .field { margin-top: 12px; }
+
+/* Consistent reading rhythm in Settings and the shared document connections panel. */
+:is(.settings-page .settings-section, .document-connections) {
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+:is(.settings-page .settings-section, .document-connections) p {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-secondary);
+}
+:is(.settings-page .settings-section, .document-connections) .settings-section-heading h2 {
+  font-size: 16px;
+  line-height: 1.5;
+}
+:is(.settings-page .settings-section, .document-connections) .settings-section-heading p {
+  margin: 6px 0 0;
+}
+:is(.settings-page .settings-section, .document-connections) h3 {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+:is(.settings-page .settings-section, .document-connections) h4 {
+  font-size: 13px;
+  line-height: 1.5;
+}
+:is(.settings-page .settings-section, .document-connections) .form-grid {
+  gap: 20px;
+}
+:is(.settings-page .settings-section, .document-connections) .field {
+  font-size: 13px;
+  line-height: 1.5;
+  gap: 8px;
+}
+:is(.settings-page .settings-section, .document-connections) small {
+  font-size: 12px;
+  line-height: 1.65;
+}
+:is(.settings-page .settings-section, .document-connections) .field :is(input, select, textarea) {
+  font-size: 13px;
+  min-height: 40px;
+}
+:is(.settings-page .settings-section, .document-connections) :is(.check-field, .buddy-toggle, .settings-action strong) {
+  font-size: 13px;
+  line-height: 1.6;
+}
+:is(.settings-page .settings-section, .document-connections) .button {
+  font-size: 12px;
+}
+:is(.settings-page .settings-section, .document-connections) details {
+  margin: 16px 0;
+}
+:is(.settings-page .settings-section, .document-connections) summary {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  cursor: pointer;
+}
+:is(.settings-page .settings-section, .document-connections) details[open] > summary {
+  margin-bottom: 12px;
+}
+:is(.settings-page .settings-section, .document-connections) :is(ol, ul) {
+  padding-left: 24px;
+  margin: 12px 0;
+}
+:is(.settings-page .settings-section, .document-connections) ol > li + li {
+  margin-top: 10px;
+}
+.document-connections > details {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.document-connections details details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--panel-soft);
+}
+.document-connections details > form {
+  margin-top: 20px;
+}
+.document-connections code {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  :is(.settings-page .settings-section, .document-connections) .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.workspace-action-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-height: 85vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.workspace-action-dialog::backdrop { background: #0007; }
+.workspace-action-dialog h3 { margin-top: 20px; font-size: 15px; }
+.workspace-action-dialog p { margin: 14px 0; }
+.workspace-action-counts { padding-left: 22px; }
+.workspace-action-dialog .form-actions { flex-wrap: wrap; }
+.opportunity-delete-action { padding: 20px 26px; border-top: 1px solid var(--line); }
+
+.opportunity-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.workspace-action-dialog .field { font-size: 13px; }
+.workspace-action-dialog .field input { font-size: 13px; min-height: 40px; }

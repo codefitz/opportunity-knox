@@ -15,7 +15,7 @@
 - [x] ~~AI activity with per-attempt history, prompt/model metadata, reported usage, optional saved-rate estimates, cancellation and workflow review/retry.~~
 - [x] ~~Universal persisted AI task scheduler for background jobs (embeddings, opportunity automation, deferred work) with cooperative cancellation, interruption handling, and UI monitoring.~~
 - [x] ~~External-assistant task-pack export (ZIP/JSON) and result import with schema validation, conflict preview, audit task recording, and Word draft generation.~~
-- [x] ~~Global private feedback inbox, optional advisory AI review, and export.~~
+- [x] ~~Private feedback form without visible history, backend export and opt-in AI-assisted GitHub issue drafts.~~
 
 Latest implementation verification: **247 Node tests + 39 launcher/helper tests (286 total)**, production build and fictional-data tests; see [VERIFICATION.md](VERIFICATION.md) for which increments also include Docker/browser and live deployment checks.
 
@@ -300,3 +300,19 @@ The launcher records immutable source/commit build metadata and publishes host-s
 ## Development build identity — 31 October 2026
 
 Main now identifies as `0.4.7-dev.0`, with `v0.4.6` retained as the published stable release. Sidebar and Settings show the running version, development/release label, linked short build commit and optional uncommitted-changes marker, plus a latest-release link. Launcher Docker metadata records commit and dirty state; direct Node development runs capture their Git identity at startup. README distinguishes stable releases from main development. A stable release supersedes its same-numbered development prerelease.
+
+## Restart connection handling — 31 October 2026
+
+Board/update polling pauses during a requested restart. A synchronous restart ref also protects requests already in flight: temporary transport and gateway errors do not create the global red banner during expected downtime. Rejected restart requests, host-reported failures and timeout errors remain visible; genuine failures clear the restarting progress notice.
+
+## Simplified feedback — 31 October 2026
+
+Feedback uses one pane with a text box, an opt-in GitHub checkbox and Submit. No history, status or export controls are visible. Submission saves feedback privately first; the GitHub option then uses Career Buddy to fill out an editable issue draft. Provider failure/cancellation preserves the private feedback and leaves a manual fallback. Original entries and historical reviews stay stored; the user reviews and submits any issue on GitHub.
+
+## Settings typography and spacing — 31 October 2026
+
+Settings uses consistent heading, paragraph, label, help-text and control sizes, with more room between expandable groups and numbered instructions. Google Docs setup guidance has an inset panel and wrapping redirect URLs. Narrow-screen Settings forms stack into one column. The shared document-connections panel uses the same formatting in Career Hub.
+
+## Opportunity deletion and workspace reset — 31 October 2026
+
+Opportunity details now offer individual deletion; list/Kanban views offer clear-all, including completed and filtered-out records. Settings → Reset workspace clears board data, conversations, feedback, preferences and saved credentials while preserving the exact profile, sign-in and storage locations. Every action previews its scope, requires typed confirmation and creates a verified private full backup before atomic removal. Existing files, external originals and earlier backups are retained. Active work and stale previews are rejected; reset invalidates old staged uploads and protects against stale tabs. See [WORKSPACE_RESET.md](WORKSPACE_RESET.md) for scope and recovery.

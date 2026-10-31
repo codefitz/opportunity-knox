@@ -1,3 +1,4 @@
+import WorkspaceAction from "./components/WorkspaceAction";
 import BuildVersion from "./components/BuildVersion";
 import WorkspaceSections from "./components/WorkspaceSections";
 import AIActivity,{type ActivityDestination} from "./components/AIActivity";
@@ -65,6 +66,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  isTemporaryConnectionError,
   api,
   ApiError,
   json,
@@ -296,11 +298,13 @@ export default function App() {
     avatarUrl: "",
     revision: 0,
   });
+  useEffect(()=>{const message=sessionStorage.getItem('knox-reset-receipt');if(message){sessionStorage.removeItem('knox-reset-receipt');setNotice(message);}},[]);
   const [tasks, setTasks] = useState<Task[]>([]),
     [referenceCount, setReferenceCount] = useState(0),
     [refreshing, setRefreshing] = useState(false),
     [restarting, setRestarting] = useState(false),
     [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const restartingRef = useRef(false);
   const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
     [dragging, setDragging] = useState(""),
@@ -349,6 +353,7 @@ export default function App() {
     appearanceDraft,
   ]);
   async function load(background = false) {
+    if (restartingRef.current) return;
     const revision = appearanceRevision.current;
     if (!background) setLoading(true);
     setRefreshing(true);
@@ -388,11 +393,11 @@ export default function App() {
     }
   }, [session?.authenticated]);
   useEffect(() => {
-    if (!session?.authenticated) return;
+    if (!session?.authenticated || restarting) return;
     let active = true;
     let checking = false;
     const check = async () => {
-      if (checking) return;
+      if (checking || restartingRef.current) return;
       checking = true;
       try {
         const status = await api<UpdateStatus>("/updates/check");
@@ -405,16 +410,17 @@ export default function App() {
     const interval = window.setInterval(() => void check(), 30000);
     window.addEventListener("focus", check);
     return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", check); };
-  }, [session?.authenticated]);
+  }, [session?.authenticated, restarting]);
   useEffect(() => {
     if (session?.authenticated && (page === "dashboard" || page === "todos"))
       void load(true);
   }, [page]);
   useEffect(() => {
-    if (!session?.authenticated) return;
+    if (!session?.authenticated || restarting) return;
     const refresh = () => {
       const element = document.activeElement as HTMLElement | null;
       if (
+        restartingRef.current ||
         page === "settings" ||
         newOpen ||
         selected ||
@@ -431,7 +437,7 @@ export default function App() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refresh);
     };
-  }, [session?.authenticated, page, newOpen, selected]);
+  }, [session?.authenticated, page, newOpen, selected, restarting]);
   function scheduleAppearanceSave() {
     if (appearanceTimerRef.current !== null)
       window.clearTimeout(appearanceTimerRef.current);
@@ -514,6 +520,8 @@ export default function App() {
     }
   }
   function report(e: unknown) {
+    // Reads already in flight can fail while the restart deliberately stops the server.
+    if (restartingRef.current && isTemporaryConnectionError(e)) return;
     setError(displayError(e));
     if (e instanceof ApiError && e.status === 401)
       setSession({
@@ -523,7 +531,8 @@ export default function App() {
       });
   }
   async function restartBoard() {
-    if (restarting) return;
+    if (restartingRef.current) return;
+    restartingRef.current = true;
     setRestarting(true);
     setError("");
     setNotice(
@@ -544,6 +553,7 @@ export default function App() {
               continue;
             }
             if (status.state === "failed") {
+              setNotice("");
               setError(status.message || "The host could not restart the board. Your settings are still pending.");
               return;
             }
@@ -557,13 +567,18 @@ export default function App() {
           await new Promise((r) => window.setTimeout(r, 1000));
         }
       }
-      if (!reconnected)
+      if (!reconnected) {
+        setNotice("");
         setError(
           "The board is taking longer than expected to restart. Refresh the page or check ./board logs.",
         );
+      }
     } catch (e) {
+      setNotice("");
+      restartingRef.current = false;
       report(e);
     } finally {
+      restartingRef.current = false;
       setRestarting(false);
     }
   }
@@ -932,10 +947,13 @@ export default function App() {
                     : "Every possibility, application, and next action in one place."}
                 </p>
               </div>
+              <div className="opportunity-page-actions">
+                <WorkspaceAction action="clear-opportunities" label="Clear all opportunities" disabled={!opportunities.length} onComplete={result=>{setSelected(null);setOpportunityFilters({...defaultOpportunityFilters,tags:[]});void load(true);setNotice(`Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`);}} />
               <button className="button primary" onClick={add}>
                 <Plus size={18} />
                 Add opportunity
               </button>
+              </div>
             </div>
             <div className="metrics">
               <Metric
@@ -1235,6 +1253,7 @@ export default function App() {
           initialTab={initialOpportunityTab}
           timezone={settings?.timezone || "Europe/London"}
           onClose={() => setSelected(null)}
+          onDeleted={result=>{setSelected(null);void load(true);setNotice(`Opportunity deleted. Backup: ${result.backup.location}`);}}
           onUpdate={updated}
           onError={report}
           onReload={() => void openOpportunity(selected.id)}
@@ -1770,6 +1789,7 @@ function OpportunityDetail({
   onError,
   onReload,
   onConfigureBuddy,
+  onDeleted,
 }: {
   initialTab?:string;
   opportunity: Opportunity;
@@ -1779,6 +1799,7 @@ function OpportunityDetail({
   onError: (e: unknown) => void;
   onReload: () => void;
   onConfigureBuddy: () => void;
+  onDeleted: (result: import("./components/WorkspaceAction").WorkspaceActionResult) => void;
 }) {
   const [tab, setTab] = useState(initialTab),
     [busy, setBusy] = useState(false),
@@ -1920,6 +1941,7 @@ function OpportunityDetail({
           />
         )}
       </div>
+      <div className="opportunity-delete-action"><WorkspaceAction action="delete-opportunity" opportunityId={o.id} label="Delete opportunity" disabled={busy} onComplete={onDeleted}/></div>
     </Modal>
   );
 }
@@ -5802,6 +5824,18 @@ function SettingsPage({
         </div>
       </section>
 
+        </> },
+        { id: "reset", label: "Reset workspace", content: <>
+          <section className="settings-section">
+            <div className="settings-section-heading"><div><h2>Start over</h2><p>Review exactly what will be removed before making a fresh start.</p></div></div>
+            <p>Keep your profile, sign-in and storage locations. Reset the board's records, library links, conversations, feedback and preferences, including saved AI and connection credentials.</p>
+            <p>A verified private backup is created first. Existing files, external originals and earlier backups stay on disk.</p>
+            <WorkspaceAction action="reset-workspace" label="Reset workspace" onComplete={result=>{
+              for(const key of Object.keys(localStorage))if(key.startsWith('knox-')||key.startsWith('opportunity-knox-'))localStorage.removeItem(key);
+              sessionStorage.setItem('knox-reset-receipt',`Workspace reset. Your profile was kept. Private backup: ${result.backup.location}`);
+              window.location.reload();
+            }}/>
+          </section>
         </> },
         { id: "connections", label: "Connections", content: <>
       <DocumentConnections onError={onError} onRestart={onRestart} restarting={restarting} />

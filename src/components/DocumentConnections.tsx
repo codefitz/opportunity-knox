@@ -148,7 +148,7 @@ export default function DocumentConnections({
     setNextPage(result.nextPageToken);
   }
   return (
-    <section className="settings-section" aria-label="Document connections">
+    <section className="settings-section document-connections" aria-label="Document connections">
       <div className="settings-section-heading">
         <div>
           <h2>Document connections</h2>

@@ -214,6 +214,7 @@ export function createJobIntake(ctx) {
     } catch {
       fail(404, "Intake review is unavailable. Prepare it again.");
     }
+    if (result.workspaceId !== ctx.getConfig?.("uploadWorkspaceId")) fail(409,"The workspace was reset. Prepare a new intake review.");
     if (Date.now() > result.expiresAt)
       fail(410, "Intake review expired. Prepare it again.");
     for (const file of ["original", "text.txt"]) {
@@ -691,6 +692,7 @@ export function createJobIntake(ctx) {
                 );
             }
         const result = {
+          workspaceId: ctx.getConfig?.("uploadWorkspaceId"),
           id,
           fields,
           evidence,

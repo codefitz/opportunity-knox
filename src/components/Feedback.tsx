@@ -1,94 +1,107 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, json } from "../api";
-type Entry = {
-  id: string;
-  text: string;
-  page: string;
-  status: string;
-  revision: number;
-  createdAt: string;
-  reviewStatus: string;
-  review?: {
-    summary: string;
-    priority: string;
-    improvements: string[];
-    questions: string[];
-    reviewedAt: string;
-    provider: string;
-    model: string;
-  };
-};
+import { feedbackIssueDraft } from "../lib/feedback";
+
+type Entry = { id: string; text: string; page: string };
+type Issue = { title: string; body: string };
+
 export default function Feedback({
   authenticated,
 }: {
   authenticated: boolean;
 }) {
   const [open, setOpen] = useState(false),
-    [tab, setTab] = useState<"write" | "inbox">("write"),
     [text, setText] = useState(""),
     [page, setPage] = useState("other"),
-    [items, setItems] = useState<Entry[]>([]),
-    [aiAvailable, setAIAvailable] = useState(false),
-    [reviewAfterSave, setReviewAfterSave] = useState(false),
+    [github, setGithub] = useState(false),
+    [issue, setIssue] = useState<Issue | null>(null),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [shown, setShown] = useState(20);
+    [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null),
     launcher = useRef<HTMLButtonElement>(null),
+    issuePreview = useRef<HTMLElement>(null),
+    saving = useRef(false),
+    draftController = useRef<AbortController | null>(null),
     submission = useRef<{ key: string; id: string } | null>(null);
-  async function load() {
-    if (!authenticated) return;
-    const r = await api<{ items: Entry[]; aiAvailable: boolean }>("/feedback");
-    setItems(r.items);
-    setAIAvailable(r.aiAvailable);
-  }
-  useEffect(()=>{const show=()=>{setTab("inbox");setOpen(true);};window.addEventListener("knox-feedback-inbox",show);return()=>window.removeEventListener("knox-feedback-inbox",show);},[]);
+  const draft = issue ? feedbackIssueDraft(issue) : null;
+
   useEffect(() => {
-    if (open) {
-      dialog.current?.showModal();
-      if (authenticated) void load().catch((e) => setError(e.message));
-    } else if (dialog.current?.open) dialog.current.close();
-  }, [open, authenticated]);
+    const show = () => setOpen(true);
+    window.addEventListener("knox-feedback-inbox", show);
+    return () => window.removeEventListener("knox-feedback-inbox", show);
+  }, []);
+  useEffect(() => {
+    if (open) dialog.current?.showModal();
+    else if (dialog.current?.open) dialog.current.close();
+  }, [open]);
+  useEffect(() => {
+    if (!authenticated) {
+      draftController.current?.abort();
+      setIssue(null);
+    }
+  }, [authenticated]);
+  useEffect(() => () => draftController.current?.abort(), []);
+  useEffect(() => {
+    if (issue && busy !== "drafting") issuePreview.current?.focus();
+  }, [!!issue, busy]);
   function close() {
+    if (busy === "saving") return;
+    draftController.current?.abort();
     setOpen(false);
+    setIssue(null);
+    setNotice("");
     launcher.current?.focus();
   }
-  async function review(id: string) {
-    setBusy(id);
-    setError("");
+  async function prepareIssue(entry: Entry) {
+    setIssue(feedbackIssueDraft(entry));
+    setBusy("drafting");
+    const controller = new AbortController();
+    draftController.current = controller;
     try {
-      await api("/feedback/" + id + "/review", json({ confirm: true }));
-      setNotice("AI suggestions saved for review. No app changes were made.");
-    } catch (e) {
-      setError((e as Error).message);
+      const result = await api<{ draft: Issue }>(
+        "/feedback/" + entry.id + "/issue-draft",
+        {
+          ...json({ confirm: true, requestId: crypto.randomUUID() }),
+          signal: controller.signal,
+        },
+      );
+      if (!controller.signal.aborted) setIssue(result.draft);
+    } catch {
+      if (!controller.signal.aborted)
+        setError(
+          "Your feedback is saved. Career Buddy could not fill out the issue. You can edit the draft below or check Career Buddy in Settings.",
+        );
     } finally {
-      setBusy("");
-      await load().catch((e) => setError(e.message));
+      if (draftController.current === controller)
+        draftController.current = null;
     }
   }
   async function submit() {
+    if (saving.current) return;
+    saving.current = true;
     setBusy("saving");
     setError("");
     setNotice("");
+    setIssue(null);
     const key = JSON.stringify([text.trim(), page]);
     if (submission.current?.key !== key)
       submission.current = { key, id: crypto.randomUUID() };
     try {
-      const r = await api<{ item: Entry }>(
+      const result = await api<{ item: Entry }>(
         "/feedback",
         json({ text, page, requestId: submission.current.id }),
       );
       setText("");
       submission.current = null;
-      setNotice("Feedback saved.");
-      setTab("inbox");
-      await load();
-      if (reviewAfterSave) await review(r.item.id);
+      setNotice("Feedback saved privately. Thank you.");
+      if (github) await prepareIssue(result.item);
+      setGithub(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      saving.current = false;
       setBusy("");
     }
   }
@@ -97,23 +110,22 @@ export default function Feedback({
       window.location.hash.replace(/^#\//, "").split(/[/?]/)[0] || "dashboard";
     if (!text.trim())
       setPage(
-        authenticated &&
-          [
-            "dashboard",
-            "opportunities",
-            "board",
-            "kanban",
-            "tasks",
-            "todos",
-            "library",
-            "buddy",
-            "activity",
-            "settings",
-          ].includes(route)
-          ? route
-          : authenticated
-            ? "other"
-            : "sign-in",
+        authenticated
+          ? [
+              "dashboard",
+              "opportunities",
+              "board",
+              "kanban",
+              "tasks",
+              "todos",
+              "library",
+              "buddy",
+              "activity",
+              "settings",
+            ].includes(route)
+            ? route
+            : "other"
+          : "sign-in",
       );
     setOpen(true);
     setError("");
@@ -144,214 +156,171 @@ export default function Feedback({
             <button
               type="button"
               className="button secondary small"
+              disabled={busy === "saving"}
               onClick={close}
             >
               Close feedback
             </button>
           </div>
-          <p>Share a problem or suggest an improvement to Opportunity Knox.</p>
-          {!authenticated && (
-            <p>Sign in to save feedback and view the inbox.</p>
-          )}
-          <div className="library-tool-actions">
-            <button
-              type="button"
-              className={
-                "button " +
-                (tab === "write" ? "primary" : "secondary") +
-                " small"
-              }
-              onClick={() => setTab("write")}
-            >
-              Write feedback
-            </button>
-            <button
-              type="button"
-              className={
-                "button " +
-                (tab === "inbox" ? "primary" : "secondary") +
-                " small"
-              }
-              disabled={!authenticated}
-              onClick={() => {
-                setTab("inbox");
-                void load().catch((e) => setError(e.message));
-              }}
-            >
-              Saved feedback ({items.length})
-            </button>
-          </div>
+          <p>
+            Share a problem or suggest an improvement. Saved privately on this
+            board.
+          </p>
+          {!authenticated && <p>Sign in to submit feedback.</p>}
           {error && (
             <p className="feedback-error" role="alert">
               {error}
             </p>
           )}
           {notice && <p role="status">{notice}</p>}
-          {tab === "write" && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submit();
-              }}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+          >
+            <label className="field">
+              <span>Your feedback</span>
+              <textarea
+                autoFocus
+                rows={5}
+                maxLength={6000}
+                required
+                disabled={!authenticated || !!busy}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setNotice("");
+                  setError("");
+                }}
+                placeholder="What happened, or what would you improve?"
+              />
+            </label>
+            <p className="buddy-muted">
+              Page: {page} · {text.length}/6,000 characters
+            </p>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={github}
+                disabled={!authenticated || !!busy}
+                onChange={(e) => setGithub(e.target.checked)}
+              />
+              Also prepare a GitHub issue
+            </label>
+            {github && (
+              <p className="buddy-muted">
+                Career Buddy will use only this feedback and page name to fill
+                in an issue draft. Review it before opening GitHub, where issues
+                may be public.
+              </p>
+            )}
+            <div className="form-actions">
+              <button
+                className="button primary"
+                disabled={!authenticated || !!busy || !text.trim()}
+              >
+                {busy === "saving"
+                  ? "Saving…"
+                  : busy === "drafting"
+                    ? "Preparing issue…"
+                    : "Submit feedback"}
+              </button>
+            </div>
+          </form>
+          {authenticated && issue && draft && (
+            <section
+              ref={issuePreview}
+              tabIndex={-1}
+              className="feedback-issue"
+              aria-label="GitHub issue draft"
             >
+              <h3>GitHub issue draft</h3>
+              {busy === "drafting" ? (
+                <>
+                  <p role="status">Career Buddy is filling out the issue…</p>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => draftController.current?.abort()}
+                  >
+                    Cancel AI drafting
+                  </button>
+                </>
+              ) : (
+                <p>
+                  Review or edit the title and description. Nothing has been
+                  posted to GitHub.
+                </p>
+              )}
               <label className="field">
-                <span>Your feedback</span>
-                <textarea
-                  autoFocus
-                  rows={7}
-                  maxLength={6000}
-                  required
-                  disabled={!authenticated || !!busy}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="What happened, what did you expect, or what would you improve?"
+                <span>Issue title</span>
+                <input
+                  maxLength={100}
+                  disabled={!!busy}
+                  value={issue.title}
+                  onChange={(e) =>
+                    setIssue({ ...issue, title: e.target.value })
+                  }
                 />
               </label>
-              <p>
-                Page: {page} · {text.length}/6,000 characters. Saved privately
-                on this board.
-              </p>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  disabled={!authenticated || !aiAvailable || !!busy}
-                  checked={reviewAfterSave}
-                  onChange={(e) => setReviewAfterSave(e.target.checked)}
-                />{" "}
-                Ask AI to review after saving
+              <label className="field">
+                <span>Issue text</span>
+                <textarea
+                  rows={7}
+                  maxLength={12000}
+                  disabled={!!busy}
+                  value={issue.body}
+                  onChange={(e) => setIssue({ ...issue, body: e.target.value })}
+                />
               </label>
-              <p className="buddy-muted">
-                AI review sends only this feedback and page name to your
-                configured Career Buddy provider. It proposes improvements; it
-                does not apply them. You can save without AI.
-              </p>
-              <div className="form-actions">
-                <button
-                  className="button primary"
-                  disabled={!authenticated || !!busy || !text.trim()}
-                >
-                  {busy === "saving" ? "Saving…" : "Submit feedback"}
-                </button>
-              </div>
-            </form>
-          )}
-          {tab === "inbox" && (
-            <div>
-              <div className="form-actions">
-                <a
-                  className="button secondary small"
-                  href="/api/feedback/export"
-                >
-                  Export feedback JSON
-                </a>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => void load().catch((e) => setError(e.message))}
-                >
-                  Refresh feedback
-                </button>
-              </div>
-              {!items.length && <p>No feedback yet.</p>}
-              {items.slice(0, shown).map((i) => (
-                <article className="feedback-entry" key={i.id}>
-                  <p>
-                    <strong>{i.page}</strong> ·{" "}
-                    {new Date(i.createdAt).toLocaleString()} · {i.status}
-                  </p>
-                  <p className="feedback-text">{i.text}</p>
-                  <div className="library-tool-actions">
-                    <label className="field">
-                      <span>Feedback status</span>
-                      <select
-                        aria-label={"Status of feedback " + i.id}
-                        value={i.status}
-                        disabled={!!busy}
-                        onChange={(e) => {
-                          setBusy("status");
-                          void api(
-                            "/feedback/" + i.id,
-                            json(
-                              { revision: i.revision, status: e.target.value },
-                              "PATCH",
-                            ),
-                          )
-                            .then(() => load())
-                            .catch((e) => setError(e.message))
-                            .finally(() => setBusy(""));
-                        }}
-                      >
-                        <option value="open">Open</option>
-                        <option value="planned">Planned</option>
-                        <option value="done">Done</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="button secondary small"
-                      disabled={
-                        !!busy || !aiAvailable || i.reviewStatus === "running"
-                      }
-                      onClick={() => void review(i.id)}
-                    >
-                      {busy === i.id
-                        ? "Reviewing…"
-                        : "Review with Career Buddy"}
-                    </button>
-                    {(busy === i.id || i.reviewStatus === "running") && (
-                      <button
-                        type="button"
-                        className="button secondary small"
-                        onClick={() =>
-                          void api("/feedback/" + i.id + "/cancel", json({}))
-                            .then(() => load())
-                            .catch((e) => setError(e.message))
-                        }
-                      >
-                        Cancel AI review
-                      </button>
-                    )}
-                  </div>
-                  <p>AI review: {i.reviewStatus}</p>
-                  {i.review && (
-                    <div>
-                      <h3>
-                        Proposed improvements · {i.review.priority} priority
-                      </h3>
-                      <p>{i.review.summary}</p>
-                      <ul>
-                        {i.review.improvements.map((s, j) => (
-                          <li key={j}>{s}</li>
-                        ))}
-                      </ul>
-                      {i.review.questions.length > 0 && (
-                        <>
-                          <h4>Questions</h4>
-                          <ul>
-                            {i.review.questions.map((s, j) => (
-                              <li key={j}>{s}</li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                      <small>
-                        {i.review.provider} · {i.review.model} ·{" "}
-                        {new Date(i.review.reviewedAt).toLocaleString()}
-                      </small>
-                    </div>
-                  )}
-                </article>
-              ))}
-              {items.length > shown && (
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => setShown((n) => n + 20)}
-                >
-                  Show more feedback
-                </button>
+              {!draft.bodyIncluded && (
+                <p>
+                  This issue is too long for a prefilled link. Copy the issue
+                  text and paste it into the GitHub draft.
+                </p>
               )}
-            </div>
+              {!busy && (
+                <div className="library-tool-actions">
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(issue.body);
+                        setNotice("Issue text copied.");
+                      } catch {
+                        setError(
+                          "Could not copy automatically. Select and copy the issue text above.",
+                        );
+                      }
+                    }}
+                  >
+                    Copy issue text
+                  </button>
+                  {issue.title.trim() && issue.body.trim() && (
+                    <a
+                      className="button secondary small"
+                      href={draft.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Review & submit on GitHub
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      setIssue(null);
+                      setError("");
+                    }}
+                  >
+                    Dismiss draft
+                  </button>
+                </div>
+              )}
+            </section>
           )}
         </dialog>,
         document.body,

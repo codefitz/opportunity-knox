@@ -6,18 +6,35 @@ export class ApiError extends Error {
     super(message);
   }
 }
+let workspaceId = "";
 export async function api<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        ...(workspaceId ? { "X-Board-Workspace": workspaceId } : {}),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    // Status 0 identifies a transport failure without hiding its original message.
+    throw new ApiError(error instanceof Error ? error.message : "Could not connect to the board.", 0);
+  }
+  const observedWorkspace = response.headers.get("X-Board-Workspace");
+  if (observedWorkspace) {
+    if (workspaceId && observedWorkspace !== workspaceId && !(path === "/workspace-actions/apply" && response.ok)) {
+      if (typeof window !== "undefined") window.location.reload();
+      throw new ApiError("The workspace was reset. Reload before continuing.",409);
+    }
+    workspaceId = observedWorkspace;
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new ApiError(
@@ -26,6 +43,9 @@ export async function api<T = unknown>(
     );
   return data as T;
 }
+export const isTemporaryConnectionError = (error: unknown) =>
+  error instanceof ApiError && [0, 502, 503, 504].includes(error.status);
+
 export const json = (body: unknown, method = "POST"): RequestInit => ({
   method,
   body: JSON.stringify(body),
