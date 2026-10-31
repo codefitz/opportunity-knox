@@ -777,6 +777,11 @@ export default function App() {
             <LogOut size={14} />
             Sign out
           </button>
+          {updateStatus?.currentVersion && (
+            <div className="sidebar-version-tag">
+              v{updateStatus.currentVersion}
+            </div>
+          )}
         </div>
       </aside>
       <div className="main-shell">
