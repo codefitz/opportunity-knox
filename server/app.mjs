@@ -1021,7 +1021,7 @@ export function createApp(options = {}) {
         }
         if (
           path.startsWith("/api/buddy/") ||
-          /^\/api\/opportunities\/[^/]+\/buddy(?:\/|$)/.test(path)
+          /^\/api\/opportunities\/[^/]+\/(buddy|assistant-pack)(?:\/|$)/.test(path)
         ) {
           try {
             if (await buddy.handle(path, method, req, res, { json, readBody }))

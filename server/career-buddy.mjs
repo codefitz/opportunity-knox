@@ -4,6 +4,7 @@ import {createOpportunityAutomation} from "./opportunity-automation.mjs";
 import {createStandaloneBuddy} from "./standalone-buddy.mjs";
 import { createDecisionReview } from "./decision-review.mjs";
 import { createVectorIndex } from "./vector-index.mjs";
+import { createAssistantPacks } from "./assistant-packs.mjs";
 import { randomUUID } from "node:crypto";
 import { embedLocal, LOCAL_MODEL } from "./local-embedding.mjs";
 import { readFileSync, statSync } from "node:fs";
@@ -251,7 +252,7 @@ export function applyChanges(record, changes, messageId, recordedAt) {
   next.updatedAt = recordedAt;
   return next;
 }
-function systemPrompt(timezone, today, action) {
+export function systemPrompt(timezone, today, action) {
   return [
     "You are Career Buddy, the private career assistant inside Opportunity Knox. Help the candidate assess and manage applications using supplied sources.",
     "Today is " +
@@ -420,8 +421,14 @@ export function createCareerBuddy(ctx) {
   const workspace=createStandaloneBuddy({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput,applyChanges,onOpportunityChanged:(id,options)=>automation.schedule(id,options)});
   const decisions=createDecisionReview({...ctx,indexDocuments,vectors,parseOutput:parseBuddyOutput});
   const automation=createOpportunityAutomation(ctx,decisions,parseBuddyOutput);
+  const assistantPacks = createAssistantPacks({
+    ...ctx,
+    indexDocuments,
+    vectors,
+  });
   return {
     requests,
+    assistantPacks,
     automate:automation.schedule,
     exportAssessments: decisions.exportAssessments,
     exportWorkspace:workspace.exportMessages,
@@ -433,6 +440,7 @@ export function createCareerBuddy(ctx) {
     indexDocuments,
     getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
+      if(await assistantPacks.handle(path,method,req,res,{json,readBody}))return true;
       if(await automation.handle(path,method,req,res,{json,readBody}))return true;
       if(await workspace.handle(path,method,req,res,{json,readBody}))return true;
       if(await decisions.handle(path,method,req,res,{json,readBody}))return true;

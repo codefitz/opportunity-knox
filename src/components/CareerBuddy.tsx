@@ -3,7 +3,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Bot,
   Check,
+  Download,
   FileText,
+  Import,
   LoaderCircle,
   Send,
   Settings2,
@@ -180,6 +182,116 @@ export default function CareerBuddy({
     );
   };
   const [activeRequest,setActiveRequest]=useState<string|null>(null);
+  const [taskPackOpen, setTaskPackOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importPreview, setImportPreview] = useState<{
+    valid: boolean;
+    baseRevision: number;
+    reply: string;
+    changes: Change[];
+    draft: { kind: string; title: string; content: string };
+    sourceIds: string[];
+  } | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [taskAction, setTaskAction] = useState<string>("general");
+  const [taskInstructions, setTaskInstructions] = useState<string>("");
+  const [packBusy, setPackBusy] = useState(false);
+
+  async function downloadTaskPack() {
+    setPackBusy(true);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/opportunities/${encodeURIComponent(o.id)}/assistant-pack`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: taskAction,
+            sourceIds: selected,
+            includeOtherOpportunities: others,
+            customInstructions: taskInstructions.trim(),
+          }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Download failed with status ${res.status}`);
+      }
+      const blob = await res.blob();
+      const filename = `task-pack-${(o.company || "opportunity").replace(/[^a-zA-Z0-9_-]/g, "_")}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTaskPackOpen(false);
+    } catch (err) {
+      setError(errorText(err));
+      onError(err);
+    } finally {
+      setPackBusy(false);
+    }
+  }
+
+  async function previewAssistantResult() {
+    if (!importText.trim()) return;
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const res = await api<{
+        valid: boolean;
+        baseRevision: number;
+        reply: string;
+        changes: Change[];
+        draft: { kind: string; title: string; content: string };
+        sourceIds: string[];
+      }>(
+        `/api/opportunities/${encodeURIComponent(o.id)}/assistant-pack/preview`,
+        json({
+          baseRevision: o.revision,
+          resultText: importText.trim(),
+        }),
+      );
+      setImportPreview(res);
+    } catch (err) {
+      setImportError(errorText(err));
+      setImportPreview(null);
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function applyAssistantResult() {
+    if (!importText.trim() || !importPreview) return;
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const res = await api<{
+        success: boolean;
+        opportunity: Opportunity;
+      }>(
+        `/api/opportunities/${encodeURIComponent(o.id)}/assistant-pack/apply`,
+        json({
+          baseRevision: o.revision,
+          resultText: importText.trim(),
+          confirm: true,
+        }),
+      );
+      onUpdate(res.opportunity);
+      setImportOpen(false);
+      setImportText("");
+      setImportPreview(null);
+      await load();
+    } catch (err) {
+      setImportError(errorText(err));
+    } finally {
+      setImportBusy(false);
+    }
+  }
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!input.trim() || busy) return;
@@ -235,14 +347,38 @@ export default function CareerBuddy({
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          className="button secondary small"
-          onClick={onConfigure}
-        >
-          <Settings2 size={14} />
-          Configure
-        </button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            type="button"
+            className="button secondary small"
+            title="Export structured task pack with context, documents, and instructions for external tools"
+            onClick={() => setTaskPackOpen(true)}
+          >
+            <Download size={14} />
+            Export task pack
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            title="Import and review assistant output"
+            onClick={() => {
+              setImportOpen(true);
+              setImportPreview(null);
+              setImportError("");
+            }}
+          >
+            <Import size={14} />
+            Import result
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={onConfigure}
+          >
+            <Settings2 size={14} />
+            Configure
+          </button>
+        </div>
       </div>
       {!active && (
         <div className="buddy-callout">
@@ -420,6 +556,198 @@ export default function CareerBuddy({
         <p className="form-error" role="alert">
           {error}
         </p>
+      )}
+
+      {taskPackOpen && (
+        <div className="task-pack-modal-backdrop" onClick={() => !packBusy && setTaskPackOpen(false)}>
+          <div className="task-pack-modal" role="dialog" aria-labelledby="task-pack-title" onClick={(e) => e.stopPropagation()}>
+            <div className="task-pack-modal-header">
+              <h3 id="task-pack-title">Export task pack for external assistants</h3>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={packBusy}
+                onClick={() => setTaskPackOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="task-pack-desc">
+              Package opportunity details, selected career evidence, instructions, and the required schema into a ZIP bundle to use with Claude Desktop, offline LLMs, or other tools without API keys or credentials.
+            </p>
+            <div className="task-pack-form">
+              <label className="field">
+                <span>Task action</span>
+                <select
+                  value={taskAction}
+                  disabled={packBusy}
+                  onChange={(e) => setTaskAction(e.target.value)}
+                >
+                  <option value="general">General advice / question</option>
+                  <option value="fit">Assess candidate fit & criteria</option>
+                  <option value="salary">Estimate salary & negotiation</option>
+                  <option value="skills">Review skills & evidence match</option>
+                  <option value="cv">Tailor CV draft</option>
+                  <option value="cover">Tailor cover letter draft</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Custom instructions / request (optional)</span>
+                <textarea
+                  rows={3}
+                  value={taskInstructions}
+                  disabled={packBusy}
+                  onChange={(e) => setTaskInstructions(e.target.value)}
+                  placeholder="e.g. Focus on our distributed systems achievements and leadership experience…"
+                />
+              </label>
+              <div className="task-pack-summary">
+                <small>
+                  Sources included: <strong>{selected.length} document(s)</strong> selected.
+                  {others ? " · Other opportunity summaries included." : ""}
+                </small>
+              </div>
+            </div>
+            <div className="task-pack-modal-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={packBusy}
+                onClick={() => setTaskPackOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                disabled={packBusy}
+                onClick={() => void downloadTaskPack()}
+              >
+                {packBusy ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}
+                Download ZIP task pack
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importOpen && (
+        <div className="task-pack-modal-backdrop" onClick={() => !importBusy && setImportOpen(false)}>
+          <div className="task-pack-modal" role="dialog" aria-labelledby="import-result-title" onClick={(e) => e.stopPropagation()}>
+            <div className="task-pack-modal-header">
+              <h3 id="import-result-title">Import external assistant result</h3>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={importBusy}
+                onClick={() => setImportOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="task-pack-desc">
+              Paste the structured JSON response or markdown output returned by your external assistant. Results will be validated against this opportunity’s revision before applying.
+            </p>
+            <div className="task-pack-form">
+              <label className="field">
+                <span>Assistant response text or JSON</span>
+                <textarea
+                  rows={6}
+                  value={importText}
+                  disabled={importBusy}
+                  onChange={(e) => {
+                    setImportText(e.target.value);
+                    setImportPreview(null);
+                  }}
+                  placeholder="Paste response here (raw JSON or ```json ... ``` codeblock)..."
+                />
+              </label>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={importBusy || !importText.trim()}
+                  onClick={() => void previewAssistantResult()}
+                >
+                  {importBusy ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}
+                  Validate & preview
+                </button>
+                <input
+                  type="file"
+                  accept=".json,.txt,.md"
+                  style={{ display: "none" }}
+                  id="import-result-file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        setImportText(String(reader.result || ""));
+                        setImportPreview(null);
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                />
+                <label htmlFor="import-result-file" className="button secondary small" style={{ cursor: "pointer", margin: 0 }}>
+                  Upload file
+                </label>
+              </div>
+
+              {importError && (
+                <p className="form-error" role="alert">
+                  {importError}
+                </p>
+              )}
+
+              {importPreview && (
+                <div className="task-pack-preview-box">
+                  <h4>Preview of assistant response</h4>
+                  <p className="task-pack-preview-reply">{importPreview.reply}</p>
+                  {importPreview.changes.length > 0 && (
+                    <div className="task-pack-preview-changes">
+                      <h5>Proposed record changes ({importPreview.changes.length}):</h5>
+                      <ul>
+                        {importPreview.changes.map((c, i) => (
+                          <li key={i}>
+                            <strong>{c.kind}:</strong> {c.field || c.title} {c.value ? `→ "${c.value}"` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {importPreview.draft && importPreview.draft.kind !== "none" && (
+                    <div className="task-pack-preview-draft">
+                      <h5>Generated document draft:</h5>
+                      <p>
+                        <strong>{importPreview.draft.kind === "cv" ? "CV" : "Cover letter"}:</strong> {importPreview.draft.title}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="task-pack-modal-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={importBusy}
+                onClick={() => setImportOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                disabled={importBusy || !importPreview}
+                onClick={() => void applyAssistantResult()}
+              >
+                {importBusy ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}
+                Apply reviewed changes & draft
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

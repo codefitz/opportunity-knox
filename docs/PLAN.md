@@ -13,7 +13,7 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | R1 | [x] ~~External embedding capability checks and model discovery~~ | Complete | Separate from completed chat discovery and built-in MiniLM. |
 | R2 | [x] ~~External embedding indexing and optional vector backends~~ | Complete | External provider indexing (OpenAI, Ollama, custom) and optional external vector backends (Qdrant, custom HTTP) with SQLite metadata and boundary validation. |
 | R3 | [x] ~~Universal persisted AI task scheduler~~ | Complete | Runnable/deferred jobs, embedding-job and opportunity-automation coverage; unified persistent `ai_tasks` SQLite store, cooperative cancellation/retries, restart interruption, backup/export integration, and UI display in AI Activity. |
-| R4 | [ ] External-assistant task-pack export/result import | Open | Separate from the completed Codex provider and application-document packs. |
+| R4 | [x] ~~External-assistant task-pack export/result import~~ | Complete | Export opportunity context, evidence excerpts, instructions, and JSON schema into ZIP/JSON task packs; validate, conflict-check, and preview external assistant results before applying mutations and saving document drafts with audit trail in `ai_tasks`. Separate from application-document packs and Codex runner. |
 | R5 | [ ] Codex live output/token accounting and remote cancellation acknowledgement | Open / provider-dependent | Current helper returns final text; local process cancellation is complete. Remote compute/billing termination cannot be assumed. |
 | R6 | [ ] Live cloud-document references and native editing | Deferred / account-dependent | Google configuration/search/snapshot connector is complete; live account verification is V2. |
 | R7 | [ ] Arbitrary unmarked templates and cross-engine layout fidelity | Open / validation-dependent | Built-in/marked templates, previews and Word/PDF exports are complete; bespoke acceptance is V3. |
@@ -193,7 +193,7 @@ Proposed managed layout:
 - [x] ~~Persist Buddy request lifecycle/diagnostics, automatic review queue/state and host Codex queue; progress/cancel/retry controls and interrupted-on-restart handling. These are workflow-specific mechanisms.~~
 - [x] ~~Unified AI request activity page, per-attempt history, explicit workflow review/retry links, prompt versions/system fingerprints, provider-reported token counters and optional saved-rate cost estimates. Covers Buddy chat/drafting, fit assessments, tags, summaries, intake, feedback reviews and inference connection tests. See AI_ACTIVITY.md.~~
 - [x] ~~Unified persisted scheduler for all AI task types, including embedding jobs, opportunity automation, and deferred runnable work. Backed by persistent `ai_tasks` SQLite store, cooperative cancellation/retry, restart interruption, backup/export safety, and UI status view.~~
-- [ ] External-assistant task-pack export and result import.
+- [x] ~~External-assistant task-pack export and result import.~~
 
 ## Launcher and first-run experience
 
@@ -255,7 +255,8 @@ The normal user interface is the web app, packaged with a host launcher so Docke
    - [x] ~~Multi-provider adapter, model discovery, local PDF/DOCX/text chunk retrieval, grounded opportunity chat, reviewed record updates, fit/salary/skills prompts, and versioned Word/Markdown draft generation.~~
    - [x] ~~Saved fit criteria, automatic reviews, standalone Buddy, request controls, built-in/marked-template layouts and PDF export.~~
    - [x] ~~Stage 1 reviewed JD extraction with source passages, snapshots and bounded local PDF OCR.~~
-   - [ ] Arbitrary-template fidelity and external-assistant task-pack exchange.
+   - [x] ~~External-assistant task-pack exchange (export and result import).~~
+   - [ ] Arbitrary-template fidelity.
 4. [ ] **Optional extensions:**
    - [x] ~~Dashboard statistics, local SQLite vectors/hybrid retrieval, Obsidian/directory sources, standalone Buddy/history sidebar, external embedding indexing/optional vector backends, and Google Docs setup/snapshot connector.~~
    - [ ] Calendar/email/reminders, additional reporting, and live Google app authorization (deferred).

@@ -5,6 +5,7 @@ export const TASK_KINDS = {
   "opportunity-automation": "Opportunity review automation",
   "deferred-assessment": "Deferred opportunity fit review",
   "deferred-briefing": "Deferred opportunity briefing",
+  "external-assistant": "External assistant task execution",
 };
 
 export const TASK_STATUSES = new Set([

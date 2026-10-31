@@ -3506,3 +3506,76 @@ test('universal AI task scheduler manages background tasks, supports cancel/retr
  assert.equal(restarted.status,'interrupted');
  assert.equal(restarted.canRetry,true);
 });
+
+test('external assistant task-pack export, preview with conflict check, and apply with audit record and draft saving',async t=>{
+ const f=await fixture(t);await f.setup();
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+
+ // 1. Unauthenticated checks
+ assert.equal((await f.request('/api/opportunities/'+op.id+'/assistant-pack',{auth:false})).status,401);
+ assert.equal((await f.request('/api/opportunities/'+op.id+'/assistant-pack/preview',{method:'POST',auth:false,body:{}})).status,401);
+ assert.equal((await f.request('/api/opportunities/'+op.id+'/assistant-pack/apply',{method:'POST',auth:false,body:{}})).status,401);
+
+ // 2. Export task pack as JSON
+ const packRes=await f.request('/api/opportunities/'+op.id+'/assistant-pack?action=cv');
+ assert.equal(packRes.status,200);
+ assert.equal(packRes.data.manifest.opportunityId,op.id);
+ assert.equal(packRes.data.manifest.action,'cv');
+ assert.ok(packRes.data.instructions);
+ assert.ok(packRes.data.expectedSchema);
+
+ // 3. Export task pack as ZIP
+ const zipRes=await f.request('/api/opportunities/'+op.id+'/assistant-pack',{
+   method:'POST',
+   body:{action:'cover',customInstructions:'Emphasize cloud architecture.'},
+ });
+ assert.equal(zipRes.status,200);
+
+ // 4. Preview result
+ const resultJson=JSON.stringify({
+   reply:"I tailored a cover letter draft and updated next action.",
+   changes:[
+     {kind:"update",field:"nextAction",value:"Review external assistant cover draft",title:"",date:"",notes:"",type:"",status:"",isFinal:false}
+   ],
+   draft:{
+     kind:"cover",
+     title:"Cover Letter - "+op.company,
+     content:"# Dear Hiring Manager\\n\\nI am pleased to apply..."
+   },
+   sourceIds:[]
+ });
+
+ const previewRes=await f.request('/api/opportunities/'+op.id+'/assistant-pack/preview',{
+   method:'POST',
+   body:{baseRevision:op.revision,resultText:resultJson}
+ });
+ assert.equal(previewRes.status,200);
+ assert.equal(previewRes.data.valid,true);
+ assert.equal(previewRes.data.changes.length,1);
+ assert.equal(previewRes.data.draft.kind,'cover');
+
+ // Conflict preview check
+ const staleRes=await f.request('/api/opportunities/'+op.id+'/assistant-pack/preview',{
+   method:'POST',
+   body:{baseRevision:op.revision+99,resultText:resultJson}
+ });
+ assert.equal(staleRes.status,409);
+
+ // 5. Apply result
+ const applyRes=await f.request('/api/opportunities/'+op.id+'/assistant-pack/apply',{
+   method:'POST',
+   body:{baseRevision:op.revision,resultText:resultJson,confirm:true}
+ });
+ assert.equal(applyRes.status,200);
+ assert.equal(applyRes.data.success,true);
+ assert.equal(applyRes.data.opportunity.nextAction,"Review external assistant cover draft");
+ assert.ok(applyRes.data.savedDocument);
+ assert.equal(applyRes.data.savedDocument.kind,"cover");
+
+ // Verify task was recorded in scheduler
+ const tasksRes=await f.request('/api/ai-tasks?kind=external-assistant');
+ assert.equal(tasksRes.status,200);
+ assert.equal(tasksRes.data.total,1);
+ assert.equal(tasksRes.data.items[0].targetId,op.id);
+ assert.equal(tasksRes.data.items[0].status,'completed');
+});

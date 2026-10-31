@@ -10,6 +10,7 @@ export const activityKinds = {
   "local-intake": "Local job reading",
   feedback: "Feedback review",
   "connection-test": "Connection test",
+  "external-assistant": "External assistant task",
 };
 const fail = (status, message) => {
   throw Object.assign(new Error(message), { status });

@@ -366,3 +366,30 @@ Deployment through the normal launcher completed with a verified full backup of 
 - Complete data safety: `ai_tasks` snapshot inclusion in `/api/backup`, table copy into portable/isolated restores, and secret-safe sanitization (`apiKey`, `vectorApiKey`, `secret` stripped) in `/api/export`.
 - User interface: "Scheduled & background tasks" pane in AI Activity view (`src/components/AIActivity.tsx`), displaying task kind, subject, badges, phase/progress, enqueued/started/finished timestamps, error diagnostics, and Cancel/Retry controls with 5-second polling.
 - Live Docker container rebuild and browser verification have not been rerun in this step.
+
+## External-assistant task-pack export & result import (R4) — 31 October 2026
+
+`npm run check` passes: production TypeScript/Vite build, 224 Node tests and 39 launcher/helper tests (263 total). Fictional-provider unit, assistant packs and server integration tests cover:
+- Task-pack bundling (`server/assistant-packs.mjs`):
+  - Structured metadata `manifest.json` (action, company, role, baseRevision, format version).
+  - System prompt instructions (`instructions.md`) and expected JSON schema (`schema.json` matching `BUDDY_SCHEMA`).
+  - Opportunity context (`context.json`) including scoped opportunity history, excerpts from selected readable evidence chunks, and optional other-opportunity summaries.
+  - Bundled source document files in `sources/` subfolder when disk paths are available.
+  - `prompt.txt` providing quick copy-paste instructions for desktop/offline assistants.
+  - Export endpoints: `GET /api/opportunities/:id/assistant-pack` (JSON payload) and `POST /api/opportunities/:id/assistant-pack` (streaming downloadable ZIP archive).
+- Assistant result parsing and conflict preview:
+  - Supports raw JSON responses as well as markdown-fenced code blocks (````json ... ````).
+  - Validates output structure (reply, proposed record changes, document draft, source citations).
+  - Enforces optimistic concurrency (`409 Conflict`) if the opportunity's revision has changed since the task pack was generated.
+  - Preview endpoint: `POST /api/opportunities/:id/assistant-pack/preview`.
+- Confirmation and mutation application:
+  - Requires explicit confirmation (`confirm: true`).
+  - Applies validated record mutations via `applyChanges` without creating duplicate interviews or corrupting history.
+  - Generates and persists versioned Word document drafts (`.docx`) in opportunity documents (`saveDocument`) when a draft is present, without overwriting approved/submitted versions.
+  - Enqueues and records an `external-assistant` audit entry in the universal `ai_tasks` SQLite store and activity reporting.
+  - Apply endpoint: `POST /api/opportunities/:id/assistant-pack/apply`.
+- UI controls:
+  - Added "Export task pack" and "Import result" action buttons to the Career Buddy header in `src/components/CareerBuddy.tsx`.
+  - Accessible modal dialogs for task action selection, custom instruction prompt, source summary, and ZIP download.
+  - Result import modal with response pasting/file upload, validation & preview diff inspection, and one-click application.
+- Live Docker container rebuild and browser verification have not been rerun in this step.

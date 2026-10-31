@@ -448,4 +448,99 @@
 .buddy-request-details dl { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 20px; }
 .buddy-request-details dl div { display:flex; justify-content:space-between; gap:10px; }
 .buddy-request-details dt { color:var(--muted); }
+
+/* External Assistant Task Packs */
+.task-pack-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.task-pack-modal {
+  background: var(--surface, #ffffff);
+  color: var(--ink, #1f2937);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: var(--radius, 12px);
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.task-pack-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.task-pack-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.task-pack-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted, #6b7280);
+}
+.task-pack-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.task-pack-summary {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+.task-pack-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.task-pack-preview-box {
+  background: var(--bg, #f9fafb);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+.task-pack-preview-box h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.task-pack-preview-reply {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--ink, #1f2937);
+  max-height: 120px;
+  overflow-y: auto;
+}
+.task-pack-preview-changes h5,
+.task-pack-preview-draft h5 {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+.task-pack-preview-changes ul {
+  margin: 0;
+  padding-left: 20px;
+}
+.task-pack-preview-draft p {
+  margin: 0;
+}
 .buddy-request-details dd { margin:0; font-variant-numeric:tabular-nums; }
