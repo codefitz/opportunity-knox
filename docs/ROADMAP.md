@@ -316,3 +316,11 @@ Settings uses consistent heading, paragraph, label, help-text and control sizes,
 ## Opportunity deletion and workspace reset — 31 October 2026
 
 Opportunity details now offer individual deletion; list/Kanban views offer clear-all, including completed and filtered-out records. Settings → Reset workspace clears board data, conversations, feedback, preferences and saved credentials while preserving the exact profile, sign-in and storage locations. Every action previews its scope, requires typed confirmation and creates a verified private full backup before atomic removal. Existing files, external originals and earlier backups are retained. Active work and stale previews are rejected; reset invalidates old staged uploads and protects against stale tabs. See [WORKSPACE_RESET.md](WORKSPACE_RESET.md) for scope and recovery.
+
+## Focused Kanban layout — 31 October 2026
+
+Kanban now uses the full viewport, replacing the sidebar, large heading, totals and footer with a compact toolbar. Search, outcome selection and Add opportunity remain visible; detailed filters expand in place and clear-all remains in the actions menu. Stage columns scroll independently while headings stay visible. Horizontal scrolling supports keyboard navigation; the back arrow returns to the standard opportunity list with shared filters retained.
+
+## Collapsible workspace sidebar — 1 November 2026
+
+This supersedes the sidebar removal in the focused Kanban increment. Kanban retains workspace navigation by default. The shared hide/show control slides the sidebar away and expands content, with a visible restore button, keyboard operation, hidden-navigation focus protection and reduced-motion support. On phones the same control hides/restores the existing bottom navigation. The choice remains while navigating within the app; reload starts with navigation visible.

@@ -83,7 +83,7 @@ The initial manual workflow covers opportunity capture, dated stage history and 
 
 - **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes, tasks, and interview/action queues. Charts and records update after changes and periodic refreshes.
 - **Opportunities:** searchable list for detailed application tracking.
-- **Kanban board:** the eight-stage drag-and-drop board on its own page with stage dates, interview/communication history, and outcome tracking.
+- **Kanban board:** full-page eight-stage drag-and-drop board with a compact search/filter/Add opportunity bar. Stage headings stay visible while long columns scroll independently; scroll sideways to reach every stage. The back arrow returns to the opportunity list, and the actions menu retains clear-all. The sidebar remains visible; its hide/show control slides navigation out of view and lets the board expand. The same control works across workspace pages and with the bottom navigation on phones.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link tasks to opportunities.
 - **Career Hub & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click.
 - **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.

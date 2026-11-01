@@ -337,3 +337,12 @@ The normal user interface is the web app, packaged with a host launcher so Docke
 - [x] Reset the workspace while preserving profile, sign-in and storage locations; clear preferences and saved connection/AI credentials.
 - [x] Mandatory verified full backup, atomic database removal, stale-preview/client protection and active-work guards. Retain physical files and external originals; document recovery and exact scope in [WORKSPACE_RESET.md](WORKSPACE_RESET.md).
 - [x] Automated regression checks and browser verification on disposable fictional data. Live deployment remains separate.
+
+## Focused Kanban layout — 31 October 2026
+
+- [x] Full-viewport Kanban with compact search, outcome, Filters and Add opportunity controls; detailed filters expand on demand. Retain clear-all in the actions menu and provide a return to the regular list.
+- [x] Independently scrolling stage columns, visible stage headings, keyboard-accessible horizontal scrolling and a compact phone layout. Verified with 48 fictional opportunities; live deployment remains separate.
+
+## Collapsible workspace sidebar — 1 November 2026
+
+- [x] Keep the sidebar visible on Kanban by default. A shared accessible hide/show control slides navigation out and reclaims its space across pages; on phones it slides the bottom navigation down. Keep the compact Kanban toolbar and scrolling layout.

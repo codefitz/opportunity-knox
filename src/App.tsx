@@ -54,6 +54,8 @@ import {
   LogOut,
   MessageSquare,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RotateCw,
   Search,
@@ -284,6 +286,7 @@ export default function App() {
     appearanceRevision = useRef(0);
   appearanceSettingsRef.current = settings;
   const [initialOpportunityTab,setInitialOpportunityTab]=useState("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [page, setPage] = useState<Page>(routePage),
     [opportunityFilters, setOpportunityFilters] = useState({...defaultOpportunityFilters,tags:[] as string[]});
   const [error, setError] = useState(""),
@@ -681,9 +684,19 @@ export default function App() {
   if (!session.authenticated)
     return <><Feedback authenticated={false}/><Auth session={session} token={token} onDone={setSession} /></>;
   return (
-    <div className="app-shell">
+    <div className={`app-shell${page === "board" ? " board-focused" : ""}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <Feedback authenticated={true}/>
-      <aside className="sidebar">
+      <button
+        className="icon-button sidebar-toggle"
+        aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+        title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+        aria-expanded={!sidebarCollapsed}
+        aria-controls="workspace-sidebar"
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+      >
+        {sidebarCollapsed ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}
+      </button>
+      <aside id="workspace-sidebar" className="sidebar" inert={sidebarCollapsed} aria-hidden={sidebarCollapsed}>
         <a
           className="brand"
           href="#/dashboard"
@@ -930,21 +943,18 @@ export default function App() {
             }}
             onDrop={externalDrop}
           >
+            {page === "opportunities" && <>
             <div className="page-heading">
               <div>
                 <div className="eyebrow">
                   A LITTLE STRUCTURE. A CLEARER PATH.
                 </div>
                 <h1>
-                  {page === "board"
-                    ? "Your opportunity board"
-                    : "Your opportunities"}
+                  Your opportunities
                   <span className="heading-dot">.</span>
                 </h1>
                 <p>
-                  {page === "board"
-                    ? "See the whole journey. Move each possibility forward at your own pace."
-                    : "Every possibility, application, and next action in one place."}
+                  Every possibility, application, and next action in one place.
                 </p>
               </div>
               <div className="opportunity-page-actions">
@@ -987,13 +997,23 @@ export default function App() {
                 tone="blue"
               />
             </div>
-            <OpportunityFiltersToolbar value={opportunityFilters} onChange={setOpportunityFilters} opportunities={opportunities} resultCount={filtered.length} board={page==="board"} timezone={filterTimezone}/>
+            </>}
+            <OpportunityFiltersToolbar value={opportunityFilters} onChange={setOpportunityFilters} opportunities={opportunities} resultCount={filtered.length} board={page==="board"} timezone={filterTimezone}
+              onBack={() => navigate("opportunities")}
+              actions={page === "board" ? <>
+                <button className="button primary small" onClick={add}><Plus size={16}/>Add opportunity</button>
+                <details className="board-actions-menu">
+                  <summary aria-label="Board actions"><MoreHorizontal size={18}/></summary>
+                  <WorkspaceAction action="clear-opportunities" label="Clear all opportunities" disabled={!opportunities.length} onComplete={result=>{setSelected(null);setOpportunityFilters({...defaultOpportunityFilters,tags:[]});void load(true);setNotice(`Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`);}} />
+                </details>
+              </> : undefined}
+            />
             {loading ? (
               <div className="loading-board">
                 <Busy text="Loading your opportunities…" />
               </div>
             ) : view === "board" ? (
-              <div className="kanban" aria-label="Opportunity stages">
+              <div className="kanban" role="region" tabIndex={0} aria-label="Opportunity stages">
                 {STAGES.map((stage, index) => {
                   const cards = filtered.filter((o) => o.stage === stage.id);
                   return (
@@ -1150,7 +1170,7 @@ export default function App() {
                 )}
               </div>
             )}
-            <div className="board-footer">
+            {page !== "board" && <div className="board-footer">
               <span>
                 <Folder size={14} />
                 Drop a job link or document anywhere to get started
@@ -1161,8 +1181,8 @@ export default function App() {
                 <span className="footer-separator">·</span>Changes save
                 automatically after confirmation
               </span>
-            </div>
-            {!opportunities.length && !loading && (
+            </div>}
+            {!opportunities.length && !loading && page !== "board" && (
               <div className="getting-started">
                 <div className="start-icon">
                   <Sparkles size={20} />

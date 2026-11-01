@@ -1,4 +1,5 @@
-import { Search, ChevronDown, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowLeft, Search, ChevronDown, X } from "lucide-react";
 import { STAGES, OUTCOMES, type Opportunity } from "../types";
 import {
   defaultOpportunityFilters,
@@ -23,6 +24,8 @@ export default function OpportunityFiltersToolbar({
   resultCount,
   board,
   timezone,
+  onBack,
+  actions,
 }: {
   value: OpportunityFilters;
   onChange: (value: OpportunityFilters) => void;
@@ -30,6 +33,8 @@ export default function OpportunityFiltersToolbar({
   resultCount: number;
   board: boolean;
   timezone: string;
+  onBack?: () => void;
+  actions?: ReactNode;
 }) {
   const tags = opportunityTags(opportunities),
     error = opportunityFilterError(value);
@@ -64,9 +69,23 @@ export default function OpportunityFiltersToolbar({
       aria-label="Opportunity filters"
     >
       <div className="board-toolbar">
-        <span className="view-caption">
-          {board ? "PIPELINE VIEW" : "OPPORTUNITY REGISTER"}
-        </span>
+        {board ? (
+          <div className="board-title">
+            <button
+              className="icon-button"
+              aria-label="Back to opportunities"
+              onClick={onBack}
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <h1>Kanban board</h1>
+            <span role="status" aria-live="polite">
+              {resultCount}/{opportunities.length}
+            </span>
+          </div>
+        ) : (
+          <span className="view-caption">OPPORTUNITY REGISTER</span>
+        )}
         <div className="toolbar-right">
           <div className="search-input">
             <Search size={16} aria-hidden="true" />
@@ -95,152 +114,185 @@ export default function OpportunityFiltersToolbar({
             <ChevronDown size={14} aria-hidden="true" />
           </label>
         </div>
-      </div>
-      <div className="opportunity-filter-controls">
-        <label className="opportunity-filter-field">
-          <span>Stage</span>
-          <select
-            aria-label="Filter by stage"
-            value={value.stage}
-            onChange={(e) =>
-              set("stage", e.target.value as OpportunityFilters["stage"])
-            }
-          >
-            <option value="">All stages</option>
-            {STAGES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="opportunity-tag-control">
-          <span>Tags</span>
-          <details className="opportunity-tag-picker">
-            <summary>
-              Tags{value.tags.length ? ` (${value.tags.length})` : " · All"}
-              <ChevronDown size={14} aria-hidden="true" />
-            </summary>
-            <div className="opportunity-tag-options">
-              <p>Select one or more tags.</p>
-              {tags.length ? (
-                tags.map((tag) => (
-                  <label className="check-field" key={tag.id}>
-                    <input
-                      type="checkbox"
-                      checked={value.tags.includes(tag.id)}
-                      onChange={(e) =>
-                        set(
-                          "tags",
-                          e.target.checked
-                            ? [...value.tags, tag.id]
-                            : value.tags.filter((t) => t !== tag.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {tag.label} <small>({tag.count})</small>
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p>No tags recorded yet.</p>
-              )}
-              {!!value.tags.length && (
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() =>
-                    onChange({ ...value, tags: [], tagMatch: "all" })
+        <details
+          className="opportunity-filter-details"
+          open={board ? undefined : true}
+        >
+          <summary>
+            Filters <ChevronDown size={14} aria-hidden="true" />
+          </summary>
+          <div className="opportunity-filter-popover">
+            <div className="opportunity-filter-controls">
+              <label className="opportunity-filter-field">
+                <span>Stage</span>
+                <select
+                  aria-label="Filter by stage"
+                  value={value.stage}
+                  onChange={(e) =>
+                    set("stage", e.target.value as OpportunityFilters["stage"])
                   }
                 >
-                  Clear selected tags
-                </button>
+                  <option value="">All stages</option>
+                  {STAGES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="opportunity-tag-control">
+                <span>Tags</span>
+                <details className="opportunity-tag-picker">
+                  <summary>
+                    Tags
+                    {value.tags.length ? ` (${value.tags.length})` : " · All"}
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </summary>
+                  <div className="opportunity-tag-options">
+                    <p>Select one or more tags.</p>
+                    {tags.length ? (
+                      tags.map((tag) => (
+                        <label className="check-field" key={tag.id}>
+                          <input
+                            type="checkbox"
+                            checked={value.tags.includes(tag.id)}
+                            onChange={(e) =>
+                              set(
+                                "tags",
+                                e.target.checked
+                                  ? [...value.tags, tag.id]
+                                  : value.tags.filter((t) => t !== tag.id),
+                              )
+                            }
+                          />
+                          <span>
+                            {tag.label} <small>({tag.count})</small>
+                          </span>
+                        </label>
+                      ))
+                    ) : (
+                      <p>No tags recorded yet.</p>
+                    )}
+                    {!!value.tags.length && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          onChange({ ...value, tags: [], tagMatch: "all" })
+                        }
+                      >
+                        Clear selected tags
+                      </button>
+                    )}
+                  </div>
+                </details>
+              </div>
+              {value.tags.length > 1 && (
+                <label className="opportunity-filter-field">
+                  <span>Tag matching</span>
+                  <select
+                    aria-label="Tag matching"
+                    value={value.tagMatch}
+                    onChange={(e) =>
+                      set("tagMatch", e.target.value as "all" | "any")
+                    }
+                  >
+                    <option value="all">All selected tags</option>
+                    <option value="any">Any selected tag</option>
+                  </select>
+                </label>
               )}
+              <label className="opportunity-filter-field">
+                <span>Application deadline</span>
+                <select
+                  aria-label="Filter application deadline"
+                  value={value.deadline}
+                  onChange={(e) =>
+                    set(
+                      "deadline",
+                      e.target.value as OpportunityFilters["deadline"],
+                    )
+                  }
+                >
+                  {Object.entries(deadlineLabels).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="check-field opportunity-overdue-toggle">
+                <input
+                  type="checkbox"
+                  checked={value.overdueOnly}
+                  onChange={(e) => set("overdueOnly", e.target.checked)}
+                />
+                Overdue actions only
+              </label>
+              <button
+                className="button secondary small"
+                type="button"
+                disabled={!changed}
+                onClick={() =>
+                  onChange({ ...defaultOpportunityFilters, tags: [] })
+                }
+              >
+                Reset filters
+              </button>
             </div>
-          </details>
-        </div>
-        {value.tags.length > 1 && (
-          <label className="opportunity-filter-field">
-            <span>Tag matching</span>
-            <select
-              aria-label="Tag matching"
-              value={value.tagMatch}
-              onChange={(e) => set("tagMatch", e.target.value as "all" | "any")}
-            >
-              <option value="all">All selected tags</option>
-              <option value="any">Any selected tag</option>
-            </select>
-          </label>
-        )}
-        <label className="opportunity-filter-field">
-          <span>Application deadline</span>
-          <select
-            aria-label="Filter application deadline"
-            value={value.deadline}
-            onChange={(e) =>
-              set("deadline", e.target.value as OpportunityFilters["deadline"])
-            }
-          >
-            {Object.entries(deadlineLabels).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="check-field opportunity-overdue-toggle">
-          <input
-            type="checkbox"
-            checked={value.overdueOnly}
-            onChange={(e) => set("overdueOnly", e.target.checked)}
-          />
-          Overdue actions only
-        </label>
-        <button
-          className="button secondary small"
-          type="button"
-          disabled={!changed}
-          onClick={() => onChange({ ...defaultOpportunityFilters, tags: [] })}
-        >
-          Reset filters
-        </button>
+            {value.deadline === "range" && (
+              <div className="opportunity-deadline-range">
+                <label className="opportunity-filter-field">
+                  <span>Deadline from</span>
+                  <input
+                    aria-label="Deadline from"
+                    type="date"
+                    value={value.deadlineFrom}
+                    aria-invalid={!!error}
+                    aria-describedby={
+                      error ? "opportunity-filter-error" : undefined
+                    }
+                    onChange={(e) => set("deadlineFrom", e.target.value)}
+                  />
+                </label>
+                <label className="opportunity-filter-field">
+                  <span>Deadline to</span>
+                  <input
+                    aria-label="Deadline to"
+                    type="date"
+                    value={value.deadlineTo}
+                    aria-invalid={!!error}
+                    aria-describedby={
+                      error ? "opportunity-filter-error" : undefined
+                    }
+                    onChange={(e) => set("deadlineTo", e.target.value)}
+                  />
+                </label>
+                <p>
+                  Both ends are inclusive; leave either blank for an open range.
+                  With both blank, all recorded deadlines match.
+                </p>
+              </div>
+            )}
+            {error && (
+              <p
+                className="alert error"
+                role="alert"
+                id="opportunity-filter-error"
+              >
+                {error}
+              </p>
+            )}
+            <p className="opportunity-filter-hint">
+              Dates use {timezone}; the next 7/30 days include today. Overdue
+              means before today and includes next actions, follow-ups, pending
+              offer responses and linked open to-dos on active opportunities.
+              Reset returns to active opportunities.
+            </p>
+          </div>
+        </details>
+        {actions}
       </div>
-      {value.deadline === "range" && (
-        <div className="opportunity-deadline-range">
-          <label className="opportunity-filter-field">
-            <span>Deadline from</span>
-            <input
-              aria-label="Deadline from"
-              type="date"
-              value={value.deadlineFrom}
-              aria-invalid={!!error}
-              aria-describedby={error ? "opportunity-filter-error" : undefined}
-              onChange={(e) => set("deadlineFrom", e.target.value)}
-            />
-          </label>
-          <label className="opportunity-filter-field">
-            <span>Deadline to</span>
-            <input
-              aria-label="Deadline to"
-              type="date"
-              value={value.deadlineTo}
-              aria-invalid={!!error}
-              aria-describedby={error ? "opportunity-filter-error" : undefined}
-              onChange={(e) => set("deadlineTo", e.target.value)}
-            />
-          </label>
-          <p>
-            Both ends are inclusive; leave either blank for an open range. With
-            both blank, all recorded deadlines match.
-          </p>
-        </div>
-      )}
-      {error && (
-        <p className="alert error" role="alert" id="opportunity-filter-error">
-          {error}
-        </p>
-      )}
       <div
         className="opportunity-filter-chips"
         aria-label="Selected opportunity filters"
@@ -281,16 +333,16 @@ export default function OpportunityFiltersToolbar({
         {value.overdueOnly &&
           chip("Overdue actions", () => set("overdueOnly", false))}
       </div>
-      <p className="opportunity-filter-count" role="status" aria-live="polite">
-        Showing <strong>{resultCount}</strong> of {opportunities.length}{" "}
-        opportunities. Workspace totals above are unfiltered.
-      </p>
-      <p className="opportunity-filter-hint">
-        Dates use {timezone}; the next 7/30 days include today. Overdue means
-        before today and includes next actions, follow-ups, pending offer
-        responses and linked open to-dos on active opportunities. Reset returns
-        to active opportunities.
-      </p>
+      {!board && (
+        <p
+          className="opportunity-filter-count"
+          role="status"
+          aria-live="polite"
+        >
+          Showing <strong>{resultCount}</strong> of {opportunities.length}{" "}
+          opportunities. Workspace totals above are unfiltered.
+        </p>
+      )}
       {opportunities.length > 0 && resultCount === 0 && !error && (
         <div className="opportunity-no-match">
           <strong>No matching opportunities.</strong>
