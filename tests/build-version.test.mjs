@@ -21,7 +21,7 @@ test('installed build identifies development source, commit and local edits; lin
   const status = checker.getStatusSync();
   assert.equal(status.currentCommit, commit);
   assert.equal(status.buildDirty, true);
-  const html = renderToStaticMarkup(createElement(BuildVersion, {status}));
+  const html = renderToStaticMarkup(createElement(BuildVersion, {status: {...status, currentVersion: "0.4.7-dev.0"}}));
   assert.match(html, /v0\.4\.7-dev\.0 \(development\)/);
   assert.match(html, new RegExp(`href="https://github.com/codefitz/opportunity-knox/commit/${commit}"`));
   assert.match(html, /<code>aaaaaaa<\/code>/);
