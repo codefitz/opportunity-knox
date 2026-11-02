@@ -3010,6 +3010,55 @@ test('criteria assessments use independent private settings, persist snapshots, 
  const backup=await f.request('/api/backup',{method:'POST',body:{}});const db=new DatabaseSync(join(backup.data.location,'board.sqlite'),{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM decision_assessments').get().n,1);db.close();
 });
 
+test('manual fit assessments fall back to the chat model with automatic fit disabled',async t=>{
+ let op,model;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{
+  model=JSON.parse(opts.body).model;
+  return buddyResponse(buddyReply({reply:JSON.stringify({recommendation:'consider',summary:'Fictional location fits.',criteria:[{id:'location',status:'met',reason:'London role.',sourceIds:[op.id],questions:[]}]})}));
+ }});await f.setup();await enableBuddy(f);
+ const workflow=(await f.request('/api/ai-workflow')).data;
+ await f.request('/api/ai-workflow',{method:'PATCH',body:{...workflow,autoFit:false,autoTags:false}});
+ await f.request('/api/buddy/fit-criteria',{method:'PATCH',body:{revision:1,items:[{id:'location',description:'London role',priority:'preferred'}]}});
+ op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,location:'London'}})).data;
+ const route='/api/buddy/decisions/'+op.id;
+ assert.equal((await f.request(route)).data.settings.enabled,true);
+ const result=await f.request(route,{method:'POST',body:{revision:op.revision,criteriaRevision:2,documentIds:[]}});
+ assert.equal(result.status,200);assert.equal(result.data.assessment.modelSource,'careerBuddy');
+ assert.equal(model,(await f.request('/api/buddy/settings')).data.model);
+ await f.restart();await f.login();
+ assert.equal((await f.request(route)).data.assessments[0].stale,false);
+ const chat=(await f.request('/api/buddy/settings')).data;
+ await f.request('/api/buddy/settings',{method:'PATCH',body:{revision:chat.revision,model:'fictional-changed-model'}});
+ assert.equal((await f.request(route)).data.assessments[0].stale,true);
+});
+
+test('one-click fit review selects evidence without saved criteria and populates editable review fields',async t=>{
+ let op,context;
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{
+  context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+  return buddyResponse(buddyReply({reply:JSON.stringify({recommendation:'consider',summary:'Review fictional fit.',criteria:[
+   {id:'strengths',status:'met',reason:'Relevant fictional engineering experience.',sourceIds:[context.excerpts[0].sourceId],questions:[]},
+   {id:'gaps',status:'unknown',reason:'Leadership experience needs clarification.',sourceIds:[],questions:[]}
+  ]})}));
+ }});await f.setup();await enableBuddy(f);
+ const workflow=(await f.request('/api/ai-workflow')).data;
+ await f.request('/api/ai-workflow',{method:'PATCH',body:{...workflow,autoFit:false,autoTags:false}});
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional engineering CV.txt',contentBase64:Buffer.from('Fictional engineering experience and delivery.').toString('base64')}})).data;
+ op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,role:'Engineering lead'}})).data;
+ const route='/api/buddy/decisions/'+op.id;
+ const result=await f.request(route,{method:'POST',body:{revision:op.revision,generalFit:true,documentIds:[]}});
+ assert.equal(result.status,200);assert.ok(context.excerpts.some(c=>c.sourceId===doc.id));
+ assert.equal(result.data.reviewDraft.strengths,'Relevant fictional engineering experience.');
+ assert.equal(result.data.reviewDraft.gaps,'Leadership experience needs clarification.');
+ assert.ok(Number.isFinite(Date.parse(result.data.reviewDraft.effectiveAt)));
+ assert.equal((await f.request('/api/opportunities/'+op.id)).data.revision,op.revision);
+ const saved=await f.request('/api/opportunities/'+op.id+'/review',{method:'PATCH',body:{revision:op.revision,...result.data.reviewDraft}});
+ assert.equal(saved.status,200);assert.equal(saved.data.review.strengths,result.data.reviewDraft.strengths);
+ await f.restart();await f.login();
+ assert.equal((await f.request('/api/opportunities/'+op.id)).data.review.gaps,result.data.reviewDraft.gaps);
+ assert.equal((await f.request(route)).data.assessments[0].stale,true);
+});
+
 test('standalone Buddy coaches, builds reviewed STAR evidence, imports recruiter tasks and confirms scoped updates',async t=>{
  let output,context,system;
  const f=await fixture(t,{buddyFetch:async(_,opts)=>{const b=JSON.parse(opts.body);system=b.messages[0].content;context=JSON.parse(b.messages.at(-1).content);return buddyResponse(buddyReply(output));}});await f.setup();await enableBuddy(f);
@@ -3380,12 +3429,13 @@ test('manual opportunity review preserves strengths/gaps and dated history; stag
  const path=`/api/opportunities/${o.id}/review`;
  const review={strengths:'Led integration delivery.',gaps:'Databricks experience not established.',decision:'proceed',reason:'Strong relevant delivery experience.',effectiveAt:'2026-10-28',applyStage:false};
  assert.equal((await f.request(path,{method:'PATCH',auth:false,body:{revision:o.revision,...review}})).status,401);
- for(const patch of [{decision:'yes'},{reason:''},{effectiveAt:'2026-02-30'},{applyStage:'yes'},{strengths:'x'.repeat(50001)},{outcome:'hired'}])assert.equal((await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,...patch}})).status,400);
+ for(const patch of [{decision:'yes'},{effectiveAt:'2026-02-30'},{applyStage:'yes'},{strengths:'x'.repeat(50001)},{outcome:'hired'}])assert.equal((await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,...patch}})).status,400);
  assert.equal((await f.request(`/api/opportunities/${o.id}`)).data.revision,o.revision);
  o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,...review}})).data;
  assert.equal(o.stage,'identification');assert.equal(o.outcome,'');assert.equal(o.currentStageEventId,initial.currentStageEventId);assert.equal(o.stageEnteredAt,initial.stageEnteredAt);assert.equal(o.review.effectiveAt,'2026-10-28');assert.equal(o.events.at(-1).title,'Review decision');assert.equal(o.review.history.length,0);
  assert.equal((await f.request(path,{method:'PATCH',body:{revision:initial.revision,...review}})).status,409);
- o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,applyStage:true}})).data;
+ o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,...review,reason:'',applyStage:true}})).data;
+ assert.equal(o.review.reason,'');
  assert.equal(o.stage,'documents');assert.equal(o.outcome,'');assert.equal(o.stageEnteredAt,'2026-10-28');assert.equal(o.events.at(-1).id,o.currentStageEventId);assert.equal(o.review.history[0].decision,'proceed');assert.equal(o.review.history[0].gaps,review.gaps);
  o=(await f.request(path,{method:'PATCH',body:{revision:o.revision,decision:'defer',reason:'Awaiting clarification.',applyStage:true,effectiveAt:'2026-10-29'}})).data;
  assert.equal(o.stage,'review');assert.equal(o.review.history.length,2);assert.equal(o.events[0].effectiveAt,initial.events[0].effectiveAt);

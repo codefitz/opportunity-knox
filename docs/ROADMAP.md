@@ -1,5 +1,13 @@
 # Implementation roadmap
 
+## One-click fit review — 2 November 2026
+
+Run Automated Fit Assessment now appears at the top of the fit review and fills editable Strengths, Gaps and review date/time. It automatically selects relevant career evidence and assesses role requirements without requiring saved criteria or an evidence picker. Results remain reviewable before Save review; decisions and stage changes remain explicit. The enabled decision model falls back to the Career Buddy LLM. Existing saved assessments and optional background-review settings are preserved. Automated tests cover evidence selection, no-criteria operation, review fields and persistence; browser and real-provider acceptance remain separate.
+
+## Manual fit assessment and optional decision reasons — 2 November 2026
+
+The Fit assessment panel offers an explicit Assess fit with AI action using saved criteria and selected evidence. Manual and automatic assessments use the enabled decision model or fall back to the Career Buddy LLM. Manual assessment remains available with automatic fit disabled. Personal review decisions allow an empty reason while retaining dated history and explicit stage-change controls. Automated coverage checks model fallback, persistence, stale detection and reason-free decisions; live-provider and browser verification remain separate.
+
 ## Google Workspace (.gdoc, .gsheet, .gslides) support in Career Hub — 2 November 2026
 
 Career Hub now supports Google Docs, Sheets, and Slides desktop shortcut and pointer files (`.gdoc`, `.gsheet`, `.gslides`) across uploads, read-only directory sources, Obsidian vault syncing, text preparation, semantic vector search, and standalone chat attachments. Uploaded or selected files automatically extract document IDs and URLs, infer document classification (e.g., CV or cover letter), and tag records with `Google Doc`, `Google Sheet`, or `Google Slides`. When Google Docs is connected via the app's OAuth configuration, text preparation exports and extracts live contents (DOCX for Docs, CSV for Sheets, PPTX for Slides); when offline, unconnected, or using public exports, Career Hub preserves pointer metadata, chunks, and direct Google Workspace links with open actions in the document list and Document Studio. Automated tests cover offline pointer parsing, live Google Drive export extraction, public export fallback, invalid file handling, and server upload/preparation workflows; live account consent remains separate.

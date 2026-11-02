@@ -141,8 +141,6 @@ export function createOpportunityWorkflow({
             fail(400, "Choose proceed, ignore, defer or not decided.");
           review.decision = body.decision;
         }
-        if (review.decision && !review.reason)
-          fail(400, "Add a reason for your review decision.");
         if (
           body.applyStage !== undefined &&
           typeof body.applyStage !== "boolean"

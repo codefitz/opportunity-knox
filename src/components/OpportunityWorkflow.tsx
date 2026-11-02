@@ -1,3 +1,4 @@
+import DecisionReview from "./DecisionReview";
 import { useState, type FormEvent } from "react";
 import { editedTimestamp, formatDate, localInput } from "../api";
 import type {
@@ -9,6 +10,7 @@ type Props = {
   opportunity: Opportunity;
   timezone: string;
   busy: boolean;
+  onError?: (e: unknown) => void;
   mutate: (path: string, body: unknown, method?: string) => Promise<boolean>;
 };
 const reviewLabels = { proceed: "Proceed", ignore: "Ignore", defer: "Defer" };
@@ -50,6 +52,7 @@ export function OpportunityReviewForm({
   timezone,
   busy,
   mutate,
+  onError = () => {},
 }: Props) {
   const [form, setForm] = useState({
     strengths: o.review?.strengths || "",
@@ -60,6 +63,7 @@ export function OpportunityReviewForm({
     applyStage: false,
   });
   const [saved, setSaved] = useState(false);
+  const [assessing, setAssessing] = useState(false);
   const set = (key: string, value: string | boolean) => {
     setForm((current) => ({ ...current, [key]: value }));
     setSaved(false);
@@ -81,6 +85,10 @@ export function OpportunityReviewForm({
   }
   return (
     <section className="workflow-section" aria-label="Your review decision">
+      <DecisionReview opportunity={o} onError={onError} disabled={busy} onBusy={setAssessing} onAssessed={draft => {
+        setForm(current => ({...current, strengths: draft.strengths, gaps: draft.gaps, effectiveAt: localInput(draft.effectiveAt)}));
+        setSaved(false);
+      }}/>
       <div className="section-intro">
         <h3>Your review decision</h3>
         <p>
@@ -89,7 +97,7 @@ export function OpportunityReviewForm({
         </p>
       </div>
       <form onSubmit={submit}>
-        <fieldset className="workflow-fields" disabled={busy}>
+        <fieldset className="workflow-fields" disabled={busy || assessing}>
           <div className="form-grid">
             <label className="field wide">
               <span>Strengths for this opportunity</span>
@@ -144,10 +152,9 @@ export function OpportunityReviewForm({
               </small>
             </label>
             <label className="field wide">
-              <span>Decision reason</span>
+              <span>Decision reason (optional)</span>
               <textarea
                 rows={3}
-                required={!!form.decision}
                 maxLength={50000}
                 value={form.reason}
                 onChange={(e) => set("reason", e.target.value)}
@@ -182,7 +189,7 @@ export function OpportunityReviewForm({
               Review saved
             </span>
           )}
-          <button className="button primary small" disabled={busy}>
+          <button className="button primary small" disabled={busy || assessing}>
             {busy ? "Saving…" : "Save review"}
           </button>
         </div>

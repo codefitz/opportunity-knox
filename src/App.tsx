@@ -19,7 +19,7 @@ import documentCategories from "../server/document-categories.json";
 import DocumentStudio from "./components/DocumentStudio";
 import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
-import DecisionReview, { FitCriteria } from "./components/DecisionReview";
+import { FitCriteria } from "./components/DecisionReview";
 import VectorIndex from "./components/VectorIndex";
 import {
   useState,
@@ -1948,7 +1948,7 @@ function OpportunityDetail({
           />
           </>
         )}{" "}
-        {tab === "decision" && <><OpportunityReviewForm key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/><DecisionReview opportunity={o} onError={onError} /></>}
+        {tab === "decision" && <><OpportunityReviewForm key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate} onError={onError}/></>}
         {tab === "offers" && <OpportunityOffers key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/>}
         {tab === "summary" && <><OpportunityBriefing id={o.id} revision={o.revision} timezone={timezone} onOpenSource={sourceId=>setTab(sourceId.startsWith("events:")?"timeline":sourceId.startsWith("activities:")?"activities":sourceId.startsWith("document:")?"documents":"overview")}/><Summary o={o} timezone={timezone} /></>}
         {tab === "buddy" && (

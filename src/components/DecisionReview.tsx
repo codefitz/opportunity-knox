@@ -4,23 +4,6 @@ import { api, json } from "../api";
 import type { Opportunity } from "../types";
 type Criterion = { id: string; description: string; priority: string };
 type Criteria = { revision: number; items: Criterion[] };
-type Assessment = {
-  id: string;
-  createdAt: string;
-  stale: boolean;
-  summary: string;
-  recommendation: string;
-  criteria: Criteria;
-  results: {
-    id: string;
-    status: string;
-    reason: string;
-    sourceIds: string[];
-    questions: string[];
-  }[];
-  sources: { id: string; name: string }[];
-  retrieval: { mode: string; reason: string; omittedChunks: number };
-};
 export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
   const [profile, setProfile] = useState<Criteria | null>(null),
     [busy, setBusy] = useState(false),
@@ -45,6 +28,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
           onSubmit={(e) => {
             e.preventDefault();
             setBusy(true);
+
             void api<Criteria>("/buddy/fit-criteria", json(profile, "PATCH"))
               .then((p) => {
                 setProfile(p);
@@ -143,233 +127,46 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     </section>
   );
 }
-export default function DecisionReview({
-  opportunity,
-  onError,
-}: {
+export type FitDraft = { strengths: string; gaps: string; effectiveAt: string };
+export default function DecisionReview({ opportunity, onError, onAssessed, onBusy, disabled = false }: {
   opportunity: Opportunity;
   onError: (e: unknown) => void;
+  onAssessed: (draft: FitDraft) => void;
+  disabled?: boolean;
+  onBusy: (busy: boolean) => void;
 }) {
-  const [state, setState] = useState<{
-      criteria: Criteria;
-      settings: { enabled: boolean };
-      documents: { id: string; name: string; generated: boolean }[];
-      assessments: Assessment[];
-    } | null>(null),
-    [selected, setSelected] = useState<string[]>([]),
-    [busy, setBusy] = useState(false);
-  const [activeRequest,setActiveRequest]=useState<string|null>(null);
-  const [automation, setAutomation] = useState<{
-    state: string;
-    tags: string;
-    fit: string;
-    requestId?:string;
-  } | null>(null);
-  const base = "/buddy/decisions/" + opportunity.id;
-  async function load() {
+  const [busy, setBusy] = useState(false);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  async function assess() {
+    setBusy(true);
+    onBusy(true);
+    setNotice("");
+    setError("");
+    const id = crypto.randomUUID();
+    setRequestId(id);
     try {
-      setState(await api(base));
-      const result = await api<{ automation: typeof automation }>(
-        "/buddy/automation/" + opportunity.id,
-      );
-      setAutomation(result.automation);
+      const result = await api<{reviewDraft: FitDraft}>("/buddy/decisions/" + opportunity.id, json({
+        revision: opportunity.revision, requestId: id, generalFit: true, documentIds: [],
+      }));
+      onAssessed(result.reviewDraft);
+      setNotice("Assessment filled in below. Review or edit it, then save your review.");
     } catch (e) {
+      setError(e instanceof Error ? e.message : "The fit assessment failed. Please retry.");
       onError(e);
+    } finally {
+      setBusy(false);
+      onBusy(false);
     }
   }
-  useEffect(() => {
-    void load();
-  }, [opportunity.id, opportunity.revision]);
-  useEffect(() => {
-    if (!automation || !["queued", "running", "cancelling"].includes(automation.state))
-      return;
-    const timer = window.setInterval(() => void load(), 4000);
-    return () => window.clearInterval(timer);
-  }, [automation?.state, opportunity.id]);
-  return (
-    <section className="buddy-panel">
-      <div className="settings-section-heading">
-        <div>
-          <h2>Opportunity fit assessment</h2>
-          <p>
-            New or edited opportunities are automatically tagged and assessed
-            against your saved criteria when a model is available. No criteria
-            need selecting here.
-          </p>
-          {automation && (
-            <p role="status">
-              Automation: {automation.state} · Tags: {automation.tags} · Fit:{" "}
-              {automation.fit}
-            </p>
-          )}
-          <AIRequestProgress id={automation?.requestId||null} cancellable={false} onError={onError}/>
-          {automation&&['queued','running','cancelling'].includes(automation.state)&&<button type="button" className="button secondary small" onClick={()=>void api('/buddy/automation/'+opportunity.id,json({cancel:true})).then(()=>load()).catch(onError)}>Cancel automatic review</button>}
-          <button
-            type="button"
-            className="button secondary small"
-            disabled={
-              busy ||
-              automation?.state === "running" ||
-              automation?.state === "queued" || automation?.state === "cancelling"
-            }
-            onClick={() => {
-              void api(
-                "/buddy/automation/" + opportunity.id,
-                json({ useLibrary: false }),
-              )
-                .then(() => load())
-                .catch(onError);
-            }}
-          >
-            Run / retry automatic review
-          </button>
-          <p>
-            Compare this role with your saved criteria. Recommendations are
-            advice; your opportunity stage and outcome stay under your control.
-          </p>
-        </div>
-      </div>
-      {!state ? (
-        <p>Loading assessment settings…</p>
-      ) : (
-        <>
-          <p>
-            {state.criteria.items.length} saved criteria · Decision model{" "}
-            {state.settings.enabled ? "enabled" : "off"}. Configure both in
-            Settings.
-          </p>
-          <details>
-            <summary>Saved criteria</summary>
-            <ul>
-              {state.criteria.items.map((c) => (
-                <li key={c.id}>
-                  {c.description} · {c.priority}
-                </li>
-              ))}
-            </ul>
-          </details>
-          <details>
-            <summary>
-              Choose supporting career evidence ({selected.length}/20)
-            </summary>
-            <div className="buddy-source-picker">
-              {state.documents
-                .filter((d) => !d.generated)
-                .map((d) => (
-                  <label key={d.id}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(d.id)}
-                      disabled={
-                        busy ||
-                        (!selected.includes(d.id) && selected.length >= 20)
-                      }
-                      onChange={(e) =>
-                        setSelected((s) =>
-                          e.target.checked
-                            ? [...s, d.id]
-                            : s.filter((id) => id !== d.id),
-                        )
-                      }
-                    />
-                    <span>{d.name}</span>
-                  </label>
-                ))}
-            </div>
-          </details>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button primary"
-              disabled={
-                busy || !state.settings.enabled || !state.criteria.items.length
-              }
-              onClick={() => {
-                setBusy(true);
-                const requestId=crypto.randomUUID();setActiveRequest(requestId);
-                void api(
-                  base,
-                  json({
-                    revision: opportunity.revision,
-                    requestId,
-                    criteriaRevision: state.criteria.revision,
-                    documentIds: selected,
-                  }),
-                )
-                  .then(() => load())
-                  .catch(e=>{setActiveRequest(null);onError(e);})
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {busy ? "Assessing…" : "Assess against my criteria"}
-            </button>
-            <AIRequestProgress id={activeRequest} scope={"decision:"+opportunity.id} onError={onError}/>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void load()}
-            >
-              Refresh
-            </button>
-          </div>
-          {!selected.length && (
-            <p className="buddy-muted">
-              Only the opportunity and your criteria will be assessed.
-              Candidate-experience questions may remain unknown without
-              supporting evidence.
-            </p>
-          )}
-          {state.assessments.map((a) => (
-            <article className="settings-section" key={a.id}>
-              <h3>
-                {a.recommendation.replaceAll("-", " ")}{" "}
-                {a.stale && (
-                  <span className="badge muted">Out of date — reassess</span>
-                )}
-              </h3>
-              <p className="buddy-muted">
-                {new Date(a.createdAt).toLocaleString()} · Criteria version{" "}
-                {a.criteria.revision}
-              </p>
-              <p>{a.summary}</p>
-              {a.results.map((row) => (
-                <div key={row.id}>
-                  <h4>
-                    {a.criteria.items.find((c) => c.id === row.id)?.description}{" "}
-                    · {a.criteria.items.find((c) => c.id === row.id)?.priority}{" "}
-                    · {row.status}
-                  </h4>
-                  <p>{row.reason}</p>
-                  <small>
-                    Evidence:{" "}
-                    {row.sourceIds
-                      .map(
-                        (id) => a.sources.find((s) => s.id === id)?.name || id,
-                      )
-                      .join(", ") || "No supporting source"}
-                  </small>
-                  {row.questions.length > 0 && (
-                    <ul>
-                      {row.questions.map((q, i) => (
-                        <li key={i}>{q}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
-              <p className="buddy-muted">
-                Search: {a.retrieval.mode}
-                {a.retrieval.reason
-                  ? " · " + a.retrieval.reason.replaceAll("-", " ")
-                  : ""}{" "}
-                · {a.retrieval.omittedChunks} passages omitted by context
-                limits.
-              </p>
-            </article>
-          ))}
-        </>
-      )}
-    </section>
-  );
+  return <div className="section-intro">
+    <button type="button" className="button primary" disabled={busy || disabled} onClick={() => void assess()}>
+      {busy ? "Assessing…" : "Run Automated Fit Assessment"}
+    </button>
+    <p>AI selects relevant career evidence and fills strengths, gaps and the review date. You can edit the result before saving.</p>
+    <AIRequestProgress id={requestId} scope={"decision:" + opportunity.id} onError={onError}/>
+    {error && <p role="alert">{error} Your review fields have been kept. You can retry the assessment.</p>}
+    {notice && <p role="status">{notice}</p>}
+  </div>;
 }
