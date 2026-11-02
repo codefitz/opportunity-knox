@@ -23,7 +23,7 @@ import {
 } from "./managed-folders.mjs";
 import { createUpdateChecker } from "./update-checker.mjs";
 import { renderJobPageWithBrowser, detectBrowserExecutable } from "./job-browser-render.mjs";
-import {documentCategory,validateCategory as categoryValue} from "./document-categories.mjs";
+import {documentCategory,inferDocumentClassification,validateCategory as categoryValue} from "./document-categories.mjs";
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
 import {createDirectorySources} from "./directory-sources.mjs";
@@ -1564,14 +1564,15 @@ export function createApp(options = {}) {
             : "";
           if (opportunityId) getRecord(opportunityId);
           const name = cleanDocumentName(body.name, true);
+          const inferred = inferDocumentClassification({ name, kind: body.kind, category: body.category, opportunityId });
           const kind = choice(
-            body.kind ?? "other",
+            body.kind ?? inferred.kind,
             ["jd", "cv", "cover", "reference", "other"],
             "document kind",
           );
           const status = choice(
-            body.status ?? "draft",
-            ["draft", "approved", "submitted"],
+            body.status ?? "",
+            ["", "draft", "approved", "submitted"],
             "document status",
           );
           if (
@@ -1589,7 +1590,7 @@ export function createApp(options = {}) {
             const existing = getDocuments().find((d) => d.importRequestId === importRequestId);
             if (existing) {
               const hash = createHash("sha256").update(content).digest("hex");
-              if (existing.sha256 !== hash || existing.name !== name || existing.opportunityId !== opportunityId || existing.kind !== kind || existing.status !== status || existing.category !== (body.category??documentCategory({kind,opportunityId}))) fail(409, "Import request ID was already used for a different document.");
+              if (existing.sha256 !== hash || existing.name !== name || existing.opportunityId !== opportunityId || existing.kind !== kind || existing.status !== status || existing.category !== inferred.category) fail(409, "Import request ID was already used for a different document.");
               return json(res, publicDocument(existing), 200);
             }
           }
@@ -1602,7 +1603,7 @@ export function createApp(options = {}) {
             content,
             notes: cleanText(body.notes ?? "", "Notes", 50000),
             tags: body.tags,
-            category:body.category,
+            category:inferred.category,
           });
           return json(res, document, 201);
         }
@@ -1932,7 +1933,7 @@ export function createApp(options = {}) {
             if (body.status !== undefined)
               doc.status = choice(
                 body.status,
-                ["draft", "approved", "submitted"],
+                ["", "draft", "approved", "submitted"],
                 "document status",
               );
             if(body.category!==undefined)doc.category=validateCategory(body.category);

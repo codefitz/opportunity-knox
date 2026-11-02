@@ -3010,8 +3010,7 @@ function Documents({
   selectedTag?: string;
   onSelectTag?: (tag: string) => void;
 }) {
-  const [kind, setKind] = useState(opportunityId ? "jd" : "reference"),
-    [status, setStatus] = useState("draft"),
+  const [kind, setKind] = useState(""),
     [notes, setNotes] = useState(""),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(""),
@@ -3038,10 +3037,10 @@ function Documents({
     [moving, setMoving] = useState(false),
     [organizing, setOrganizing] = useState(false);
   const [categoryFilter,setCategoryFilter]=useState(''),[uploadCategory,setUploadCategory]=useState(''),[bulkCategory,setBulkCategory]=useState(''),[categorising,setCategorising]=useState(false);
-  const queue=useUploadQueue(opportunityId, options=>{setKind(options.kind);setStatus(options.status);setNotes(options.notes);setUploadCategory(options.category);setBatchUploads(options.batchUploads);});
+  const queue=useUploadQueue(opportunityId, options=>{setKind(options.automaticDefaults ? options.kind : "");setNotes(options.notes);setUploadCategory(options.automaticDefaults ? options.category : "");setBatchUploads(options.batchUploads);});
   const files=queue.files,uploadAbort=useRef<AbortController|null>(null);
   useEffect(()=>()=>uploadAbort.current?.abort(),[]);
-  useEffect(()=>{if(queue.ready)void queue.saveOptions({kind,status,notes,category:uploadCategory,batchUploads});},[queue.ready,kind,status,notes,uploadCategory,batchUploads]);
+  useEffect(()=>{if(queue.ready)void queue.saveOptions({automaticDefaults:true,kind,status:"",notes,category:uploadCategory,batchUploads});},[queue.ready,kind,notes,uploadCategory,batchUploads]);
   const documents=useMemo(()=>allDocuments.filter(d=>!categoryFilter||d.category===categoryFilter),[allDocuments,categoryFilter]);
   async function categoriseSelected(){if(!bulkCategory||!selectedForMove.length)return;setCategorising(true);try{await api('/documents/categories',json({category:bulkCategory,documents:movableDocuments.filter(d=>selectedForMove.includes(d.id)).map(d=>({id:d.id,revision:d.revision??1}))}));setSelectedForMove([]);onChanged();onNotice?.('Document categories saved. Files stay in their current folders.');}catch(e){onError(e);}finally{setCategorising(false);}}
   const movableDocuments = documents.filter((d) => {
@@ -3181,7 +3180,7 @@ function Documents({
         try {
           const stored = await queue.attempt(item, {
               kind,
-              status,
+              status: "",
               notes,
               category: uploadCategory,
               batchUploads,
@@ -3192,7 +3191,7 @@ function Documents({
               opportunityId,
               name: item.path,
               contentBase64: await readFile(item.file),
-              kind: options.kind,
+              ...(options.kind ? { kind: options.kind } : {}),
               status: options.status,
               notes: options.notes,
               importRequestId: stored.id,
@@ -3387,6 +3386,7 @@ function Documents({
               <Field label="Document type">
                 <select value={kind} onChange={(e) => setKind(e.target.value)}>
                   {[
+                    ["", "Automatic for each file"],
                     ["jd", "Job description"],
                     ["cv", "CV"],
                     ["cover", "Cover letter"],
@@ -3399,17 +3399,8 @@ function Documents({
                   ))}
                 </select>
               </Field>
-              <Field label="Category"><select value={uploadCategory} onChange={e=>setUploadCategory(e.target.value)}><option value="">Automatic from document type</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></Field>
-              <Field label="Status">
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="approved">Approved</option>
-                  <option value="submitted">Submitted</option>
-                </select>
-              </Field>
+              <Field label="Category"><select value={uploadCategory} onChange={e=>setUploadCategory(e.target.value)}><option value="">Automatic for each file</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></Field>
+              <p className="muted">Type and category use each file’s name and folders. Unrecognised files use Other. Imports start without a status.</p>
               <Field label="Notes" wide>
                 <input
                   value={notes}
@@ -3940,6 +3931,7 @@ function Documents({
                                   }
                                 }}
                               >
+                                <option value="">No status</option>
                                 <option value="draft">Draft</option>
                                 <option value="approved">Approved</option>
                                 <option value="submitted">Submitted</option>

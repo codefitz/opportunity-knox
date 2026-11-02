@@ -2644,6 +2644,42 @@ test("retrying an import request returns the original document without another v
   assert.equal(conflict.status,409);
 });
 
+test("document imports infer each file independently, stay unclassified when unclear and start without status", async (t) => {
+  const f = await fixture(t); await f.setup();
+  const contentBase64 = Buffer.from("Fictional imported document bytes").toString("base64");
+  const cases = [
+    ["CVs/Fictional_Master_CV.pdf", "cv", "master-cv"],
+    ["CVs/Fictional-cover-letter.docx", "cover", "cover-letter"],
+    ["Job descriptions/Fictional role.pdf", "jd", "job-description"],
+    ["Fictional tailored resume.docx", "cv", "tailored-cv"],
+    ["Fictional-CV-template.docx", "other", "template"],
+    ["Fictional supporting statement.txt", "other", "supporting-statement"],
+    ["Fictional STAR story.md", "other", "star-story"],
+    ["Fictional reference.pdf", "reference", "reference"],
+    ["Fictional scan.pdf", "other", "other"],
+    ["Fictional overview.txt", "other", "other"],
+  ];
+  for (const [name, kind, category] of cases) {
+    const body = { name, contentBase64, importRequestId: "fictional-auto-" + cases.findIndex(c => c[0] === name).toString().padStart(4, "0") };
+    const first = await f.request("/api/documents", { method: "POST", body });
+    assert.equal(first.status, 201);
+    assert.equal(first.data.kind, kind, name); assert.equal(first.data.category, category, name);
+    assert.equal(first.data.status, "");
+    const retry = await f.request("/api/documents", { method: "POST", body });
+    assert.equal(retry.status, 200); assert.equal(retry.data.id, first.data.id);
+  }
+  const manual = await f.request("/api/documents", { method: "POST", body: { name: "Fictional CV.pdf", contentBase64, kind: "reference", category: "template" } });
+  assert.equal(manual.data.kind, "reference"); assert.equal(manual.data.category, "template");
+  const byCategory = await f.request("/api/documents", { method: "POST", body: { name: "Fictional scan.pdf", contentBase64, category: "master-cv" } });
+  assert.equal(byCategory.data.kind, "cv");
+  const approved = await f.request("/api/documents/" + byCategory.data.id, { method: "PATCH", body: { status: "approved", revision: byCategory.data.revision } });
+  assert.equal(approved.data.status, "approved");
+  const cleared = await f.request("/api/documents/" + byCategory.data.id, { method: "PATCH", body: { status: "", revision: approved.data.revision } });
+  assert.equal(cleared.status, 200); assert.equal(cleared.data.status, "");
+  await f.restart(); await f.login();
+  assert.equal((await f.request("/api/documents")).data.documents.find(d => d.id === byCategory.data.id).status, "");
+});
+
 test("backup inspection checks real snapshot hashes without changing the board", async (t) => {
   const f = await fixture(t); await f.setup();
   const doc = await f.request("/api/documents", {method:"POST",body:{name:"fictional.txt",kind:"reference",contentBase64:Buffer.from("fictional original").toString("base64")}});
@@ -3126,7 +3162,7 @@ test('templates stay selectable explicitly but are excluded from automatic Buddy
 
 test('application packs pin reviewed versions, freeze submission details and export exact bytes',async t=>{
  const f=await fixture(t);await f.setup();const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
- const bytes=Buffer.from('Fictional CV version one.');const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.txt',kind:'cv',status:'draft',opportunityId:op.id,contentBase64:bytes.toString('base64')}})).data;
+ const bytes=Buffer.from('Fictional CV version one.');const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.txt',opportunityId:op.id,contentBase64:bytes.toString('base64')}})).data;assert.equal(doc.status,'');
  const base='/api/opportunities/'+op.id+'/packs';assert.equal((await f.request(base,{auth:false})).status,401);
  let r=await f.request(base,{method:'POST',body:{revision:op.revision,title:'Fictional pack',documentIds:[doc.id],coverLetterNotRequired:true,supportingStatement:'Verified fictional supporting text.',answers:[{question:'Why this role?',answer:'Fictional supported answer.'}]}});assert.equal(r.status,201);const id=r.data.pack.id;
  r=await f.request(base+'/'+id+'/approve',{method:'POST',body:{revision:r.data.opportunity.revision,confirm:true}});assert.equal(r.status,200);assert.equal(r.data.pack.state,'approved');

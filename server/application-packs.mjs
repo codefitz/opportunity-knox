@@ -284,7 +284,7 @@ export function createApplicationPacks({
         db.exec("BEGIN");
         try {
           for (const d of docs)
-            if (d.status === "draft") {
+            if (!d.status || d.status === "draft") {
               d.status = "approved";
               d.revision++;
               putDocument(d);

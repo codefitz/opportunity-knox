@@ -204,7 +204,7 @@ export default function ApplicationPacks({
                       )
                     }
                   />
-                  {d.name} · v{d.version} · {d.status}
+                  {d.name} · v{d.version}{d.status ? ` · ${d.status}` : ""}
                 </label>
               ))}
               {!data?.documents.length && (

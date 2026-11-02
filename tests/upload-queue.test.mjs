@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {uploadQueue,queueStore} from '../src/lib/upload-queue.ts';
-const options={kind:'reference',status:'draft',notes:'Fictional evidence',category:'other',batchUploads:true};
+const options={automaticDefaults:true,kind:'',status:'',notes:'Fictional evidence',category:'',batchUploads:true};
 const item=(path='fictional.txt')=>({path,file:new File(['Fictional saved bytes'],path,{type:'text/plain'})});
 test('queued file bytes, paths and preferences survive reopening the database and deduplicate paths',async()=>{
  const scope='fictional-library';await uploadQueue.add(scope,[item('folder/fictional.txt'),item('folder/fictional.txt')]);await uploadQueue.options(scope,options);

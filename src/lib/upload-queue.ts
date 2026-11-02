@@ -6,6 +6,7 @@ export const uploadId = () =>
       ).join("");
 import type { DroppedFile } from "../api";
 export type UploadOptions = {
+  automaticDefaults?: boolean;
   kind: string;
   status: string;
   notes: string;

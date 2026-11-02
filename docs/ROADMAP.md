@@ -1,5 +1,9 @@
 # Implementation roadmap
 
+## Document upload defaults — 2 November 2026
+
+File and folder uploads start without a status. Type and category default to per-file inference from filenames and folder names, with manual overrides; unclear files use Other. Existing records retain their statuses, and approval/submission remain explicit later actions. Saved upload attempts retain their original options for safe retries. Automated coverage includes mixed imports, overrides, idempotent retries, restart persistence and approval/submission of documents imported without status; running-app/browser validation is separate.
+
 **Current status — 30 October 2026.** Core workflow and the defined existing-workflow integration phase are complete. AI integration and optional extensions are partial; completed work is struck through below. [PLAN.md](PLAN.md#remaining-work) is the canonical backlog and [PLAN_AUDIT.md](PLAN_AUDIT.md) reconciles the original 39 markers.
 
 ## Delivered and verified within the documented scope
