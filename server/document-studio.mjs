@@ -19,7 +19,7 @@ const run = promisify(execFile),
   fail = (s, m) => {
     throw Object.assign(new Error(m), { status: s });
   };
-export async function convertWord(bytes, folder) {
+export async function convertWord(bytes, folder, { thumbnail = false } = {}) {
   await safeWord(bytes);
   writeFileSync(join(folder, "document.docx"), bytes, { mode: 0o600 });
   const profile = join(folder, "profile");
@@ -75,18 +75,31 @@ export async function convertWord(bytes, folder) {
     fail(413, "Preview supports up to 30 pages. Shorten the draft first.");
   await run(
     "pdftoppm",
-    ["-scale-to", "1100", "-png", pdf, join(folder, "page")],
+    thumbnail ? ["-f","1","-l","1","-singlefile","-scale-to","400","-png",pdf,join(folder,"thumbnail")] : ["-scale-to", "1100", "-png", pdf, join(folder, "page")],
     { timeout: 30000, maxBuffer: 1024 * 1024 },
   );
-  return { pages, pdf: readFileSync(pdf) };
+  return { pages, pdf: readFileSync(pdf), ...(thumbnail?{thumbnailPath:join(folder,"thumbnail.png")}:{}) };
+}
+export async function renderPDFThumbnail(bytes,folder){
+  if(bytes.length>20*1024*1024)fail(413,"PDF preview exceeds 20 MB.");
+  if(!bytes.subarray(0,1024).includes(Buffer.from("%PDF-")))fail(400,"Choose a readable PDF.");
+  const pdf=join(folder,"document.pdf"),thumbnailPath=join(folder,"thumbnail.png");
+  writeFileSync(pdf,bytes,{mode:0o600});
+  try{await run("pdftoppm",["-f","1","-l","1","-singlefile","-scale-to","400","-png",pdf,join(folder,"thumbnail")],{timeout:30000,maxBuffer:1024*1024});}
+  catch{fail(502,"Could not render this PDF preview. The file is unchanged.");}
+  return {thumbnailPath};
 }
 export function createDocumentStudio({
   getDocuments,
   documentPath,
   saveDocument,
   convert = convertWord,
+  pdfThumbnail = renderPDFThumbnail,
+  googleDocuments,
 }) {
-  const previews = new Map();
+  const previews = new Map(), thumbnails=new Map(), pendingThumbnails=new Map();
+  let thumbnailQueue=Promise.resolve();
+  const isCV=d=>/\.(docx|pdf|gdoc)$/i.test(d.name)&&d.category!=="template"&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
   let busy = false;
   function clean() {
     for (const [id, p] of previews)
@@ -103,6 +116,7 @@ export function createDocumentStudio({
   const timer = setInterval(clean, 60000);
   timer.unref();
   function invalidate(documentIds = null) {
+    for(const id of thumbnails.keys())if(!documentIds||documentIds.includes(id))thumbnails.delete(id);
     for (const [id,preview] of previews) if (!documentIds || documentIds.includes(preview.sourceId)) {
       rmSync(preview.folder,{recursive:true,force:true});previews.delete(id);
     }
@@ -110,13 +124,54 @@ export function createDocumentStudio({
   return {
     invalidate,
     close() {
-      clearInterval(timer);
+      clearInterval(timer);thumbnails.clear();
       for (const p of previews.values())
         rmSync(p.folder, { recursive: true, force: true });
       previews.clear();
     },
     async handle(path, method, req, res, { json, readBody }) {
       clean();
+      if(path==="/api/document-studio/cv-styles"&&method==="GET"){
+        json(res,{documents:getDocuments().filter(isCV).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id}))});return true;
+      }
+      const thumbnailMatch=path.match(/^\/api\/document-studio\/cv-styles\/([^/]+)\/thumbnail$/)||path.match(/^\/api\/document-studio\/thumbnails\/([^/]+)$/);
+      if(thumbnailMatch&&method==="GET"){
+        const doc=find(thumbnailMatch[1]);if(!/\.(docx|pdf|gdoc|gsheet|gslides)$/i.test(doc.name))fail(400,"Preview supports PDF, Word and connected Google Workspace files.");
+        if(/\.(gdoc|gsheet|gslides)$/i.test(doc.name)&&!googleDocuments?.isConnected())fail(400,"Connect Google Docs in Career Hub to preview this shortcut.");
+        const st=statSync(documentPath(doc)),signature=`${doc.revision}:${doc.sha256}:${st.size}:${st.mtimeMs}`;
+        let cached=thumbnails.get(doc.id);
+        if(cached?.signature!==signature||cached.expiresAt<Date.now()){
+          if(!pendingThumbnails.has(doc.id)){
+            if(pendingThumbnails.size>=24)fail(429,"Style previews are busy. Try again shortly.");
+            const render=thumbnailQueue.then(async()=>{
+              const current=find(doc.id);if(current.revision!==doc.revision)fail(409,"CV changed. Refresh its style preview.");
+              const folder=mkdtempSync(join(tmpdir(),"knox-cv-thumbnail-"));
+              try{
+                let bytes=readFileSync(documentPath(current)),rendered;
+                if(/\.(gdoc|gsheet|gslides)$/i.test(current.name)){
+                  let id=current.externalSource?.id;
+                  if(!id){
+                    const raw=bytes.toString("utf8");
+                    try{const pointer=JSON.parse(raw);id=pointer.doc_id||pointer.id||pointer.resource_id?.replace(/^(document|spreadsheet|presentation):/,"");}catch{}
+                    id ||= raw.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+                  }
+                  if(!id)fail(400,"Google shortcut does not contain a readable document ID.");
+                  bytes=await googleDocuments.exportDocument(id,"application/pdf");
+                  rendered=await pdfThumbnail(bytes,folder);
+                }else if(/\.pdf$/i.test(current.name))rendered=await pdfThumbnail(bytes,folder);
+                else{await safeWord(bytes);rendered=await convert(bytes,folder,{thumbnail:true});}
+                const png=readFileSync(rendered.thumbnailPath||join(folder,"page-"+String(1).padStart(String(rendered.pages).length,"0")+".png"));
+                if(png.length>4*1024*1024)fail(413,"CV thumbnail is too large.");
+                if(thumbnails.size>=24)thumbnails.delete(thumbnails.keys().next().value);
+                const result={signature,bytes:png,expiresAt:Date.now()+5*60000};thumbnails.set(doc.id,result);return result;
+              }finally{rmSync(folder,{recursive:true,force:true});}
+            });
+            thumbnailQueue=render.catch(()=>{});pendingThumbnails.set(doc.id,render);
+          }
+          try{cached=await pendingThumbnails.get(doc.id);}finally{pendingThumbnails.delete(doc.id);}
+        }
+        res.writeHead(200,{"Content-Type":"image/png","Cache-Control":"no-store"});res.end(cached.bytes);return true;
+      }
       if (path === "/api/document-studio" && method === "GET") {
         json(res, {
           layouts,

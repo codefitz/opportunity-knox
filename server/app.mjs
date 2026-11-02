@@ -940,8 +940,8 @@ export function createApp(options = {}) {
   const backupSchedule=createBackupSchedule({getConfig,putConfig,createBackup,clock:options.backupClock,timers:options.backupTimers!==false,canRun:()=>!reliability.applying()});
   const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
   const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
-  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
+  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,googleDocuments});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
   const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
@@ -959,6 +959,7 @@ export function createApp(options = {}) {
     googleDocuments,
     fetcher: options.googleFetch || fetch,
     buddyFetch: options.buddyFetch,
+    pdfStyle: options.pdfStyle,
     embeddingFn: options.embeddingFn,
     automationEnabled:options.automationEnabled,
     scheduler:aiScheduler,

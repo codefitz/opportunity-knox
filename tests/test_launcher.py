@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 MODULE = Path(__file__).resolve().parents[1] / "scripts" / "launcher.py"
 spec = importlib.util.spec_from_file_location("board_launcher", MODULE)
@@ -226,6 +226,21 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertFalse((self.state / "pending-restart.json").exists())
         self.assertEqual(calls, [["restart", "--state-dir", str(self.state.resolve()), "--no-open", "--no-watch"]])
+
+    def test_in_app_restart_reloads_the_host_codex_adapter(self):
+        import sys, types
+        first, second = MagicMock(), MagicMock()
+        adapter = types.ModuleType("codex_buddy")
+        adapter.CodexWorker = MagicMock(side_effect=[first, second])
+        launcher.atomic_json(self.state / "pending-restart.json", {"requestId": "fictional-restart"})
+        with patch.dict(sys.modules, {"codex_buddy": adapter}), patch("importlib.reload", return_value=adapter) as reload_adapter, patch.object(launcher, "main", return_value=0), patch.object(launcher, "source_status", return_value={}), patch.object(launcher.time, "sleep", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                launcher.watch_loop(self.state)
+        first.close.assert_called_once()
+        second.close.assert_called_once()
+        reload_adapter.assert_called_once_with(adapter)
+        self.assertEqual(adapter.CodexWorker.call_count, 2)
+        self.assertEqual(launcher.read_json(self.state / "restart-status.json")["state"], "succeeded")
 
     def test_pending_vault_creates_and_mounts_host_vault(self):
         config, _ = launcher.make_config(self.args(), self.state)

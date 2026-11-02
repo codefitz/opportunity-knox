@@ -42,6 +42,8 @@ These four groups are separate from unfinished implementation; they are not reas
 
 ## Feature Requests
 
+- [ ] Optional MCP server for chat-client access to opportunities, career evidence and fit-review saving. See [MCP_PLAN.md](MCP_PLAN.md); planned for later, client/transport choice pending.
+
 - [x] ~~Single-pane Feedback form without visible history; private backend storage/export and optional opt-in AI-assisted GitHub issue drafting at submission time. Originals and historical reviews preserved; editable issue drafts require user review and submission on GitHub.~~
 
 - [x] ~~Separate embedding provider, endpoint, model and server-side API key configuration from Career Buddy chat settings (OpenAI, Ollama and custom compatible endpoints). No embedding requests or indexing are triggered by saving.~~

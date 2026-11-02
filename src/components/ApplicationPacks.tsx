@@ -1,3 +1,4 @@
+import TailorApplication from "./TailorApplication";
 import { useEffect, useState } from "react";
 import { api, json } from "../api";
 import type { Opportunity } from "../types";
@@ -59,6 +60,7 @@ export default function ApplicationPacks({
     [receipt, setReceipt] = useState(""),
     [advance, setAdvance] = useState(true),
     [notice, setNotice] = useState("");
+  const [management, setManagement] = useState(false);
   const [documentQuery, setDocumentQuery] = useState(""),
     [allTypes, setAllTypes] = useState(false);
   const matching = (data?.documents || []).filter(
@@ -118,7 +120,15 @@ export default function ApplicationPacks({
   }
   return (
     <section className="application-packs">
-      <h3>Application packs</h3>
+      <TailorApplication key={opportunity.id} opportunity={opportunity} onError={onError} onSaved={async (documentIds, hasCover) => {
+        const current = await api<{opportunityRevision:number;packs:Pack[]}>(base);
+        if(!current.packs.some(p=>p.state==="draft" && p.documents.length===documentIds.length && p.documents.every(d=>documentIds.includes(d.id))))
+          await api(base,json({revision:current.opportunityRevision,title:`${opportunity.company} — ${opportunity.role}`,documentIds,coverLetterNotRequired:!hasCover,supportingStatement:"",answers:[]}));
+        await load();setManagement(true);onChanged();
+      }}/>
+      <details className="application-review-expander" open={management} onToggle={e=>{if(e.target===e.currentTarget)setManagement(e.currentTarget.open);}}>
+      <summary>Review applications or use existing files</summary>
+      <h3>Review and submit</h3>
       <p>
         Group exact document versions, supporting text and application answers.
         Approve a pack after review, then record a submission you made outside
@@ -131,7 +141,7 @@ export default function ApplicationPacks({
           disabled={busy || editing !== null}
           onClick={() => edit()}
         >
-          New application pack
+          Use existing files (advanced)
         </button>
         <button
           type="button"
@@ -170,7 +180,8 @@ export default function ApplicationPacks({
               />
             </label>
             <fieldset className="field wide">
-              <legend>Exact document versions</legend>
+              <legend>Selected application documents</legend>
+              <details><summary>Choose existing files (advanced)</summary>
               <label className="field">
                 <span>Find pack documents</span>
                 <input
@@ -212,6 +223,7 @@ export default function ApplicationPacks({
                   Upload documents below or add them to Career Hub first.
                 </p>
               )}
+              </details>
             </fieldset>
             <label className="check-label">
               <input
@@ -509,6 +521,7 @@ export default function ApplicationPacks({
           )}
         </details>
       ))}
+      </details>
     </section>
   );
 }

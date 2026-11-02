@@ -7,6 +7,9 @@ export type BuddyRequestInfo = {
   timeoutSeconds?: number;
   errorCode?: string;
   preview?: string;
+  codexIssue?: string;
+  codexEventCount?: number;
+  codexLastEventAt?: string;
   timings?: Record<string, number>;
   responseMode?: string;
   cancellation?: string;
@@ -17,6 +20,10 @@ export const requestStage = (stage: string) =>
     "reading-pdf":"Reading PDF pages",
     ocr:"Reading scanned pages locally",
     preparing: "Preparing sources",
+    "searching-evidence": "Searching for additional evidence",
+    "reviewing-fit": "Completing the fit review",
+    "codex-reasoning": "Codex is assessing evidence",
+    "codex-error": "Codex reported an error or connection retry",
     "waiting-provider": "Waiting for the model",
     "reading-response": "Reading the response",
     "receiving-response": "Receiving the answer",
@@ -67,6 +74,8 @@ export default function BuddyRequestDetails({
       {(timings.length > 0 || request.cancellation) && (
         <details className="buddy-request-details">
           <summary>Response details</summary>
+          {request.codexIssue && <p>Codex diagnostic: {request.codexIssue.replaceAll("-", " ")}</p>}
+          {request.codexLastEventAt && <p>{request.codexEventCount} Codex events · Last activity: {new Date(request.codexLastEventAt).toLocaleTimeString()}</p>}
           <dl>
             {timings.map(([key, value]) => (
               <div key={key}>

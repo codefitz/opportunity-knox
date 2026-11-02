@@ -1520,6 +1520,41 @@ test("drafting requires actual career evidence and advice actions reject unrelat
   });
   assert.equal((await buddyChat(f, op.id)).status, 422);
 });
+test('automatic application tailoring chooses a source CV, respects visual layout choices and saves separate drafts',async t=>{
+ let sourceId, calls=0, contexts=[],selectionIds=[];
+ const f=await fixture(t,{buddyFetch:async(_,opts)=>{
+  calls++;const payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+  if(payload.candidates){selectionIds=payload.candidates.map(d=>d.id);return buddyResponse({sourceCvId:sourceId,layout:'executive',reason:'Relevant engineering CV.'});}
+  contexts.push(payload.context);
+  const kind=payload.request.startsWith('Write a')?'cover':'cv';
+  return buddyResponse(buddyReply({reply:'Review factual accuracy.',sourceIds:[sourceId],draft:{kind,title:'Fictional tailored '+kind,content:'# Alex Example\n\n## Experience\nEngineer | Fictional Systems | 2020–2026\n- Built Python reports.'}}));
+ }});await f.setup();await enableBuddy(f);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,role:'Engineering lead'}})).data;
+ const original='Alex Example\nEngineer | Fictional Systems | 2020–2026\nBuilt Python reports.';
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional Engineering CV.txt',kind:'cv',contentBase64:Buffer.from(original).toString('base64')}})).data;sourceId=source.id;
+ await f.request('/api/documents',{method:'POST',body:{name:'Fictional Product CV.txt',kind:'cv',contentBase64:Buffer.from('Fictional product management CV.').toString('base64')}});
+ const base='/api/opportunities/'+op.id+'/buddy';
+ const body={action:'cv',message:'Tailor my CV.',autoTailor:true,templateLayout:'compact',documentIds:[],includeOtherOpportunities:false,requestId:'fictional-auto-cv'};
+ const result=await f.request(base+'/chat',{method:'POST',body});assert.equal(result.status,200);assert.equal(calls,2);
+ const reply=result.data.messages.at(-1);assert.equal(reply.tailoring.sourceCvId,sourceId);assert.equal(reply.tailoring.layout,'compact');
+ assert.equal(contexts[0].sourceCV.text,original);assert.equal(contexts[0].layout,'compact');assert.ok(selectionIds.includes(sourceId));
+ const saveBody={title:reply.draft.title,content:reply.draft.content,layout:reply.tailoring.layout};
+ const saved=await f.request(base+'/draft/'+reply.id,{method:'POST',body:saveBody});assert.equal(saved.status,200);
+ const cv=saved.data.opportunity.documents[0];assert.equal(cv.status,'draft');assert.equal(cv.generation.sourceCvId,sourceId);
+ assert.equal((await f.request(source.url,{binary:true})).data.toString(),original);
+ assert.equal((await f.request(base+'/draft/'+reply.id,{method:'POST',body:saveBody})).data.opportunity.documents.length,1);
+ const covering=await f.request(base+'/chat',{method:'POST',body:{...body,action:'cover',message:'Write a cover letter.',sourceCvId:sourceId,requestId:'fictional-auto-cover'}});
+ assert.equal(covering.status,200);assert.equal(calls,3);assert.equal(covering.data.messages.at(-1).draft.kind,'cover');
+ const coverReply=covering.data.messages.at(-1);
+ const coverSaved=await f.request(base+'/draft/'+coverReply.id,{method:'POST',body:{title:coverReply.draft.title,content:coverReply.draft.content,layout:'compact'}});
+ assert.equal(coverSaved.status,200);assert.equal(coverSaved.data.opportunity.documents.at(-1).generation.layout,'letter');
+ const before=calls;
+ assert.equal((await f.request(base+'/chat',{method:'POST',body:{...body,sourceCvId:cv.id,requestId:'fictional-bad-generated'}})).status,400);assert.equal(calls,before);
+ assert.equal((await f.request(base+'/chat',{method:'POST',body:{...body,templateLayout:'unsupported',requestId:'fictional-bad-layout'}})).status,400);
+ await f.restart();await f.login();
+ const history=(await f.request(base)).data.messages;assert.ok(history.some(m=>m.id===reply.id&&m.tailoring.sourceCvId===sourceId));
+});
+
 test("CV drafts save a new editable Word document, keep submitted originals and include chats/text/key in private backups", async (t) => {
   const f = await fixture(t, {
     buddyFetch: async () =>
@@ -3033,13 +3068,11 @@ test('manual fit assessments fall back to the chat model with automatic fit disa
 });
 
 test('one-click fit review selects evidence without saved criteria and populates editable review fields',async t=>{
- let op,context;
+ let op,context,calls=0,invalid=false;
  const f=await fixture(t,{buddyFetch:async(_,opts)=>{
   context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
-  return buddyResponse(buddyReply({reply:JSON.stringify({recommendation:'consider',summary:'Review fictional fit.',criteria:[
-   {id:'strengths',status:'met',reason:'Relevant fictional engineering experience.',sourceIds:[context.excerpts[0].sourceId],questions:[]},
-   {id:'gaps',status:'unknown',reason:'Leadership experience needs clarification.',sourceIds:[],questions:[]}
-  ]})}));
+  calls++;
+  return buddyResponse({strengths:'Relevant fictional engineering experience.',gaps:'Leadership experience needs clarification.',sourceIds:invalid?['unavailable-source']:[context.excerpts[0].sourceId],searchQuery:calls===1?'leadership delivery':''});
  }});await f.setup();await enableBuddy(f);
  const workflow=(await f.request('/api/ai-workflow')).data;
  await f.request('/api/ai-workflow',{method:'PATCH',body:{...workflow,autoFit:false,autoTags:false}});
@@ -3047,11 +3080,14 @@ test('one-click fit review selects evidence without saved criteria and populates
  op=(await f.request('/api/opportunities',{method:'POST',body:{...opportunity,role:'Engineering lead'}})).data;
  const route='/api/buddy/decisions/'+op.id;
  const result=await f.request(route,{method:'POST',body:{revision:op.revision,generalFit:true,documentIds:[]}});
- assert.equal(result.status,200);assert.ok(context.excerpts.some(c=>c.sourceId===doc.id));
+ assert.equal(result.status,200);assert.equal(calls,2);assert.ok(context.excerpts.some(c=>c.sourceId===doc.id));
  assert.equal(result.data.reviewDraft.strengths,'Relevant fictional engineering experience.');
  assert.equal(result.data.reviewDraft.gaps,'Leadership experience needs clarification.');
  assert.ok(Number.isFinite(Date.parse(result.data.reviewDraft.effectiveAt)));
  assert.equal((await f.request('/api/opportunities/'+op.id)).data.revision,op.revision);
+ invalid=true;
+ assert.equal((await f.request(route,{method:'POST',body:{revision:op.revision,generalFit:true,documentIds:[]}})).status,502);
+ assert.equal((await f.request(route)).data.assessments.length,1);
  const saved=await f.request('/api/opportunities/'+op.id+'/review',{method:'PATCH',body:{revision:op.revision,...result.data.reviewDraft}});
  assert.equal(saved.status,200);assert.equal(saved.data.review.strengths,result.data.reviewDraft.strengths);
  await f.restart();await f.login();
@@ -3238,6 +3274,90 @@ test('document studio protects previews, records page-target warnings and saves 
  const saved=await f.request(save,{method:'POST',body:{confirm:true,format:'pdf'}});assert.equal(saved.status,200);assert.equal(saved.data.document.status,'draft');assert.notEqual(saved.data.document.id,source.id);assert.equal((await f.request(save,{method:'POST',body:{confirm:true,format:'pdf'}})).data.document.id,saved.data.document.id);
  assert.deepEqual((await f.request('/api/documents/'+source.id+'/content',{binary:true})).data,bytes);
  await f.request('/api/document-studio/'+rendered.data.id,{method:'DELETE'});assert.equal((await f.request(rendered.data.pdfUrl)).status,404);
+});
+
+test('previous CV gallery thumbnails are private, cached, invalidated and reusable for new drafts',async t=>{
+ const {layoutDraft}=await import('../server/document-layout.mjs');let renders=0,sourceId;
+ const f=await fixture(t,{documentConvert:async(_,folder)=>{renders++;writeFileSync(join(folder,'page-1.png'),Buffer.from('fictional-png'));return {pages:1,pdf:Buffer.from('fictional-pdf')};},buddyFetch:async(_,opts)=>{
+  const payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+  if(payload.candidates)return buddyResponse({sourceCvId,layout:'classic',reason:'Fictional source.'});
+  return buddyResponse(buddyReply({reply:'Review this draft.',sourceIds:[sourceId],draft:{kind:'cv',title:'New CV',content:'# New Candidate\n\n## Experience\nVerified new content.'}}));
+ }});await f.setup();await enableBuddy(f);
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.txt',kind:'cv',contentBase64:Buffer.from('New Candidate. Verified new content.').toString('base64')}})).data;sourceId=source.id;
+ const bytes=await layoutDraft('Previous CV','# Prior Candidate\n\nOld private content.','executive');
+ const style=(await f.request('/api/documents',{method:'POST',body:{name:'Previous CV.docx',kind:'cv',contentBase64:bytes.toString('base64')}})).data;
+ await f.request('/api/documents',{method:'POST',body:{name:'CV template.docx',kind:'cv',category:'template',contentBase64:bytes.toString('base64')}});
+ const gallery='/api/document-studio/cv-styles';
+ assert.equal((await f.request(gallery,{auth:false})).status,401);
+ const listing=(await f.request(gallery)).data.documents;assert.deepEqual(listing.map(d=>d.id),[style.id]);
+ const thumb=listing[0].thumbnailUrl;
+ assert.equal((await f.request(thumb,{auth:false})).status,401);
+ assert.equal((await f.request(thumb,{binary:true})).data.toString(),'fictional-png');
+ await f.request(thumb);assert.equal(renders,1);
+ let updated=(await f.request('/api/documents/'+style.id,{method:'PATCH',body:{revision:style.revision,notes:'Changed metadata'}})).data;
+ assert.equal((await f.request(thumb)).status,200);assert.equal(renders,2);
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const base='/api/opportunities/'+op.id+'/buddy';
+ const body={action:'cv',message:'Tailor CV.',autoTailor:true,templateLayout:'classic',sourceCvId:source.id,styleDocumentId:style.id,styleDocumentRevision:updated.revision,documentIds:[],includeOtherOpportunities:false,requestId:'fictional-previous-style'};
+ const draft=await f.request(base+'/chat',{method:'POST',body});assert.equal(draft.status,200);
+ const reply=draft.data.messages.at(-1);assert.equal(reply.tailoring.styleDocumentId,style.id);
+ const save={title:reply.draft.title,content:reply.draft.content};
+ const saved=await f.request(base+'/draft/'+reply.id,{method:'POST',body:save});assert.equal(saved.status,200);
+ const doc=saved.data.opportunity.documents.at(-1);assert.equal(doc.generation.layout,'previous');assert.equal(doc.generation.styleDocumentId,style.id);
+ const zip=await (await import('jszip')).default.loadAsync((await f.request(doc.url,{binary:true})).data);
+ const xml=await zip.file('word/document.xml').async('string');assert.match(xml,/Verified new content/);assert.doesNotMatch(xml,/Prior Candidate|Old private/);
+ await f.request('/api/documents/'+style.id,{method:'PATCH',body:{revision:updated.revision,notes:'Style changed again'}});
+ assert.equal((await f.request(base+'/draft/'+reply.id,{method:'POST',body:save})).status,409);
+ assert.equal((await f.request(base+'/chat',{method:'POST',body:{...body,requestId:'fictional-stale-style'}})).status,409);
+ assert.deepEqual((await f.request(style.url,{binary:true})).data,bytes);
+});
+
+test('PDF and connected Google CV styles are selectable and applied to separate Word drafts',async t=>{
+ const {layoutDraft}=await import('../server/document-layout.mjs');
+ let googleWord=await layoutDraft('Google reference','# Reference Person\n\nPrivate old text.','executive');
+ const profile={body:{font:'Liberation Serif',size:11,color:'202820'},title:{font:'Liberation Serif',size:24,color:'204080'},heading:{font:'Liberation Serif',size:14,color:'204080'},page:{width:595,height:842,top:40,bottom:36,left:48,right:48},line:14};
+ let sourceId;
+ const f=await fixture(t,{pdfStyle:async bytes=>{assert.match(bytes.toString(),/^%PDF-/);return profile;},googleFetch:async()=>new Response(googleWord),buddyFetch:async()=>buddyResponse(buddyReply({reply:'Review layout.',sourceIds:[sourceId],draft:{kind:'cv',title:'New CV',content:'# New Candidate\n\n## Experience\nVerified new achievement.'}}))});await f.setup();await enableBuddy(f);
+ const source=(await f.request('/api/documents',{method:'POST',body:{name:'Source CV.txt',kind:'cv',contentBase64:Buffer.from('New Candidate. Verified new achievement.').toString('base64')}})).data;sourceId=source.id;
+ const pdf=(await f.request('/api/documents',{method:'POST',body:{name:'Reference CV.pdf',kind:'cv',contentBase64:Buffer.from('%PDF-fictional-style').toString('base64')}})).data;
+ const google=(await f.request('/api/documents',{method:'POST',body:{name:'Google reference CV.gdoc',kind:'cv',contentBase64:Buffer.from(JSON.stringify({doc_id:'fictionalGoogleStyle'})).toString('base64')}})).data;
+ const op=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+ const base='/api/opportunities/'+op.id+'/buddy';
+ const body={action:'cv',message:'Tailor CV.',autoTailor:true,templateLayout:'classic',sourceCvId:source.id,documentIds:[],includeOtherOpportunities:false};
+ const draft=await f.request(base+'/chat',{method:'POST',body:{...body,styleDocumentId:pdf.id,styleDocumentRevision:pdf.revision,requestId:'fictional-pdf-style'}});assert.equal(draft.status,200);
+ const reply=draft.data.messages.at(-1);assert.equal(reply.tailoring.styleProfile.title.color,'204080');
+ const saved=await f.request(base+'/draft/'+reply.id,{method:'POST',body:{title:'New CV',content:reply.draft.content}});assert.equal(saved.status,200);
+ const doc=saved.data.opportunity.documents.at(-1);assert.equal(doc.generation.styleMatch,'recreated');assert.equal(doc.generation.styleDocumentId,pdf.id);
+ const zip=await (await import('jszip')).default.loadAsync((await f.request(doc.url,{binary:true})).data);assert.match(await zip.file('word/styles.xml').async('string'),/Liberation Serif/);assert.match(await zip.file('word/styles.xml').async('string'),/204080/);
+ assert.equal((await f.request(base+'/chat',{method:'POST',body:{...body,styleDocumentId:google.id,styleDocumentRevision:google.revision,requestId:'fictional-google-disconnected'}})).status,400);
+ testConfig(f,'googleDocuments',{revision:1,tokens:{access_token:'fictional-access-token',expiresAt:Date.now()+3600000}});
+ const g=await f.request(base+'/chat',{method:'POST',body:{...body,styleDocumentId:google.id,styleDocumentRevision:google.revision,requestId:'fictional-google-style'}});assert.equal(g.status,200);
+ const gr=g.data.messages.at(-1),savePath=base+'/draft/'+gr.id;
+ const gs=await f.request(savePath,{method:'POST',body:{title:'Google styled CV',content:gr.draft.content}});assert.equal(gs.status,200);
+ googleWord=await layoutDraft('Changed Google reference','# Reference Person\nNew style.','compact');
+ assert.equal((await f.request(savePath,{method:'POST',body:{title:'Changed wording',content:gr.draft.content}})).status,409);
+ assert.equal((await f.request(pdf.url,{binary:true})).data.toString(),'%PDF-fictional-style');
+});
+
+test('existing PDF and Google shortcut files get private thumbnails and preview-only CV gallery entries',async t=>{
+ let pdfRenders=0,exports=0;
+ const f=await fixture(t,{documentThumbnail:async(bytes,folder)=>{pdfRenders++;assert.match(bytes.toString(),/^%PDF-/);const thumbnailPath=join(folder,'thumbnail.png');writeFileSync(thumbnailPath,'fictional-thumbnail');return {thumbnailPath};},googleFetch:async url=>{exports++;assert.match(String(url),/fictionalGoogle/);assert.match(String(url),/mimeType=application%2Fpdf/);return new Response('%PDF-fictional-google');}});await f.setup();
+ const pdf=(await f.request('/api/documents',{method:'POST',body:{name:'Existing CV.pdf',kind:'cv',contentBase64:Buffer.from('%PDF-fictional-existing').toString('base64')}})).data;
+ const google=(await f.request('/api/documents',{method:'POST',body:{name:'Existing CV.gdoc',kind:'cv',contentBase64:Buffer.from(JSON.stringify({doc_id:'fictionalGoogle'})).toString('base64')}})).data;
+ const route='/api/document-studio/thumbnails/';
+ assert.equal((await f.request(route+pdf.id,{auth:false})).status,401);
+ assert.equal((await f.request(route+pdf.id,{binary:true})).data.toString(),'fictional-thumbnail');assert.equal(pdfRenders,1);
+ await f.request(route+pdf.id);assert.equal(pdfRenders,1);
+ assert.equal((await f.request(route+google.id)).status,400);assert.equal(exports,0);
+ testConfig(f,'googleDocuments',{revision:1,tokens:{access_token:'fictional-access-token',expiresAt:Date.now()+3600000}});
+ assert.equal((await f.request(route+google.id,{binary:true})).data.toString(),'fictional-thumbnail');assert.equal(exports,1);assert.equal(pdfRenders,2);
+ testConfig(f,'googleDocuments',{revision:2,tokens:null});
+ assert.equal((await f.request(route+google.id)).status,400);assert.equal(exports,1);
+ const gallery=(await f.request('/api/document-studio/cv-styles')).data.documents;
+ assert.equal(gallery.length,2);assert.ok(gallery.every(d=>d.reusable===true));assert.ok(gallery.some(d=>d.format==='pdf'));assert.ok(gallery.some(d=>d.format==='gdoc'));
+ assert.equal((await f.request(pdf.url,{binary:true})).data.toString(),'%PDF-fictional-existing');
+ const text=(await f.request('/api/documents',{method:'POST',body:{name:'Notes.txt',contentBase64:Buffer.from('Fictional notes.').toString('base64')}})).data;
+ assert.equal((await f.request(route+text.id)).status,400);
 });
 
 test('document studio detects source changes before save and reports renderer failures without creating files',async t=>{

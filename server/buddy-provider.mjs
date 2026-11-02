@@ -336,7 +336,7 @@ export function providerRequest(config, system, messages) {
                       type: "json_schema",
                       name: "career_buddy",
                       strict: true,
-                      schema: BUDDY_SCHEMA,
+                      schema: config.outputSchema || BUDDY_SCHEMA,
                     }
                   : { type: "json_object" },
             },
@@ -355,7 +355,7 @@ export function providerRequest(config, system, messages) {
       ...(mode === "schema"
         ? {
             output_config: {
-              format: { type: "json_schema", schema: BUDDY_SCHEMA },
+              format: { type: "json_schema", schema: config.outputSchema || BUDDY_SCHEMA },
             },
           }
         : {}),
@@ -379,7 +379,7 @@ export function providerRequest(config, system, messages) {
           ? {
               responseMimeType: "application/json",
               ...(mode === "schema"
-                ? { responseJsonSchema: BUDDY_SCHEMA }
+                ? { responseJsonSchema: config.outputSchema || BUDDY_SCHEMA }
                 : {}),
             }
           : {}),
@@ -394,7 +394,7 @@ export function providerRequest(config, system, messages) {
       messages: all,
       options: { num_predict: config.maxOutputTokens || 8000 },
       ...(mode !== "prompt"
-        ? { format: mode === "schema" ? BUDDY_SCHEMA : "json" }
+        ? { format: mode === "schema" ? (config.outputSchema || BUDDY_SCHEMA) : "json" }
         : {}),
     };
   } else {
@@ -414,7 +414,7 @@ export function providerRequest(config, system, messages) {
                     json_schema: {
                       name: "career_buddy",
                       strict: true,
-                      schema: BUDDY_SCHEMA,
+                      schema: config.outputSchema || BUDDY_SCHEMA,
                     },
                   }
                 : { type: "json_object" },
@@ -607,7 +607,7 @@ export async function callProvider(
   const began=performance.now();
   config.onDiagnostics?.({promptHash:createHash("sha256").update(system).digest("hex")});
   try {
-    if(config.provider==="codex")return await runLocalCodex(config,system,messages,BUDDY_SCHEMA);
+    if(config.provider==="codex")return await runLocalCodex(config,system,messages,config.outputSchema || BUDDY_SCHEMA);
     const result=await providerJSON(config,providerRequest(config,system,messages),fetcher,resolve,(config.requestTimeoutSeconds||120)*1000);
     if(!result[streamedText]){const model=reportedModel(config.provider,result);if(model)config.onDiagnostics?.({reportedModel:model});const usage=providerUsage(config.provider,result);if(Object.keys(usage).length)config.onDiagnostics?.({usage:{...usage,complete:true}});}
     if(config.provider==="ollama")config.onDiagnostics?.(ollamaTimings(result));

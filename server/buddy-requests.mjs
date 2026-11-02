@@ -8,6 +8,10 @@ const stages = new Set([
   "reading-pdf",
   "ocr",
   "preparing",
+  "searching-evidence",
+  "reviewing-fit",
+  "codex-reasoning",
+  "codex-error",
   "waiting-provider",
   "reading-response",
   "receiving-response",
@@ -204,6 +208,9 @@ export function createBuddyRequests(db, { getConfig = () => null } = {}) {
             /^[a-f0-9]{64}$/.test(values.promptHash)
           )
             record.promptHash = values.promptHash;
+          if(["rate-limit","authentication","connection","schema","provider-error"].includes(values?.codexIssue))record.codexIssue=values.codexIssue;
+          if(Number.isSafeInteger(values?.codexEventCount)&&values.codexEventCount>=0)record.codexEventCount=values.codexEventCount;
+          if(typeof values?.codexLastEventAt==="string"&&Number.isFinite(Date.parse(values.codexLastEventAt)))record.codexLastEventAt=new Date(values.codexLastEventAt).toISOString();
           record.cost = estimateCost(record);
           for (const [key, value] of Object.entries(values || {})) {
             if (

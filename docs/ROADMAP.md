@@ -1,5 +1,33 @@
 # Implementation roadmap
 
+## Select PDF and Google CV style references — 2 November 2026
+
+Previous PDF CVs are now selectable with the same radio controls as Word CVs. The bundled PDF tools extract first-page typography, colour, spacing and page settings into a formatting-only profile; saved drafts recreate those settings in editable Word files without copying the reference’s text. Complex graphics/sidebars are approximated, and image-only PDFs report that no readable style can be extracted. Connected Google Docs use a live Word export with a core-content/style snapshot check before saving. The source CV used for factual tailoring remains independent. Fictional automated coverage checks style transfer, source preservation and Google snapshot conflicts; a native Docker PDF→Word render was visually checked and the PDF selection/draft/save flow passed a disposable-browser test with a fixture model.
+
+## Existing-file thumbnails and compact selection controls — 2 November 2026
+
+Saved document rows now show lazy first-page thumbnails for Word/PDF and Google Workspace shortcuts when the board’s Google connection can export them. The previous-CV gallery includes PDF and Google Doc CVs as preview-only entries; native style reuse remains a Word operation. Thumbnails are private, bounded and cached; PDF/Word thumbnail rendering processes only the first page. Checkbox/radio controls use native 14px sizing, and text-field styling excludes those controls.
+
+## Compact document workflow and previous CV styles — 2 November 2026
+
+Tailoring and file uploads now start behind expanders. The old studio selector is replaced by separate horizontally scrollable template and previous Word CV thumbnail galleries, with filename filtering and bounded batches for larger libraries. Previous CV thumbnails render actual first pages under authenticated, bounded caching. New drafts can reuse previous CV typography, paragraph spacing and page settings while keeping factual source selection independent; old CV text, headers and sidebars are not copied. Revision/hash checks reject changed style sources. Existing originals and submission records are preserved; underlying preview/export APIs remain.
+
+## Simple AI CV tailoring — 2 November 2026
+
+The opportunity Documents tab now starts with Tailor a new CV, an optional cover-letter checkbox and rendered Classic/Compact/Executive template thumbnails (or Let AI choose). AI selects a readable source CV from a bounded shortlist, drafts against the full chosen CV plus retrieved evidence and shows the chosen source/layout. Editable text is reviewed before saving new Word drafts and automatically assembling their application. Previous draft groups restore on reopening; approval/submission and original-file preservation remain unchanged. Existing-file selection is an advanced, collapsed flow. Fictional server and browser checks cover source selection, layout override, optional cover drafting and saving; real-model document quality and final page layout require review.
+
+## Host helper refresh on in-app restart — 2 November 2026
+
+In-app restarts now close and reload the host Codex adapter after updating the board. Previously the long-running watcher retained its imported helper code, so rebuilding the container could leave Codex requests using an older command and no event diagnostics. Launcher regression coverage checks that both old and replacement helper lifecycles are handled.
+
+## Incremental fit reviews and Codex diagnostics — 2 November 2026
+
+Manual fit reviews request concise strengths/gaps and evidence references directly, using up to six automatically selected documents and 16,000 excerpt characters for the first pass. A model-requested focused search permits one additional pass (up to 12,000 extra characters) within the remaining request budget. Retrieval uses role requirements, removes duplicate excerpts and omits unrelated opportunity history. Fields remain editable before saving; invalid, cancelled or conflicting results are not applied. Codex uses JSON event diagnostics (activity count/time and bounded error categories), reported usage and low reasoning effort for fit reviews; prompt and reasoning text are not persisted in diagnostics. Live fictional helper smoke tests completed in 5.3 seconds with small context and 5.8 seconds with roughly 16,000 characters of evidence; these synthetic checks do not establish real-corpus or browser acceptance.
+
+## Planned: chat-client MCP integration — 2 November 2026
+
+[MCP_PLAN.md](MCP_PLAN.md) defines a small server exposing opportunity lookup, career evidence retrieval and revision-safe fit-review saving to a compatible chat client. This is a future implementation plan; no MCP server or client connection is delivered.
+
 ## One-click fit review — 2 November 2026
 
 Run Automated Fit Assessment now appears at the top of the fit review and fills editable Strengths, Gaps and review date/time. It automatically selects relevant career evidence and assesses role requirements without requiring saved criteria or an evidence picker. Results remain reviewable before Save review; decisions and stage changes remain explicit. The enabled decision model falls back to the Career Buddy LLM. Existing saved assessments and optional background-review settings are preserved. Automated tests cover evidence selection, no-criteria operation, review fields and persistence; browser and real-provider acceptance remain separate.

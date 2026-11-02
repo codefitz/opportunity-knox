@@ -1132,7 +1132,7 @@ small {
   color: var(--muted);
   line-height: 1.65;
 }
-.field input,
+.field input:not([type="checkbox"]):not([type="radio"]),
 .field select,
 .field textarea,
 input[type="datetime-local"],
@@ -1150,7 +1150,7 @@ input[type="datetime-local"],
 textarea {
   resize: vertical;
 }
-.field input::placeholder,
+.field input:not([type="checkbox"]):not([type="radio"])::placeholder,
 .field textarea::placeholder {
   color: var(--muted);
 }
@@ -2289,7 +2289,7 @@ textarea {
   .form-grid .field {
     font-size: 10px;
   }
-  .field input,
+  .field input:not([type="checkbox"]):not([type="radio"]),
   .field select,
   .field textarea {
     font-size: 11px;
@@ -4189,7 +4189,7 @@ textarea {
 
 .opportunity-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .workspace-action-dialog .field { font-size: 13px; }
-.workspace-action-dialog .field input { font-size: 13px; min-height: 40px; }
+.workspace-action-dialog .field input:not([type="checkbox"]):not([type="radio"]) { font-size: 13px; min-height: 40px; }
 
 /* The board owns the viewport; other workspace pages keep their regular shell. */
 .opportunity-filter-details > summary { display: none; }
@@ -4255,3 +4255,35 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .main-shell, .sidebar-toggle { transition: none; }
 }
+
+.tailor-application { margin-bottom: 1.5rem; }
+.template-option { display: flex; flex-direction: column; gap: .5rem; padding: .75rem; border: 2px solid var(--line); border-radius: .6rem; cursor: pointer; min-width: 0; }
+.template-option.selected { border-color: var(--green); outline: 1px solid var(--green); }
+.template-option:focus-within { outline: 3px solid var(--green); outline-offset: 2px; }
+.template-option img { width: 100%; height: 180px; object-fit: contain; background: white; border: 1px solid #ddd; }
+.template-auto { justify-content: center; }
+.template-option small { font-size: .8rem; }
+.tailored-draft { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); border-radius: .6rem; }
+.tailored-draft textarea { width: 100%; line-height: 1.5; }
+
+.tailor-application > summary, .document-upload-expander > summary { cursor: pointer; font-size: 1.05rem; font-weight: 650; padding: .8rem 0; }
+.document-upload-expander { margin: .75rem 0 1rem; border-block: 1px solid var(--line); }
+.cv-style-choices { border: 0; padding: 0; margin: 1rem 0; min-width: 0; }
+.cv-style-choices legend { font-weight: 650; }
+.cv-style-choices h4 { margin: 1rem 0 .5rem; }
+.cv-style-strip { display: flex; gap: .8rem; overflow-x: auto; padding: .3rem .25rem .75rem; scroll-snap-type: x proximity; }
+.cv-style-strip .template-option { flex: 0 0 170px; scroll-snap-align: start; }
+.cv-style-strip .template-option strong { overflow-wrap: anywhere; }
+.cv-style-strip .template-option img { height: 155px; }
+.cv-thumbnail-unavailable { height: 155px; display: grid; place-content: center; background: var(--panel-soft); font-size: .8rem; }
+
+.application-packs { padding: 0; margin-bottom: 0; border: 0; background: transparent; }
+.application-packs > details.tailor-application, .application-packs > details.application-review-expander { margin: 0; padding: 0; border-top: 0; border-bottom: 1px solid var(--line); }
+.application-review-expander > summary { padding: .8rem 0; font-size: 1.05rem; font-weight: 650; }
+
+input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height:0; max-width:14px; padding:0; margin:0; flex:0 0 14px; vertical-align:middle; accent-color:var(--green); }
+.check-label { display:flex; align-items:center; gap:8px; }
+.template-option input:is([type="checkbox"],[type="radio"]) { display:inline-block; }
+.document-row-thumbnail { width:56px; height:76px; flex:0 0 56px; object-fit:contain; border:1px solid var(--line); border-radius:4px; background:white; }
+.document-thumbnail-fallback { display:inline-grid; place-items:center; color:var(--muted); background:var(--panel-soft); }
+.cv-style-strip .document-thumbnail-fallback { width:100%; height:155px; }

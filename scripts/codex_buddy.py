@@ -2,9 +2,10 @@
 import json, os, re, shutil, signal, subprocess, tempfile, threading, time
 from pathlib import Path
 
-def command(executable, directory, schema, output, model):
-    args=[executable,'exec','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','-C',str(directory),'--output-schema',str(schema),'-o',str(output)]
+def command(executable, directory, schema, output, model, effort=None):
+    args=[executable,'exec','--json','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','-C',str(directory),'--output-schema',str(schema),'-o',str(output)]
     for key,value in {'features.shell_tool':'false','features.apps':'false','features.plugins':'false','features.memories':'false','features.request_permissions_tool':'false','skills.bundled.enabled':'false','skills.include_instructions':'false','web_search':'"disabled"','project_doc_max_bytes':'0','approval_policy':'"never"'}.items():args+=['-c',key+'='+value]
+    if effort in ('low','medium','high'):args+=['-c','model_reasoning_effort='+json.dumps(effort)]
     if model!='default':args+=['-m',model]
     return args+['-']
 
@@ -59,24 +60,48 @@ class CodexWorker:
                         schema=Path(temp)/'schema.json';schema.write_text(json.dumps(job['schema']));output=Path(temp)/'answer.json'
                         env={k:v for k,v in os.environ.items() if k not in ('OPENAI_API_KEY','CODEX_API_KEY','CODEX_ACCESS_TOKEN')}
                         execution_started=time.monotonic()
-                        self.process=subprocess.Popen(command(self.executable,temp,schema,output,model),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True,start_new_session=True,env=env)
-                        self.write(progress,{'stage':'running-codex'})
-                        first=True
+                        prompt=Path(temp)/'prompt.txt';prompt.write_text(job['prompt']);prompt.chmod(0o600)
+                        details={'stage':'running-codex','eventCount':0}
+                        def events(process):
+                            while True:
+                                line=process.stdout.readline(65537)
+                                if not line:break
+                                if len(line)>65536:
+                                    while line and not line.endswith('\n'):line=process.stdout.readline(65537)
+                                    continue
+                                try:event=json.loads(line)
+                                except (ValueError,TypeError):continue
+                                if not isinstance(event,dict):continue
+                                kind=event.get('type')
+                                if kind not in ('thread.started','turn.started','turn.completed','turn.failed','item.started','item.updated','item.completed','error'):continue
+                                details['eventCount']+=1;details['lastEventAt']=time.time()
+                                if kind in ('error','turn.failed'):
+                                    details['stage']='codex-error'
+                                    message=str(event.get('message',event.get('error',''))).lower()
+                                    details['issue']='rate-limit' if 'rate limit' in message or '429' in message else 'authentication' if '401' in message or 'unauthorized' in message else 'connection' if 'connect' in message or 'stream' in message else 'schema' if 'schema' in message else 'provider-error'
+                                elif kind.startswith('item.'):
+                                    details['stage']='codex-reasoning' if event.get('item',{}).get('type')=='reasoning' else 'receiving-response'
+                                elif kind=='turn.started':details['stage']='running-codex'
+                                if kind=='turn.completed':
+                                    usage=event.get('usage',{});details['usage']={k:v for k,v in usage.items() if k in ('input_tokens','cached_input_tokens','output_tokens','reasoning_output_tokens') and type(v) is int and v>=0}
+                                self.write(progress,dict(details))
+                        with prompt.open() as input_file:
+                            self.process=subprocess.Popen(command(self.executable,temp,schema,output,model,job.get('reasoningEffort')),stdin=input_file,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,start_new_session=True,env=env)
+                        self.write(progress,dict(details))
+                        reader=threading.Thread(target=events,args=(self.process,),daemon=True);reader.start()
                         deadline=min(job['expiresAt'],time.time()+900)
-                        while True:
+                        while self.process.poll() is None:
                             if cancel.exists() or self.stop.is_set() or time.time()>=deadline:
                                 try:os.killpg(self.process.pid,signal.SIGKILL)
                                 except ProcessLookupError:pass
-                                self.process.wait()
+                                self.process.wait();reader.join(timeout=1);self.process.stdout.close()
                                 raise RuntimeError('Codex request cancelled.' if cancel.exists() or self.stop.is_set() else 'Codex request exceeded its configured deadline.')
-                            try:
-                                self.process.communicate(job['prompt'] if first else None,timeout=.2)
-                                break
-                            except subprocess.TimeoutExpired:first=False
+                            self.stop.wait(.1)
+                        reader.join(timeout=1);self.process.stdout.close()
                         if self.process.returncode or not output.exists():raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
                         if output.stat().st_size>2*1024*1024:raise ValueError()
                         answer=output.read_text();json.loads(answer)
-                        if job['expiresAt']>=time.time():self.write(response,{'output':answer,'timings':{'executionMs':round((time.monotonic()-execution_started)*1000)}})
+                        if job['expiresAt']>=time.time():self.write(response,{'output':answer,'timings':{'executionMs':round((time.monotonic()-execution_started)*1000)},'usage':details.get('usage',{})})
                 except RuntimeError as e:self.write(response,{'error':str(e),'errorCode':'deadline' if 'exceeded its configured deadline' in str(e) else 'cancelled' if str(e)=='Codex request cancelled.' else 'codex-failed'})
                 except (OSError,ValueError,KeyError,TypeError):self.write(response,{'error':'The Codex request could not be processed.'})
                 finally:

@@ -100,9 +100,41 @@ export async function layoutDraft(
   layout = "classic",
   templateBytes,
 ) {
-  if (!layouts.some((l) => l.id === layout) && layout !== "custom")
+  if (!layouts.some((l) => l.id === layout) && !["custom","previous"].includes(layout))
     err(400, "Choose a supported layout.");
   const base = await wordDraft(title, content);
+  if (layout === "previous") {
+    if(!templateBytes)err(400,"Choose a previous Word CV style.");
+    const previous=await safeWord(templateBytes), generated=await JSZip.loadAsync(base);
+    const original=load(await previous.file("word/document.xml").async("string"),{xml:true});
+    const output=load(await generated.file("word/document.xml").async("string"),{xml:true});
+    const styles=previous.file("word/styles.xml");
+    if(styles)generated.file("word/styles.xml",await styles.async("string"));
+    const theme=previous.file("word/theme/theme1.xml");
+    if(theme)generated.file("word/theme/theme1.xml",await theme.async("string"));
+    const paragraphs=original("w\\:p").toArray().filter(p=>original(p).find("w\\:t").text().trim());
+    const role=(p,$)=>{
+      const style=$(p).children("w\\:pPr").find("w\\:pStyle").attr("w:val")||"";
+      return /title/i.test(style)?"title":/heading|section/i.test(style)?"heading":$(p).find("w\\:numPr").length?"bullet":"body";
+    };
+    const samples={title:paragraphs[0],heading:paragraphs.find(p=>role(p,original)==="heading"),bullet:paragraphs.find(p=>role(p,original)==="bullet"),body:paragraphs.find(p=>role(p,original)==="body"&&original(p).find("w\\:t").text().length>30)};
+    output("w\\:body > w\\:p").each((_,p)=>{
+      const kind=role(p,output), sample=samples[kind]||samples.body;
+      if(!sample)return;
+      const pPr=original(sample).children("w\\:pPr").clone();
+      pPr.find("w\\:sectPr,w\\:numPr").remove();
+      const number=output(p).children("w\\:pPr").find("w\\:numPr").toArray().map(n=>output.xml(n)).join("");
+      if(pPr.length){output(p).children("w\\:pPr").remove();output(p).prepend(original.xml(pPr[0]));if(number)output(p).children("w\\:pPr").append(number);}
+      const rPr=original(sample).find("w\\:rPr").first();
+      if(rPr.length)output(p).find("w\\:r").each((_,r)=>{output(r).children("w\\:rPr").remove();output(r).prepend(original.xml(rPr[0]));});
+    });
+    for(const tag of ["pgSz","pgMar","cols"]){
+      const settings=original("w\\:sectPr").last().children("w\\:"+tag).first();
+      if(settings.length){output("w\\:sectPr").last().children("w\\:"+tag).remove();output("w\\:sectPr").last().append(original.xml(settings[0]));}
+    }
+    generated.file("word/document.xml",output.xml());
+    return generated.generateAsync({type:"nodebuffer"});
+  }
   if (layout === "custom") {
     if (!templateBytes)
       err(400, "Select a Word template containing a {{content}} paragraph.");

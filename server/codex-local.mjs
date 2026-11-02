@@ -66,6 +66,7 @@ export async function runLocalCodex(
       kind,
       schema,
       model: config.model,
+      reasoningEffort: config.reasoningEffort,
       expiresAt: Date.now() / 1000 + timeoutSeconds,
     }),
     { mode: 0o600, flag: "wx" },
@@ -101,6 +102,7 @@ export async function runLocalCodex(
       }
       try {
         const value = JSON.parse(readFileSync(progress, "utf8"));
+        config.onDiagnostics?.({codexIssue:value.issue,codexEventCount:value.eventCount,codexLastEventAt:typeof value.lastEventAt==="number"?new Date(value.lastEventAt*1000).toISOString():undefined});
         if (value.stage !== lastProgress) {
           lastProgress = value.stage;
           config.onProgress?.(value.stage);
@@ -128,6 +130,7 @@ export async function runLocalCodex(
         )
           throw failure("Codex returned an invalid response.", 502);
         if(value.timings)config.onDiagnostics?.(value.timings);
+        if(value.usage && Object.keys(value.usage).length)config.onDiagnostics?.({usage:{inputTokens:value.usage.input_tokens,outputTokens:value.usage.output_tokens,cachedInputTokens:value.usage.cached_input_tokens,reasoningTokens:value.usage.reasoning_output_tokens,complete:true}});
         return value.output;
       }
       await new Promise((r) => setTimeout(r, 250));

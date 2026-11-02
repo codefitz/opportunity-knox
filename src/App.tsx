@@ -1,3 +1,4 @@
+import DocumentThumbnail from "./components/DocumentThumbnail";
 import WorkspaceAction from "./components/WorkspaceAction";
 import BuildVersion from "./components/BuildVersion";
 import WorkspaceSections from "./components/WorkspaceSections";
@@ -16,7 +17,6 @@ import Feedback from "./components/Feedback";
 import ApplicationPacks from "./components/ApplicationPacks";
 import DocumentCategory from "./components/DocumentCategory";
 import documentCategories from "../server/document-categories.json";
-import DocumentStudio from "./components/DocumentStudio";
 import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
 import { FitCriteria } from "./components/DecisionReview";
@@ -3250,6 +3250,8 @@ function Documents({
         : `${files.length} files queued (${Math.max(1, Math.round(files.reduce((sum, f) => sum + f.file.size, 0) / 1024))} KB total)`;
   return (
     <>
+      <details className="document-upload-expander" open={files.length>0||busy||undefined}>
+        <summary>Add documents{files.length?` · ${files.length} queued`:""}</summary>
       <div className="section-intro with-action">
         <div>
           <h3>
@@ -3298,8 +3300,6 @@ function Documents({
           e.target.value = "";
         }}
       />
-      <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>d.category===c.id).length})</option>)}</select></label>
-      <DocumentStudio onError={onError} onChanged={onChanged} opportunityId={opportunityId}/>
       {queue.error&&<div className="alert error" role="alert">{queue.error} Queue changes could not be saved. Free browser storage or choose fewer files, then select them again; originals are unchanged.</div>}
       <p className="quiet-empty" role="status">{!queue.ready?"Opening saved upload queue…":queue.saving?"Saving files to this browser…":files.length?`${files.length} ${files.length===1?"file":"files"} saved in this browser’s upload queue. Reloading or closing this tab will not clear them. Select Upload to resume.`:"Selected files are kept in this browser until uploaded or removed."} Browser storage limits apply; this queue is private to this browser and is not part of server backups.</p>
       <form className="document-upload" onSubmit={upload}>
@@ -3436,6 +3436,9 @@ function Documents({
           </>
         )}
       </form>
+      </details>
+      <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>d.category===c.id).length})</option>)}</select></label>
+
       {!opportunityId && movableDocuments.length > 0 && (
         <div className="library-move-toolbar">
           <label>
@@ -3725,9 +3728,7 @@ function Documents({
                                 }
                               />
                             )}
-                            <span className="document-icon">
-                              <FileText size={21} />
-                            </span>
+                            <DocumentThumbnail key={`${doc.id}:${doc.revision}`} id={doc.id} name={doc.name} revision={doc.revision} className="document-row-thumbnail"/>
                             <div className="document-name">
                               <a
                                 href={

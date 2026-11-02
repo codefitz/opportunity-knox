@@ -38,8 +38,9 @@ test("Codex queue validates readiness and model IDs, returns structured output, 
     await assert.rejects(runLocalCodex({ model: "--bad" }, "", [], {}, dir), {
       status: 400,
     });
+    const diagnostics=[];
     const pending = runLocalCodex(
-      { model: "default" },
+      { model: "default", reasoningEffort:"low", onDiagnostics:value=>diagnostics.push(value) },
       "Fictional instruction",
       [{ role: "user", content: "Fictional career data" }],
       { type: "object" },
@@ -48,12 +49,15 @@ test("Codex queue validates readiness and model IDs, returns structured output, 
     const file = readdirSync(dir).find((n) => n.endsWith(".request.json"));
     const job = JSON.parse(readFileSync(join(dir, file)));
     assert.match(job.prompt, /Fictional career data/);
+    assert.equal(job.reasoningEffort,"low");
+    writeFileSync(join(dir,file.replace(".request.json",".progress.json")),JSON.stringify({stage:"codex-reasoning",eventCount:3,lastEventAt:Date.now()/1000,issue:"connection"}));
     assert.ok(job.expiresAt > Date.now() / 1000);
     writeFileSync(
       join(dir, file.replace(".request.json", ".response.json")),
       JSON.stringify({ output: '{"ready":true}' }),
     );
     assert.equal(await pending, '{"ready":true}');
+    assert.ok(diagnostics.some(value=>value.codexEventCount===3&&value.codexIssue==="connection"));
     assert.deepEqual(readdirSync(dir), ["status.json"]);
     writeFileSync(
       join(dir, "status.json"),

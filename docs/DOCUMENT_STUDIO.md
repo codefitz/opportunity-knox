@@ -1,3 +1,11 @@
+# CV styles and document previews
+
+The previous standalone studio selector has been replaced in the interface by the **Tailor a new CV** expander. **Templates** and **Previous CVs** are separate horizontally scrollable thumbnail galleries. Previous Word CVs reuse typography, paragraph spacing and page settings in a new document; arbitrary tables, sidebars and fixed headers are not copied into the new CV. The original files are never changed.
+
+Saved-file and CV thumbnails support DOCX and PDF; Google Workspace shortcuts use the board’s existing Google connection to export a PDF. Disconnected or unreadable files show a file icon with a preview-unavailable explanation. PDF and Google Doc CVs are selectable style references in the previous-CV gallery. Google Docs require the board’s Google connection. Image-only PDFs cannot supply text-based formatting and report an actionable error.
+
+CV thumbnails show the actual first rendered page, are generated lazily, require authentication and use a bounded in-memory cache invalidated by document changes. Word CVs reuse native styles; PDF CVs recreate typography and page settings in a new editable document. Connected Google Docs use their Word export for style reuse. The existing document preview/export backend remains available; the technical reference below describes those endpoints and their safeguards.
+
 # CV and cover-letter layout studio
 
 Open Career Library, or an opportunity’s Documents tab, and expand **CV and cover-letter layout studio**. Save a Buddy-generated Word draft first, or upload an existing DOCX. Refresh documents if it was added in another tab.

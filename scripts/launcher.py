@@ -421,6 +421,11 @@ def watch_loop(state_dir: Path, *, once: bool = False) -> int:
                     request_id = request.get("requestId", "")
                     atomic_json(status_path, {"requestId": request_id, "state": "running"})
                     main(["restart", "--state-dir", str(state_dir), "--no-open", "--no-watch"])
+                    if worker:
+                        # The watcher survives an in-app restart; reload the updated host adapter too.
+                        worker.close(); worker = None
+                        import importlib, codex_buddy
+                        worker = importlib.reload(codex_buddy).CodexWorker(state_dir)
                     atomic_json(status_path, {"requestId": request_id, "state": "succeeded"})
                 except (LauncherError, OSError) as exc:
                     atomic_json(status_path, {"requestId": locals().get("request_id", ""), "state": "failed", "message": str(exc)})
