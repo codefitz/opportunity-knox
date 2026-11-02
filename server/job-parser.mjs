@@ -9,7 +9,7 @@ const DESCRIPTION_SELECTORS = [
   '[itemprop="description"]', '[data-testid="job-description"]', '[data-test-id="job-description"]',
   '[data-test="job-description"]', '[data-testid*="job-description"]', '[data-testid*="jobDescription"]',
   '[data-automation-id="jobPostingDescription"]', '[data-automation="jobDescription"]',
-  '#jobDescriptionText', '#job-description', '.job-description', '.jobs-description', '.show-more-less-html__markup',
+  '#jobDescriptionText', '#job-description', '#job-detail .content', '.job-description', '.jobs-description', '.show-more-less-html__markup',
   '.jobs-description-content', '.description__text', '[class*="job-description"]', '[class*="jobDescription"]',
   'article', 'main', '[role="main"]',
 ];
@@ -277,6 +277,15 @@ function fallbackFields($, warnings) {
   })) for (const selector of selectors) {
     const element = $(selector).first(); const text = plain(element.attr('content') || element.text());
     if (text) { fields[key] = text; break; }
+  }
+  // Amazon Jobs publishes visible sections rather than JobPosting JSON-LD.
+  const jobMeta = plain($('#job-detail .details-line .meta').first().text())
+    .match(/^Job ID:\s*([^|]+)\s*\|\s*(.+)$/i);
+  if (jobMeta) {
+    fields.jobReference ||= jobMeta[1].trim();
+    fields.company ||= jobMeta[2].trim();
+    fields.location ||= unique($('#job-detail .location-icon .association-content li')
+      .toArray().map(element => plain($(element).text()))).join('; ');
   }
   if (!fields.employmentType) $('.description__job-criteria-item').each((_, element) => {
     const label = plain($(element).find('.description__job-criteria-subheader').text());

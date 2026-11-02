@@ -16,6 +16,7 @@ Find them in the opportunity’s **Documents** tab. They do not appear in the Ca
 
 ## Limits and source handling
 
+- Quick lookup and URL intake also read Amazon Jobs' static job sections, including qualifications, labelled employer/reference and listed locations, when structured JobPosting data is absent. Missing salary and deadline stay blank.
 - Sources: up to 15 MB; PDF, DOCX, TXT, Markdown and HTML files. Old binary `.doc` files need a PDF/DOCX/text copy for intake.
 - Public URL reading keeps the existing public-only DNS pinning and redirect checks; no cookies/sign-in/CAPTCHA bypass. URL downloads retain the existing 2 MB transfer/decoded limit. Larger PDFs can be uploaded. JavaScript-dependent/blocked pages may require pasted text or a file. HTML snapshots preserve the downloaded response, not a rendered browser session or all linked assets. HTML is downloaded as an attachment rather than executed in the app.
 - Native PDF text: first 40 pages. Sparse scanned pages: English OCR among the first 12 pages, up to 15 seconds per native tool and a 90-second OCR preparation budget. The full original PDF remains intact. Other languages and image content in DOCX are not handled by this PDF OCR flow. OCR can misread names, numbers and dates.

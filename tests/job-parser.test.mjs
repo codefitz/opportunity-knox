@@ -76,6 +76,28 @@ test('employer is not inferred from a job board brand and missing company stays 
   assert.equal(result.fields.company,undefined); assert.ok(result.warnings.some(w=>/employer could not be identified/.test(w)));
 });
 
+test('Amazon-shaped static sections retain qualifications and visible employer, reference and locations', () => {
+  const result = parse(page(`<div id="job-detail">
+    <h1>Fictional Delivery Consultant</h1>
+    <div class="details-line"><p class="meta">Job ID: FICTION-042 | Fictional Cloud (UK Branch)</p></div>
+    <div id="job-detail-body"><div class="content">
+      <div class="section"><h2>Description</h2>${description}</div>
+      <div class="section"><h2>Basic Qualifications</h2><p>Experience designing cloud services.</p></div>
+      <div class="section"><h2>Preferred Qualifications</h2><p>Cloud certification.</p></div>
+    </div><div class="location-icon"><ul class="association-content"><li>Bristol, UK</li><li>London, UK</li></ul></div>
+    <div>Share this job</div></div></div><footer>Career navigation</footer>`));
+  assert.equal(result.method, 'page-content');
+  assert.equal(result.fields.role, 'Fictional Delivery Consultant');
+  assert.equal(result.fields.company, 'Fictional Cloud (UK Branch)');
+  assert.equal(result.fields.jobReference, 'FICTION-042');
+  assert.equal(result.fields.location, 'Bristol, UK; London, UK');
+  assert.match(result.fields.description, /Basic Qualifications\n\nExperience designing cloud services/);
+  assert.match(result.fields.description, /Preferred Qualifications\n\nCloud certification/);
+  assert.doesNotMatch(result.fields.description, /Share this job|Career navigation|Job ID:/);
+  assert.equal(result.fields.salary, undefined);
+  assert.equal(result.fields.deadline, undefined);
+});
+
 test('malformed JSON-LD can fall back to useful visible content without pretending it was structured', () => {
   const result=parse(page(`<main><h1>Research Engineer</h1><div data-testid="job-description">${description}</div></main>`, '<script type="application/ld+json">{broken}</script>'));
   assert.equal(result.method,'page-content'); assert.ok(result.warnings.some(w=>/could not be read/.test(w)));
