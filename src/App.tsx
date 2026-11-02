@@ -1870,11 +1870,12 @@ function OpportunityDetail({
         {[
           ["overview", "Overview"],
           ["decision", "Fit assessment"],
-          ["timeline", "Timeline & notes"],
-          ["activities", "Interviews & comms"],
-          ["offers", "Offers"],
           ["documents", "Documents"],
-          ["summary", "Summary"],
+          ["activities", "Interview & comms"],
+          ...(o.offers?.length || tab === "offers"
+            ? [["offers", `Offers${o.offers?.length ? ` (${o.offers.length})` : ""}`]]
+            : []),
+          ["timeline", "Timeline & notes"],
           ["buddy", "Career Buddy"],
         ].map(([id, label]) => (
           <button
@@ -1915,14 +1916,35 @@ function OpportunityDetail({
             }
           />
         )}{" "}
-        {tab === "timeline" && (
-          <Timeline
-            key={o.revision}
-            o={o}
+        {tab === "decision" && (
+          <OpportunityReviewForm
+            key={`${o.id}-${o.revision}`}
+            opportunity={o}
             timezone={timezone}
             busy={busy}
             mutate={mutate}
+            onError={onError}
           />
+        )}{" "}
+        {tab === "documents" && (
+          <>
+            <ApplicationPacks
+              opportunity={o}
+              timezone={timezone}
+              onChanged={onReload}
+              onError={onError}
+            />
+            <Documents
+              documents={o.documents || []}
+              opportunityId={o.id}
+              timezone={timezone}
+              onChanged={onReload}
+              onError={(e) => {
+                setLocalError(displayError(e));
+                if (e instanceof ApiError && e.status === 401) onError(e);
+              }}
+            />
+          </>
         )}{" "}
         {tab === "activities" && (
           <Activities
@@ -1933,24 +1955,25 @@ function OpportunityDetail({
             mutate={mutate}
           />
         )}{" "}
-        {tab === "documents" && (
-          <>
-          <ApplicationPacks opportunity={o} timezone={timezone} onChanged={onReload} onError={onError}/>
-          <Documents
-            documents={o.documents || []}
-            opportunityId={o.id}
+        {tab === "offers" && (
+          <OpportunityOffers
+            key={`${o.id}-${o.revision}`}
+            opportunity={o}
             timezone={timezone}
-            onChanged={onReload}
-            onError={(e) => {
-              setLocalError(displayError(e));
-              if (e instanceof ApiError && e.status === 401) onError(e);
-            }}
+            busy={busy}
+            mutate={mutate}
           />
-          </>
         )}{" "}
-        {tab === "decision" && <><OpportunityReviewForm key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate} onError={onError}/></>}
-        {tab === "offers" && <OpportunityOffers key={`${o.id}-${o.revision}`} opportunity={o} timezone={timezone} busy={busy} mutate={mutate}/>}
-        {tab === "summary" && <><OpportunityBriefing id={o.id} revision={o.revision} timezone={timezone} onOpenSource={sourceId=>setTab(sourceId.startsWith("events:")?"timeline":sourceId.startsWith("activities:")?"activities":sourceId.startsWith("document:")?"documents":"overview")}/><Summary o={o} timezone={timezone} /></>}
+        {(tab === "timeline" || tab === "summary") && (
+          <Timeline
+            key={o.revision}
+            o={o}
+            timezone={timezone}
+            busy={busy}
+            mutate={mutate}
+            onNavigateTab={(targetTab) => setTab(targetTab)}
+          />
+        )}{" "}
         {tab === "buddy" && (
           <CareerBuddy
             opportunity={o}
@@ -2236,16 +2259,100 @@ function Overview({
     </form>
   );
 }
+function generateSummaryText(o: Opportunity, timezone: string): string {
+  const entries = [
+    ...(o.events || []).map((e) => ({
+      date: e.effectiveAt,
+      title: e.title || stageLabel(e.stage),
+      text: e.note || "Entered this stage.",
+    })),
+    ...(o.activities || []).map((a) => ({
+      date: a.scheduledAt || a.createdAt,
+      title: `${a.kind === "interview" ? "Interview" : "Communication"}: ${a.title}`,
+      text: [
+        `${a.kind === "communication" ? [a.direction || "Direction not recorded", a.channel || a.type].join(" · ") : a.type} · ${a.status}${a.isFinal ? " · Final stage" : ""}`,
+        a.followUp
+          ? `Follow-up${a.followUpDone ? " (completed)" : ""}: ${a.followUp}${a.followUpDate ? ` · Due ${formatDate(a.followUpDate, timezone)}` : ""}`
+          : "",
+        ...(a.documentIds || []).map(
+          (id) =>
+            `Attachment: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
+        ),
+        a.contact,
+        a.notes,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
+  return [
+    `${o.role} — ${o.company}`,
+    `Stage: ${stageLabel(o.stage)}${o.outcome ? ` | Outcome: ${o.outcome}` : ""}`,
+    o.url ? `Job link: ${o.url}` : "",
+    o.applicationRoute ? `Application route: ${o.applicationRoute}` : "",
+    ...(o.review
+      ? [
+          "CURRENT REVIEW",
+          `Decision: ${o.review.decision || "Not decided"}`,
+          o.review.strengths ? `Strengths: ${o.review.strengths}` : "",
+          o.review.gaps ? `Gaps: ${o.review.gaps}` : "",
+          o.review.reason ? `Reason: ${o.review.reason}` : "",
+        ]
+      : []),
+    ...(o.offers?.length
+      ? [
+          "CURRENT OFFERS",
+          ...o.offers.flatMap((v) => [
+            `${v.title}: ${v.decision} · Offered ${formatDate(v.offeredAt, timezone, true)}`,
+            v.compensation,
+            v.terms,
+            v.contact,
+            v.responseDueDate
+              ? `Respond by: ${formatDate(v.responseDueDate, timezone)}`
+              : "",
+            v.startDate
+              ? `Proposed start: ${formatDate(v.startDate, timezone)}`
+              : "",
+            v.decidedAt
+              ? `Decision date: ${formatDate(v.decidedAt, timezone, true)}`
+              : "",
+            v.decisionReason,
+            ...v.documentIds.map(
+              (id) =>
+                `Offer document: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
+            ),
+          ]),
+        ]
+      : []),
+    o.nextAction
+      ? `Next action: ${o.nextAction}${o.nextActionDate ? ` (${formatDate(o.nextActionDate)})` : ""}`
+      : "",
+    "HISTORY",
+    ...entries.flatMap((e) => [
+      `${formatDate(e.date, timezone, true)} — ${e.title}`,
+      e.text,
+      "",
+    ]),
+    "DOCUMENTS",
+    ...(o.documents || []).map(
+      (d) => `${d.name} — ${d.kind}, v${d.version}, ${d.status}`,
+    ),
+  ]
+    .filter((x) => x !== undefined)
+    .join("\n");
+}
 function Timeline({
   o,
   timezone,
   busy,
   mutate,
+  onNavigateTab,
 }: {
   o: Opportunity;
   timezone: string;
   busy: boolean;
   mutate: (path: string, body: unknown, method?: string) => Promise<boolean>;
+  onNavigateTab?: (tab: string) => void;
 }) {
   const [note, setNote] = useState(""),
     [date, setDate] = useState(""),
@@ -2268,13 +2375,55 @@ function Timeline({
   }
   return (
     <>
-      <div className="section-intro">
-        <h3>Every step, remembered.</h3>
-        <p>
-          Stage changes and notes build a lasting history. Correcting a date
-          keeps the original record.
-        </p>
+      <div className="section-intro with-action">
+        <div>
+          <h3>Every step, remembered.</h3>
+          <p>
+            Stage changes, notes, and activity history.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="button secondary small"
+          onClick={() =>
+            download(
+              `${o.company}-${o.role}-summary.txt`,
+              generateSummaryText(o, timezone),
+            )
+          }
+          title="Download complete chronological history and document log"
+        >
+          <ArrowDownToLine size={14} />
+          Download log (.txt)
+        </button>
       </div>
+      <details className="timeline-briefing-expander">
+        <summary className="timeline-briefing-summary">
+          <span className="timeline-briefing-title">
+            <Sparkles size={14} />
+            <strong>Career Buddy Briefing</strong>
+          </span>
+          <span className="timeline-briefing-badge">AI summary</span>
+        </summary>
+        <div className="timeline-briefing-body">
+          <OpportunityBriefing
+            id={o.id}
+            revision={o.revision}
+            timezone={timezone}
+            onOpenSource={(sourceId) =>
+              onNavigateTab?.(
+                sourceId.startsWith("events:")
+                  ? "timeline"
+                  : sourceId.startsWith("activities:")
+                  ? "activities"
+                  : sourceId.startsWith("document:")
+                  ? "documents"
+                  : "overview",
+              )
+            }
+          />
+        </div>
+      </details>
       <form onSubmit={add} className="note-composer">
         <textarea
           required
@@ -4212,111 +4361,6 @@ function Documents({
           No documents yet. Add one above to keep everything together.
         </p>
       )}
-    </>
-  );
-}
-function Summary({ o, timezone }: { o: Opportunity; timezone: string }) {
-  const entries = [
-    ...(o.events || []).map((e) => ({
-      date: e.effectiveAt,
-      title: e.title || stageLabel(e.stage),
-      text: e.note || "Entered this stage.",
-    })),
-    ...(o.activities || []).map((a) => ({
-      date: a.scheduledAt || a.createdAt,
-      title: `${a.kind === "interview" ? "Interview" : "Communication"}: ${a.title}`,
-      text: [
-        `${a.kind === "communication" ? [a.direction || "Direction not recorded", a.channel || a.type].join(" · ") : a.type} · ${a.status}${a.isFinal ? " · Final stage" : ""}`,
-        a.followUp
-          ? `Follow-up${a.followUpDone ? " (completed)" : ""}: ${a.followUp}${a.followUpDate ? ` · Due ${formatDate(a.followUpDate, timezone)}` : ""}`
-          : "",
-        ...(a.documentIds || []).map(
-          (id) =>
-            `Attachment: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
-        ),
-        a.contact,
-        a.notes,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    })),
-  ].sort((a, b) => a.date.localeCompare(b.date));
-  const summary = [
-    `${o.role} — ${o.company}`,
-    `Stage: ${stageLabel(o.stage)}${o.outcome ? ` | Outcome: ${o.outcome}` : ""}`,
-    o.url ? `Job link: ${o.url}` : "",
-    o.applicationRoute ? `Application route: ${o.applicationRoute}` : "",
-    ...(o.review
-      ? [
-          "CURRENT REVIEW",
-          `Decision: ${o.review.decision || "Not decided"}`,
-          o.review.strengths ? `Strengths: ${o.review.strengths}` : "",
-          o.review.gaps ? `Gaps: ${o.review.gaps}` : "",
-          o.review.reason ? `Reason: ${o.review.reason}` : "",
-        ]
-      : []),
-    ...(o.offers?.length
-      ? [
-          "CURRENT OFFERS",
-          ...o.offers.flatMap((v) => [
-            `${v.title}: ${v.decision} · Offered ${formatDate(v.offeredAt, timezone, true)}`,
-            v.compensation,
-            v.terms,
-            v.contact,
-            v.responseDueDate
-              ? `Respond by: ${formatDate(v.responseDueDate, timezone)}`
-              : "",
-            v.startDate
-              ? `Proposed start: ${formatDate(v.startDate, timezone)}`
-              : "",
-            v.decidedAt
-              ? `Decision date: ${formatDate(v.decidedAt, timezone, true)}`
-              : "",
-            v.decisionReason,
-            ...v.documentIds.map(
-              (id) =>
-                `Offer document: ${(o.documents || []).find((d) => d.id === id)?.name || "Unavailable (removed document)"}`,
-            ),
-          ]),
-        ]
-      : []),
-    o.nextAction
-      ? `Next action: ${o.nextAction}${o.nextActionDate ? ` (${formatDate(o.nextActionDate)})` : ""}`
-      : "",
-    "HISTORY",
-    ...entries.flatMap((e) => [
-      `${formatDate(e.date, timezone, true)} — ${e.title}`,
-      e.text,
-      "",
-    ]),
-    "DOCUMENTS",
-    ...(o.documents || []).map(
-      (d) => `${d.name} — ${d.kind}, v${d.version}, ${d.status}`,
-    ),
-  ]
-    .filter((x) => x !== undefined)
-    .join("\n");
-  return (
-    <>
-      <div className="section-intro with-action">
-        <div>
-          <h3>The whole story, in one place.</h3>
-          <p>
-            A chronological summary of your notes, decisions, and conversations.
-            No AI required.
-          </p>
-        </div>
-        <button
-          className="button secondary small"
-          onClick={() =>
-            download(`${o.company}-${o.role}-summary.txt`, summary)
-          }
-        >
-          <ArrowDownToLine size={15} />
-          Download
-        </button>
-      </div>
-      <pre className="summary-text">{summary}</pre>
     </>
   );
 }

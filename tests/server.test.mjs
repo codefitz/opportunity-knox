@@ -3310,6 +3310,11 @@ test('previous CV gallery thumbnails are private, cached, invalidated and reusab
  assert.equal((await f.request(base+'/draft/'+reply.id,{method:'POST',body:save})).status,409);
  assert.equal((await f.request(base+'/chat',{method:'POST',body:{...body,requestId:'fictional-stale-style'}})).status,409);
  assert.deepEqual((await f.request(style.url,{binary:true})).data,bytes);
+ const manualDraft = await f.request(base+'/chat',{method:'POST',body:{action:'cv',message:'Direct copy without AI.',autoTailor:true,passToAi:false,templateLayout:'classic',sourceCvId:source.id,documentIds:[],includeOtherOpportunities:false,requestId:'fictional-pass-no-ai'}});
+ assert.equal(manualDraft.status,200);
+ const manualReply = manualDraft.data.messages.at(-1);
+ assert.match(manualReply.content,/Missing from Experience \(JD Gaps\)/);
+ assert.equal(manualReply.draft.kind,'cv');
 });
 
 test('PDF and connected Google CV styles are selectable and applied to separate Word drafts',async t=>{

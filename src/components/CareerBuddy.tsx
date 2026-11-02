@@ -1,5 +1,5 @@
 import AIRequestProgress from "./AIRequestProgress";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Bot,
   Check,
@@ -7,6 +7,7 @@ import {
   FileText,
   Import,
   LoaderCircle,
+  Plus,
   Send,
   Settings2,
   Sparkles,
@@ -124,6 +125,53 @@ function Text({ value }: { value: string }) {
     </div>
   );
 }
+type ChatExchange = {
+  id: string;
+  userMessage?: BuddyMessage;
+  assistantMessage?: BuddyMessage;
+  messages: BuddyMessage[];
+  title: string;
+  createdAt: string;
+  hasDraft?: boolean;
+  hasChanges?: boolean;
+};
+
+function groupMessagesIntoChats(messages: BuddyMessage[]): ChatExchange[] {
+  if (!Array.isArray(messages)) return [];
+  const exchanges: ChatExchange[] = [];
+  let current: ChatExchange | null = null;
+
+  for (const m of messages) {
+    if (!m) continue;
+    if (m.role === "user") {
+      if (current) exchanges.push(current);
+      current = {
+        id: m.id || crypto.randomUUID(),
+        userMessage: m,
+        messages: [m],
+        title: (m.content ? String(m.content).slice(0, 85).trim() : "") || "Question",
+        createdAt: m.createdAt || new Date().toISOString(),
+      };
+    } else {
+      if (!current) {
+        current = {
+          id: m.id || crypto.randomUUID(),
+          messages: [m],
+          title: "Career Buddy reply",
+          createdAt: m.createdAt || new Date().toISOString(),
+        };
+      } else {
+        current.messages.push(m);
+      }
+      current.assistantMessage = m;
+      if (m.draft && typeof m.draft === "object" && m.draft.kind && m.draft.kind !== "none") current.hasDraft = true;
+      if (Array.isArray(m.changes) && m.changes.length > 0) current.hasChanges = true;
+    }
+  }
+  if (current) exchanges.push(current);
+  return exchanges;
+}
+
 export default function CareerBuddy({
   opportunity: o,
   timezone,
@@ -137,6 +185,9 @@ export default function CareerBuddy({
   onError: (e: unknown) => void;
   onConfigure: () => void;
 }) {
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [pendingUserPrompt, setPendingUserPrompt] = useState<string | null>(null);
+  const chatWindowRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<State | null>(null),
     [selected, setSelected] = useState<string[]>([]),
     [others, setOthers] = useState(false),
@@ -295,10 +346,13 @@ export default function CareerBuddy({
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!input.trim() || busy) return;
+    const sentText = input.trim();
     setBusy(true);
     setError("");
+    setPendingUserPrompt(sentText);
+    setSelectedChatId(null);
     const payload = JSON.stringify({
-      message: input.trim(),
+      message: sentText,
       action,
       documentIds: selected,
       includeOtherOpportunities: others,
@@ -317,13 +371,34 @@ export default function CareerBuddy({
       setInput("");
       setAction("chat");
       retry.current = null;
+      setPendingUserPrompt(null);
+      const newChats = groupMessagesIntoChats(result.messages);
+      const latest = newChats[newChats.length - 1];
+      if (latest) {
+        setSelectedChatId(latest.id);
+      }
     } catch (error) {
       setError(errorText(error));
       onError(error);
     } finally {
       setBusy(false);
+      setPendingUserPrompt(null);
     }
   }
+  const chats = useMemo(
+    () => (state ? groupMessagesIntoChats(state.messages) : []),
+    [state?.messages],
+  );
+  const selectedChat =
+    selectedChatId
+      ? chats.find((c) => c.id === selectedChatId) ?? null
+      : null;
+
+  const displayMessages: BuddyMessage[] = useMemo(() => {
+    if (selectedChat) return selectedChat.messages;
+    return [];
+  }, [selectedChat]);
+
   if (!state)
     return (
       <div className="buddy-empty">{error || "Opening Career Buddy…"}</div>
@@ -340,9 +415,11 @@ export default function CareerBuddy({
             <h3>Career Buddy</h3>
             <p>
               {active
-                ? state.settings.providers[state.settings.provider]?.name +
+                ? (state.settings.providers?.[state.settings.provider]?.name ||
+                    state.settings.provider ||
+                    "AI") +
                   " · " +
-                  state.settings.model
+                  (state.settings.model || "default")
                 : "Your career assistant is switched off."}
             </p>
           </div>
@@ -389,114 +466,8 @@ export default function CareerBuddy({
           </button>
         </div>
       )}
-      <details className="buddy-context">
-        <summary>
-          Sources for your next message <span>{selected.length} selected</span>
-        </summary>
-        <p>
-          This opportunity and these selected document excerpts will be sent to{" "}
-          <strong>
-            {state.settings.providers[state.settings.provider]?.name}
-          </strong>
-          . Files are read locally first. Select up to 20; use a source CV for
-          tailoring.
-        </p>
-        {state.documents.length === 0 ? (
-          <p className="buddy-muted">
-            Add a CV or career evidence in the Career Hub or this
-            opportunity’s Documents tab.
-          </p>
-        ) : (
-          <div className="buddy-source-picker">
-            {state.documents.map((doc) => (
-              <label key={doc.id}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(doc.id)}
-                  disabled={
-                    busy ||
-                    (!selected.includes(doc.id) && selected.length >= 20)
-                  }
-                  onChange={(event) =>
-                    setSelected((current) =>
-                      event.target.checked
-                        ? [...current, doc.id]
-                        : current.filter((id) => id !== doc.id),
-                    )
-                  }
-                />
-                <span>
-                  <strong>{doc.name}</strong>
-                  <small>
-                    {doc.kind} ·{" "}
-                    {doc.generated ? "AI draft, not verified evidence · " : ""}
-                    {doc.extraction.status === "ready"
-                      ? doc.extraction.chunkCount + " text chunks"
-                      : doc.extraction.status === "pending"
-                        ? "Prepared when sent"
-                        : doc.extraction.warnings.join(" ") ||
-                          doc.extraction.status}
-                  </small>
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
-        <label className="buddy-toggle">
-          <input
-            type="checkbox"
-            checked={others}
-            disabled={busy}
-            onChange={(event) => setOthers(event.target.checked)}
-          />
-          Also include short summaries of my other opportunities
-        </label>
-        <small>
-          Original files stay unchanged. Scanned PDFs need OCR; legacy .doc
-          files need a .docx or text copy. Long sources use selected excerpts.
-        </small>
-      </details>
-      <div className="buddy-conversation" aria-live="polite">
-        {!state.messages.length && (
-          <div className="buddy-welcome">
-            <Sparkles size={23} />
-            <h3>A little support for your next step.</h3>
-            <p>
-              Ask a question, draft an application, or tell me what happened.
-              For example: “Had the second interview today — they mentioned lack
-              of Databricks experience.”
-            </p>
-          </div>
-        )}
-        {state.messages.map((message) =>
-          message.role === "user" ? (
-            <article className="buddy-message is-user" key={message.id}>
-              <div className="buddy-message-byline">
-                You · {formatDate(message.createdAt, timezone, true)}
-              </div>
-              <Text value={message.content} />
-            </article>
-          ) : (
-            <Reply
-              key={message.id}
-              message={message}
-              opportunity={o}
-              timezone={timezone}
-              base={base}
-              onChanged={changed}
-              onError={onError}
-            />
-          ),
-        )}
-        <AIRequestProgress id={activeRequest} scope={"opportunity:"+o.id} onError={onError}/>
-        {busy && (
-          <div className="buddy-working" role="status">
-            <LoaderCircle size={16} className="spin" />
-            Career Buddy is reading your selected sources and thinking…
-          </div>
-        )}
-        <div ref={end} />
-      </div>
+
+      {/* 1. Presets / prompt suggestions at the top */}
       <div className="buddy-presets" aria-label="Career Buddy prompts">
         {prompts.map((p) => (
           <button
@@ -506,6 +477,7 @@ export default function CareerBuddy({
             onClick={() => {
               setAction(p.action);
               setInput(p.prompt);
+              if (selectedChatId) setSelectedChatId(null);
             }}
           >
             <Sparkles size={13} />
@@ -513,6 +485,8 @@ export default function CareerBuddy({
           </button>
         ))}
       </div>
+
+      {/* 2. Message Career Buddy chat box */}
       <form
         className="buddy-composer"
         onSubmit={send}
@@ -536,8 +510,7 @@ export default function CareerBuddy({
         </label>
         <div className="buddy-composer-bottom">
           <small>
-            Changes are proposed for review. Drafts need a factual and layout
-            check before use.
+            Changes are proposed for review. Drafts need a factual and layout check before use.
           </small>
           <button
             className="button primary"
@@ -552,10 +525,197 @@ export default function CareerBuddy({
           </button>
         </div>
       </form>
+
+      {/* 3. Compact Sources */}
+      <details className="buddy-context-compact">
+        <summary>
+          <span>Sources for your next message ({selected.length} selected)</span>
+          <span className="buddy-context-hint">Configure document excerpts</span>
+        </summary>
+        <div className="buddy-context-body">
+          <p>
+            This opportunity and these selected document excerpts will be sent to{" "}
+            <strong>
+              {state.settings.providers?.[state.settings.provider]?.name ||
+                state.settings.provider ||
+                "AI"}
+            </strong>
+            . Files are read locally first. Select up to 20; use a source CV for tailoring.
+          </p>
+          {state.documents.length === 0 ? (
+            <p className="buddy-muted">
+              Add a CV or career evidence in the Career Hub or this opportunity’s Documents tab.
+            </p>
+          ) : (
+            <div className="buddy-source-picker">
+              {state.documents.map((doc) => (
+                <label key={doc.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(doc.id)}
+                    disabled={
+                      busy ||
+                      (!selected.includes(doc.id) && selected.length >= 20)
+                    }
+                    onChange={(event) =>
+                      setSelected((current) =>
+                        event.target.checked
+                          ? [...current, doc.id]
+                          : current.filter((id) => id !== doc.id),
+                      )
+                    }
+                  />
+                  <span>
+                    <strong>{doc.name}</strong>
+                    <small>
+                      {doc.kind} ·{" "}
+                      {doc.generated ? "AI draft, not verified evidence · " : ""}
+                      {doc.extraction.status === "ready"
+                        ? doc.extraction.chunkCount + " text chunks"
+                        : doc.extraction.status === "pending"
+                          ? "Prepared when sent"
+                          : doc.extraction.warnings.join(" ") ||
+                            doc.extraction.status}
+                    </small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <label className="buddy-toggle" style={{ marginTop: "10px" }}>
+            <input
+              type="checkbox"
+              checked={others}
+              disabled={busy}
+              onChange={(event) => setOthers(event.target.checked)}
+            />
+            Also include short summaries of my other opportunities
+          </label>
+        </div>
+      </details>
+
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
+      )}
+
+      {/* 4. Active conversation / Selected chat viewer */}
+      {(displayMessages.length > 0 || pendingUserPrompt || busy || activeRequest) && (
+        <div className="buddy-top-window" ref={chatWindowRef}>
+          {selectedChat && (
+            <div className="buddy-historic-notice">
+              <span>
+                Viewing earlier chat from{" "}
+                <strong>{formatDate(selectedChat.createdAt, timezone, true)}</strong>: &ldquo;{selectedChat.title}&rdquo;
+              </span>
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => setSelectedChatId(null)}
+              >
+                Close chat view
+              </button>
+            </div>
+          )}
+
+          <div className="buddy-conversation" aria-live="polite">
+            {pendingUserPrompt && !displayMessages.length && (
+              <article className="buddy-message is-user">
+                <div className="buddy-message-byline">
+                  You · Just now
+                </div>
+                <Text value={pendingUserPrompt} />
+              </article>
+            )}
+            {displayMessages.map((message) =>
+              message.role === "user" ? (
+                <article className="buddy-message is-user" key={message.id}>
+                  <div className="buddy-message-byline">
+                    You · {formatDate(message.createdAt, timezone, true)}
+                  </div>
+                  <Text value={message.content} />
+                </article>
+              ) : (
+                <Reply
+                  key={message.id}
+                  message={message}
+                  opportunity={o}
+                  timezone={timezone}
+                  base={base}
+                  onChanged={changed}
+                  onError={onError}
+                />
+              ),
+            )}
+            <AIRequestProgress id={activeRequest} scope={"opportunity:" + o.id} onError={onError} />
+            {busy && (
+              <div className="buddy-working" role="status">
+                <LoaderCircle size={16} className="spin" />
+                Career Buddy is reading your selected sources and thinking…
+              </div>
+            )}
+            <div ref={end} />
+          </div>
+        </div>
+      )}
+
+      {/* 5. Historic Chats at the bottom */}
+      {chats.length > 0 && (
+        <div className="buddy-history-section">
+          <div className="buddy-history-header">
+            <h4>Previous chats ({chats.length})</h4>
+            {selectedChatId && (
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => setSelectedChatId(null)}
+              >
+                Clear active view
+              </button>
+            )}
+          </div>
+          <div className="buddy-history-list">
+            {chats
+              .slice()
+              .reverse()
+              .map((chat) => {
+                const isSelected = selectedChatId
+                  ? selectedChatId === chat.id
+                  : chat.id === chats[chats.length - 1].id;
+                return (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    className={`historic-chat-link ${isSelected ? "selected" : ""}`}
+                    onClick={() => {
+                      setSelectedChatId(chat.id);
+                      chatWindowRef.current?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    <div className="historic-chat-main">
+                      <span className="historic-chat-title">{chat.title}</span>
+                      <span className="historic-chat-meta">
+                        {formatDate(chat.createdAt, timezone, true)}
+                      </span>
+                    </div>
+                    <div className="historic-chat-badges">
+                      {chat.hasChanges && (
+                        <span className="historic-chat-badge badge-changes">
+                          Changes proposed
+                        </span>
+                      )}
+                      {chat.hasDraft && (
+                        <span className="historic-chat-badge badge-draft">
+                          Draft
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+        </div>
       )}
 
       {taskPackOpen && (

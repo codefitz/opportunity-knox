@@ -544,3 +544,145 @@
   margin: 0;
 }
 .buddy-request-details dd { margin:0; font-variant-numeric:tabular-nums; }
+
+/* Clean Career Buddy layout & history navigation */
+.buddy-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.buddy-top-window {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.buddy-historic-notice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.buddy-historic-notice strong {
+  color: var(--green);
+}
+.buddy-context-compact {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.buddy-context-compact summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text);
+  user-select: none;
+}
+.buddy-context-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+.buddy-context-body {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+.buddy-history-section {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.buddy-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.buddy-history-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+.buddy-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.historic-chat-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.historic-chat-link:hover {
+  border-color: var(--green);
+  background: var(--panel-soft);
+}
+.historic-chat-link.selected {
+  border-color: var(--green);
+  background: var(--accent-soft);
+  outline: 1px solid var(--green);
+}
+.historic-chat-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.historic-chat-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.historic-chat-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.historic-chat-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.historic-chat-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--line);
+  color: var(--text);
+}
+.historic-chat-badge.badge-changes {
+  background: rgba(46, 125, 50, 0.15);
+  color: var(--green);
+}
+.historic-chat-badge.badge-draft {
+  background: rgba(33, 150, 243, 0.15);
+  color: #1976d2;
+}

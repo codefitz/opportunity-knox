@@ -204,20 +204,24 @@ export function formatDate(
   withTime = false,
 ) {
   if (!value) return "Not set";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value))
-    return new Date(value + "T12:00:00Z").toLocaleDateString("en-GB", {
+  try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value))
+      return new Date(value + "T12:00:00Z").toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+    return new Date(value).toLocaleString("en-GB", {
       day: "numeric",
       month: "short",
       year: "numeric",
-      timeZone: "UTC",
+      ...(withTime ? ({ hour: "2-digit", minute: "2-digit" } as const) : {}),
+      timeZone: timezone,
     });
-  return new Date(value).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    ...(withTime ? ({ hour: "2-digit", minute: "2-digit" } as const) : {}),
-    timeZone: timezone,
-  });
+  } catch {
+    return value || "Not set";
+  }
 }
 
 /** Preserve exact stored precision and DST occurrence when only other fields are edited. */

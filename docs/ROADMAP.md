@@ -1,5 +1,31 @@
 # Implementation roadmap
 
+## Clean Career Buddy tab with top composer and bottom historic chats — 2 November 2026
+
+The opportunity Career Buddy tab has been streamlined to eliminate embedded visual clutter and provide an intuitive conversational flow:
+- **Composer & suggestions at the top:** Placed the immediate prompt suggestions ("Am I a good fit?", "What salary should I ask for?", "Which skills should I highlight?", "Tailor my CV", "Tailor a cover letter") and the 'Message Career Buddy' chat box right at the very top of the tab.
+- **No auto-loading of old chats:** When opening an opportunity, past conversations do not take over the screen. The tab starts clean with the input box ready.
+- **Selectable historic chats at the bottom:** All previous chats from past sessions are linked at the bottom as clean, selectable links showing titles, timestamps, and badges for proposed changes or drafts.
+- **Dynamic window replacement:** Clicking an older chat opens that exchange below the composer with a "Close chat view" button. Sending a new prompt or clicking a suggestion resets the view and displays the new live response.
+- **Discreet context configuration:** Compacted the source document selection and cross-opportunity toggle into an expandable details section below the composer, preventing document checklists from overwhelming the conversation.
+- Automated test suite passes (277 Node tests, 43 Python launcher tests).
+
+## Streamlined CV tailoring flow, AI toggle and gap analysis — 2 November 2026
+
+The opportunity detail navigation and Documents tab tailoring interface have been reorganized into a clear, linear flow:
+- **Restructured opportunity tabs:** Reordered tabs to match the hiring progression: **Overview > Fit Assessment > Documents > Interview & Comms > Timeline & Notes > Career Buddy** (with conditional access to Offers preserved when offers are recorded).
+- **Merged Summary into Timeline & Notes:** Consolidated the chronological log and stage history. The Career Buddy briefing is now a discreet, expandable AI summary card within Timeline & Notes, accompanied by an instant plain-text chronological log download (`Download log (.txt)`).
+- **Style selection & generation options first:** Users select a template or previous CV style reference, then configure generation options (`Pass generation to AI` showing the configured provider/model like Codex, and optional cover letter).
+- **Logical action placement:** The `Tailor a fresh version` / `Tailor CV with AI` button is positioned directly under the style selection and options.
+- **Clear AI Notes & JD Match:** The AI response prompt and UI now format a scannable breakdown highlighting **Matched Strengths** (`✓`), explicit **Missing from Experience (JD Gaps)** (`⚠`) comparing the candidate's verified evidence against the role requirements, and the **Tailoring Focus** (`🎯`).
+- **Clarified Save Action:** Replaced confusing "Save reviewed drafts" button with a dedicated **Save as Word documents (.docx)** card explaining that editable Word files are saved to the opportunity documents and attached to the application pack, with direct `.docx` download buttons and confirmation upon saving.
+- **De-cluttered interface:** Removed the superfluous "Review applications or use existing files" expander while preserving the "Add documents" upload section below. Stripped redundant explanatory prose throughout.
+- Automated tests pass with 277 Node tests and 43 launcher tests; running-container browser verification remains distinct.
+
+## Next priority: AI-created CV artifacts preserving structural layout — 2 November 2026
+
+The user confirmed that the generation pipeline works but sidebar/structural formatting is lost in the final Word CV. Current style reuse reconstructs a linear document and does not establish full layout fidelity. R7 is now prioritized: pass actual reference files and rendered pages to a scoped Codex document-authoring job, render/check the generated files, and save its exact DOCX/PDF artifacts. See [AI_DOCUMENT_GENERATION_PLAN.md](AI_DOCUMENT_GENERATION_PLAN.md). This is planned work, not a delivered fix.
+
 ## Select PDF and Google CV style references — 2 November 2026
 
 Previous PDF CVs are now selectable with the same radio controls as Word CVs. The bundled PDF tools extract first-page typography, colour, spacing and page settings into a formatting-only profile; saved drafts recreate those settings in editable Word files without copying the reference’s text. Complex graphics/sidebars are approximated, and image-only PDFs report that no readable style can be extracted. Connected Google Docs use a live Word export with a core-content/style snapshot check before saving. The source CV used for factual tailoring remains independent. Fictional automated coverage checks style transfer, source preservation and Google snapshot conflicts; a native Docker PDF→Word render was visually checked and the PDF selection/draft/save flow passed a disposable-browser test with a fixture model.

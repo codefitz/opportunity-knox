@@ -732,6 +732,9 @@ export function createCareerBuddy(ctx) {
         if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||styleDocument.category==="template"||!(styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé)\b/i.test(styleDocument.name))))
           throw buddyError(400,"Choose an available previous CV style.");
         if(styleDocument&&styleDocument.revision!==body.styleDocumentRevision)throw buddyError(409,"The style CV changed. Refresh the style selection.");
+        if (body.passToAi !== undefined && typeof body.passToAi !== "boolean")
+          throw buddyError(400, "passToAi must be a boolean.");
+        const passToAi = body.passToAi !== false;
         if (typeof body.includeOtherOpportunities !== "boolean")
           throw buddyError(
             400,
@@ -876,28 +879,68 @@ export function createCareerBuddy(ctx) {
               413,
               "This opportunity history is too long for one request. Use a smaller source selection.",
             );
-          const raw = await callProvider(
-            c,
-            systemPrompt(timezone, today, action)+(autoTailor?" Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. Do not truncate employment history silently. Use layout "+selectedLayout+". Keep all advice and missing-evidence warnings outside the document prose.":""),
-            [
-              {
-                role: "user",
-                content: JSON.stringify({
-                  request: message,
-                  context,
-                  previousConversation: autoTailor?[]:history,
-                }),
+          let parsed;
+          if (autoTailor && !passToAi) {
+            task.progress("preparing");
+            parsed = {
+              reply: [
+                "### Source CV Loaded",
+                `- Base factual CV: ${selectedCv.name}`,
+                `- Selected layout: ${selectedLayout}`,
+                "",
+                "### Missing from Experience (JD Gaps)",
+                "- Direct document creation without AI tailoring. Compare your CV against the role requirements in the overview to identify any missing qualifications.",
+                "",
+                "### Tailoring Focus",
+                "- Created directly from your source CV. Review and edit the draft text below before saving.",
+              ].join("\n"),
+              changes: [],
+              draft: {
+                kind: action,
+                title:
+                  (action === "cv" ? "CV" : "Cover letter") +
+                  " - " +
+                  opportunity.company +
+                  " - " +
+                  opportunity.role,
+                content:
+                  action === "cv"
+                    ? selectedCv.text
+                    : `# Cover Letter\n\nDear Hiring Team,\n\nI am writing to express my interest in the ${opportunity.role} position at ${opportunity.company}.\n\nSincerely,\nCandidate`,
               },
-            ],
-            ctx.buddyFetch,
-          );
-          task.check();if(stage)requireAIStage(getConfig,stage);task.progress("validating");
-          const parsed = parseBuddyOutput(raw, [
-            opportunity.id,
-            ...(autoTailor?[selectedCv.id]:[]),
-            ...context.otherOpportunities.map((o) => o.id),
-            ...retrieval.chunks.map((d) => d.sourceId),
-          ]);
+              sourceIds: [selectedCv.id],
+            };
+          } else {
+            const raw = await callProvider(
+              c,
+              systemPrompt(timezone, today, action) +
+                (autoTailor
+                  ? " Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. Do not truncate employment history silently. Use layout " +
+                    selectedLayout +
+                    ".\n\nIn your reply (AI notes), provide a clear, scannable analysis formatted as follows:\n### Matched Strengths\n- Briefly bullet 2-3 key areas where candidate experience directly matches the job requirements.\n### Missing from Experience (JD Gaps)\n- Explicitly list any important requirements, skills, qualifications, or tools from the job description that are NOT found or are weak in the candidate's verified evidence. Be direct, specific, and honest about what is missing.\n### Tailoring Focus\n- In 1-2 concise sentences, summarize the emphasis and strategic angle chosen for this draft.\n\nKeep all advice, gap analysis, and missing-evidence warnings strictly in your reply outside the document prose."
+                  : ""),
+              [
+                {
+                  role: "user",
+                  content: JSON.stringify({
+                    request: message,
+                    context,
+                    previousConversation: autoTailor ? [] : history,
+                  }),
+                },
+              ],
+              ctx.buddyFetch,
+            );
+            task.check();
+            if (stage) requireAIStage(getConfig, stage);
+            task.progress("validating");
+            parsed = parseBuddyOutput(raw, [
+              opportunity.id,
+              ...(autoTailor ? [selectedCv.id] : []),
+              ...context.otherOpportunities.map((o) => o.id),
+              ...retrieval.chunks.map((d) => d.sourceId),
+            ]);
+          }
           if(parsed.draft.kind!=="none"){requireAIStage(getConfig,"drafting");task.describe({kind:"draft"});}
           if (
             ["fit", "salary", "skills", "cv", "cover"].includes(action) &&

@@ -25,7 +25,7 @@ This is the canonical list of **13 distinct remaining work areas**, including op
 | --- | --- | --- |
 | R5 | Codex live output/token accounting and remote cancellation acknowledgement | Will Not Do. Local Codex process termination is complete; intermediate streaming and remote token tracking are unnecessary overhead. |
 | R6 | Live cloud-document references and native editing | Deferred. Google Docs OAuth setup deferred; local snapshot and Markdown/Word workflows are complete. |
-| R7 | Arbitrary unmarked templates and cross-engine layout fidelity | Backburner. Built-in and marked DOCX template layout preservation and PDF exports are complete and sufficient. |
+| R7 | Arbitrary unmarked templates and cross-engine layout fidelity | **Prioritized 2 November 2026:** user reports that generated CVs lose sidebar/structural formatting. Move final document creation/rendering to Codex and save its exact artifacts. See [AI_DOCUMENT_GENERATION_PLAN.md](AI_DOCUMENT_GENERATION_PLAN.md). Existing typography reuse does not complete this scope. |
 | R10 | Private production remote hosting with HTTPS/VPN | Future direction. Standalone local server and private desktop hosting are the priority. |
 | R11 | Named reusable criteria/evidence profiles | Will Not Do. The existing saved criteria profile and candidate evidence selection workflows are sufficient; multiple named criteria profiles add unnecessary complexity. |
 
@@ -41,6 +41,8 @@ These four groups are separate from unfinished implementation; they are not reas
 | V4 | Complete live-provider, OCR/retrieval-corpus and host-shortcut acceptance checks | Implementation/fixture/browser evidence exists; real-model quality and Finder double-click checks are not inferred from it. |
 
 ## Feature Requests
+
+- [ ] **AI-created CV artifacts preserving the chosen reference layout (R7, next priority).** The pipeline works, but Markdown-to-Word generation loses sidebars and page structure. Implement a scoped Codex file-generation/render/review path and exact-artifact saving; optional cover letter and existing application review remain. Full handover: [AI_DOCUMENT_GENERATION_PLAN.md](AI_DOCUMENT_GENERATION_PLAN.md).
 
 - [ ] Optional MCP server for chat-client access to opportunities, career evidence and fit-review saving. See [MCP_PLAN.md](MCP_PLAN.md); planned for later, client/transport choice pending.
 
