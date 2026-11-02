@@ -136,6 +136,16 @@ export function createGoogleDocuments({
     );
   return {
     status,
+    isConnected() {
+      const c = config();
+      return Boolean(c.tokens?.refresh_token || c.tokens?.access_token);
+    },
+    async exportDocument(id, mimeType = DOCX) {
+      return await api(
+        "files/" + fileId(id) + "/export?" + new URLSearchParams({ mimeType }),
+        true,
+      );
+    },
     async handle(path, method, req, res, { json, readBody }) {
       if (path === "/api/connections/google/callback" && method === "GET") {
         const q = new URL(req.url, "http://board").searchParams,

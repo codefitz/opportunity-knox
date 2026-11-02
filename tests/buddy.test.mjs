@@ -537,6 +537,147 @@ test("PowerPoint (.pptx) slides and speaker notes, Word footnotes/comments, HTML
   assert.match(rtfRes.text, /Led Kubernetes migration/);
 });
 
+test("Google Docs (.gdoc) shortcut files extract locally with pointer metadata, live Drive export, or public export", async () => {
+  // 1. Offline / unconnected .gdoc pointer file
+  const gdocJson = JSON.stringify({
+    doc_id: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+    url: "https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit",
+    email: "fictional-user@example.com",
+    resource_id: "document:1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+  });
+  const offlineRes = await extractDocument(
+    "Master-CV.gdoc",
+    Buffer.from(gdocJson, "utf8"),
+  );
+  assert.equal(offlineRes.status, "ready");
+  assert.match(offlineRes.text, /Google Doc: Master-CV/);
+  assert.match(offlineRes.text, /1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/);
+  assert.match(offlineRes.text, /fictional-user@example\.com/);
+  assert.ok(offlineRes.chunks.length > 0);
+  assert.match(offlineRes.warnings[0], /Google Doc shortcut/);
+
+  // 2. Live connected Google Docs export via googleDocuments adapter
+  const docxBytes = await wordDraft(
+    "Fictional Live Strategy",
+    "# Strategic Roadmap\n\n- Expanded into EMEA market with 40% growth.\n- Led cloud transformation across 12 services.",
+  );
+  const liveRes = await extractDocument(
+    "Roadmap.gdoc",
+    Buffer.from(JSON.stringify({ doc_id: "liveDoc123" })),
+    {
+      googleDocuments: {
+        exportDocument: async (id) => {
+          assert.equal(id, "liveDoc123");
+          return docxBytes;
+        },
+      },
+    },
+  );
+  assert.equal(liveRes.status, "ready");
+  assert.match(liveRes.text, /Strategic Roadmap/);
+  assert.match(liveRes.text, /Expanded into EMEA market with 40% growth/);
+  assert.match(liveRes.warnings[0], /connected Google account/);
+
+  // 3. Public export fallback via fetcher
+  const publicRes = await extractDocument(
+    "Public-Overview.gdoc",
+    Buffer.from(JSON.stringify({ doc_id: "pubDoc456" })),
+    {
+      fetcher: async (url) => {
+        assert.match(String(url), /pubDoc456\/export\?format=txt/);
+        return new Response("Public engineering principles and career architecture.");
+      },
+    },
+  );
+  assert.equal(publicRes.status, "ready");
+  assert.match(publicRes.text, /Public engineering principles and career architecture/);
+  assert.match(publicRes.warnings[0], /public export/);
+
+  // 4. Invalid .gdoc file without ID or URL
+  const invalidRes = await extractDocument(
+    "Broken.gdoc",
+    Buffer.from("random unparseable content without google docs link"),
+  );
+  assert.equal(invalidRes.status, "unavailable");
+  assert.match(invalidRes.warnings[0], /does not contain a valid Google reference/);
+
+  // 5. Google Sheets (.gsheet) offline pointer
+  const gsheetJson = JSON.stringify({
+    doc_id: "sheet123",
+    url: "https://docs.google.com/spreadsheets/d/sheet123/edit",
+    email: "finance@example.com",
+    resource_id: "spreadsheet:sheet123",
+  });
+  const sheetOffline = await extractDocument(
+    "Budget.gsheet",
+    Buffer.from(gsheetJson, "utf8"),
+  );
+  assert.equal(sheetOffline.status, "ready");
+  assert.match(sheetOffline.text, /Google Sheet: Budget/);
+  assert.match(sheetOffline.text, /https:\/\/docs\.google\.com\/spreadsheets\/d\/sheet123\/edit/);
+  assert.match(sheetOffline.warnings[0], /Google Sheet shortcut/);
+
+  // 6. Google Sheets (.gsheet) live Drive export (CSV text)
+  const sheetLive = await extractDocument(
+    "Metrics.gsheet",
+    Buffer.from(JSON.stringify({ doc_id: "sheetLiveId" })),
+    {
+      googleDocuments: {
+        exportDocument: async (id, mime) => {
+          assert.equal(id, "sheetLiveId");
+          assert.equal(mime, "text/csv");
+          return Buffer.from("Quarter,Revenue,Growth\nQ1,1200000,15%\nQ2,1450000,21%\n");
+        },
+      },
+    },
+  );
+  assert.equal(sheetLive.status, "ready");
+  assert.match(sheetLive.text, /Quarter,Revenue,Growth/);
+  assert.match(sheetLive.text, /Q2,1450000,21%/);
+  assert.match(sheetLive.warnings[0], /connected Google account/);
+
+  // 7. Google Slides (.gslides) offline pointer
+  const gslidesJson = JSON.stringify({
+    doc_id: "slides123",
+    url: "https://docs.google.com/presentation/d/slides123/edit",
+    email: "speaker@example.com",
+    resource_id: "presentation:slides123",
+  });
+  const slidesOffline = await extractDocument(
+    "Keynote.gslides",
+    Buffer.from(gslidesJson, "utf8"),
+  );
+  assert.equal(slidesOffline.status, "ready");
+  assert.match(slidesOffline.text, /Google Slide: Keynote/);
+  assert.match(slidesOffline.text, /https:\/\/docs\.google\.com\/presentation\/d\/slides123\/edit/);
+  assert.match(slidesOffline.warnings[0], /Google Slide shortcut/);
+
+  // 8. Google Slides (.gslides) live Drive export (PPTX format via worker)
+  const { default: JSZip } = await import("jszip");
+  const slideZip = new JSZip();
+  slideZip.file(
+    "ppt/slides/slide1.xml",
+    '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:p><a:r><a:t>Quarterly Engineering Strategy</a:t></a:r></a:p></p:sld>',
+  );
+  const slideBytes = await slideZip.generateAsync({ type: "nodebuffer" });
+  const slidesLive = await extractDocument(
+    "Quarterly-Deck.gslides",
+    Buffer.from(JSON.stringify({ doc_id: "slideDeckId" })),
+    {
+      googleDocuments: {
+        exportDocument: async (id, mime) => {
+          assert.equal(id, "slideDeckId");
+          assert.match(mime, /presentationml\.presentation/);
+          return slideBytes;
+        },
+      },
+    },
+  );
+  assert.equal(slidesLive.status, "ready");
+  assert.match(slidesLive.text, /Quarterly Engineering Strategy/);
+  assert.match(slidesLive.warnings[0], /connected Google account/);
+});
+
 function textPDF(text) {
   const stream =
     "BT /F1 12 Tf 50 780 Td (" + text.replace(/[()\\]/g, "\\$&") + ") Tj ET";

@@ -40,6 +40,9 @@ const SUPPORTED_VAULT_EXTS = new Set([
   ".json",
   ".yaml",
   ".yml",
+  ".gdoc",
+  ".gsheet",
+  ".gslides",
 ]);
 
 const MARKDOWN_EXTS = new Set([".md", ".markdown"]);

@@ -372,7 +372,10 @@ export function createCareerBuddy(ctx) {
             cached = {
               id,
               fingerprint: hash,
-              ...(await extractDocument(doc.name, bytes)),
+              ...(await extractDocument(doc.name, bytes, {
+                googleDocuments: ctx.googleDocuments,
+                fetcher: ctx.fetcher,
+              })),
               indexedAt: new Date().toISOString(),
             };
             putRow("document_text", cached);

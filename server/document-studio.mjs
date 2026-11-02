@@ -133,7 +133,7 @@ export function createDocumentStudio({
               originalUrl:
                 d.externalSource?.url ||
                 (d.notes || "").match(
-                  /https:\/\/docs\.google\.com\/document\/d\/[A-Za-z0-9_-]+(?:\/edit)?/,
+                  /https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/[A-Za-z0-9_-]+(?:\/edit)?/,
                 )?.[0] ||
                 "",
             })),

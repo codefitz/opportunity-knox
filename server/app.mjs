@@ -260,6 +260,9 @@ function inferDocumentTags(name, kind, content) {
     ".json": "Data",
     ".yaml": "Config",
     ".yml": "Config",
+    ".gdoc": "Google Doc",
+    ".gsheet": "Google Sheet",
+    ".gslides": "Google Slides",
   };
   if (extMap[ext]) add(extMap[ext]);
   const kindMap = {
@@ -322,14 +325,24 @@ const publicDocument = ({
   sha256,
   tags,
   ...rest
-}) => ({
-  ...rest,
-  category:documentCategory(rest),
-  tags: Array.isArray(tags)
-    ? tags
-    : inferDocumentTags(rest.name || "", rest.kind || ""),
-  url: `/api/documents/${rest.id}/content`,
-});
+}) => {
+  const originalUrl =
+    rest.originalUrl ||
+    rest.externalSource?.url ||
+    (rest.notes || "").match(
+      /https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/[A-Za-z0-9_-]+(?:\/edit)?/,
+    )?.[0] ||
+    "";
+  return {
+    ...rest,
+    ...(originalUrl ? { originalUrl } : {}),
+    category: documentCategory(rest),
+    tags: Array.isArray(tags)
+      ? tags
+      : inferDocumentTags(rest.name || "", rest.kind || ""),
+    url: `/api/documents/${rest.id}/content`,
+  };
+};
 function writeAtomic(path, data) {
   const temp = path + "." + randomUUID() + ".tmp";
   writeFileSync(temp, data, { mode: 0o600 });
@@ -731,6 +744,63 @@ export function createApp(options = {}) {
       tags !== undefined
         ? cleanDocumentTags(tags)
         : inferDocumentTags(name, kind, content);
+    let detectedExternalSource = externalSource;
+    const ext = extname(name).toLowerCase();
+    if (
+      !detectedExternalSource &&
+      [".gdoc", ".gsheet", ".gslides"].includes(ext) &&
+      content.length < 100000
+    ) {
+      try {
+        const raw = content.toString("utf8").replace(/^\uFEFF/, "").trim();
+        const data = JSON.parse(raw);
+        const docId =
+          data.doc_id ||
+          data.id ||
+          (typeof data.resource_id === "string"
+            ? data.resource_id.replace(
+                /^(?:document|spreadsheet|presentation):/,
+                "",
+              )
+            : "");
+        let url = data.url || "";
+        if (!docId && url) {
+          const m =
+            url.match(
+              /\/(?:document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/,
+            ) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+          if (m) docId = m[1];
+        }
+        const subpath =
+          ext === ".gsheet"
+            ? "spreadsheets"
+            : ext === ".gslides"
+              ? "presentation"
+              : "document";
+        if (!url && docId) url = `https://docs.google.com/${subpath}/d/${docId}/edit`;
+        if (docId || url) {
+          detectedExternalSource = {
+            provider: "google-docs",
+            id: docId,
+            url,
+            email: data.email || "",
+          };
+        }
+      } catch {
+        const m = content
+          .toString("utf8")
+          .match(
+            /https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/,
+          );
+        if (m) {
+          detectedExternalSource = {
+            provider: "google-docs",
+            id: m[1],
+            url: m[0],
+          };
+        }
+      }
+    }
     const document = {
       id,
       name,
@@ -748,7 +818,7 @@ export function createApp(options = {}) {
       sha256: createHash("sha256").update(content).digest("hex"),
       revision: 1,
       ...(generation ? { generation } : {}),
-      ...(externalSource?{externalSource}:{}),
+      ...(detectedExternalSource ? { externalSource: detectedExternalSource } : {}),
       ...(importRequestId ? { importRequestId } : {}),
     };
     try {
@@ -886,6 +956,8 @@ export function createApp(options = {}) {
     documentPath: (doc) => doc.readOnlyDirectorySource ? directories.sourcePath(doc) : doc.readOnlyVaultSource ? obsidian.sourcePath(doc) : documentPath(doc),
     settings,
     saveDocument,
+    googleDocuments,
+    fetcher: options.googleFetch || fetch,
     buddyFetch: options.buddyFetch,
     embeddingFn: options.embeddingFn,
     automationEnabled:options.automationEnabled,

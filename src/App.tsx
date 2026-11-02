@@ -3260,7 +3260,7 @@ function Documents({
           <p>
             {opportunityId
               ? "Each upload creates a separate version. Submitted files stay preserved."
-              : "Drag and drop files or entire directories into your library. Career Buddy prepares PDF, DOCX and text sources locally."}
+              : "Drag and drop files or entire directories into your library. Career Buddy prepares PDF, DOCX, Google Workspace (.gdoc, .gsheet, .gslides) and text sources locally."}
           </p>
         </div>
         <div className="section-actions">
@@ -3319,7 +3319,7 @@ function Documents({
           <Upload size={21} />
           <strong>{summaryLabel}</strong>
           <span>
-            PDF, Word, PowerPoint, Markdown, HTML, RTF, captions (.vtt/.srt), or
+            PDF, Word, PowerPoint, Markdown, HTML, RTF, captions (.vtt/.srt), Google Workspace (.gdoc, .gsheet, .gslides), or
             text · multiple files or folders · up to 15 MB per file
           </span>
           <input
@@ -3741,6 +3741,23 @@ function Documents({
                                 {doc.kind} · v{doc.version} ·{" "}
                                 {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
                                 {formatDate(doc.createdAt, timezone)}
+                                {(doc.originalUrl || doc.externalSource?.url) && (
+                                  <>
+                                    {" · "}
+                                    <a
+                                      href={doc.originalUrl || doc.externalSource?.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={{ textDecoration: "underline" }}
+                                    >
+                                      {doc.name.endsWith(".gsheet")
+                                        ? "Google Sheet"
+                                        : doc.name.endsWith(".gslides")
+                                          ? "Google Slides"
+                                          : "Google Doc"}
+                                    </a>
+                                  </>
+                                )}
                               </small>
                               <DocumentCategory document={doc} onChanged={onChanged} onError={onError}/>
                               <div className="document-tags">
@@ -3947,6 +3964,18 @@ function Documents({
                               >
                                 <FolderInput size={17} />
                               </button>
+                            )}
+                            {(doc.originalUrl || doc.externalSource?.url) && (
+                              <a
+                                className="icon-button"
+                                href={doc.originalUrl || doc.externalSource?.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Open ${doc.name} in Google`}
+                                title={`Open in ${doc.name.endsWith(".gsheet") ? "Google Sheets" : doc.name.endsWith(".gslides") ? "Google Slides" : "Google Docs"}`}
+                              >
+                                <ArrowUpRight size={17} />
+                              </a>
                             )}
                             <a
                               className="icon-button"

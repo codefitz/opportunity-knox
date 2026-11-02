@@ -50,6 +50,15 @@ export type BoardDocument = {
   notes: string;
   tags?: string[];
   url: string;
+  originalUrl?: string;
+  externalSource?: {
+    provider?: string;
+    id?: string;
+    url?: string;
+    version?: string;
+    modifiedTime?: string;
+    importedAt?: string;
+  };
 };
 export type OpportunityReview = {
   strengths: string;

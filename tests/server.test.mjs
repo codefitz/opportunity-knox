@@ -2680,6 +2680,81 @@ test("document imports infer each file independently, stay unclassified when unc
   assert.equal((await f.request("/api/documents")).data.documents.find(d => d.id === byCategory.data.id).status, "");
 });
 
+test("Career Hub uploads, indexes and links Google Docs (.gdoc) shortcut files", async (t) => {
+  const f = await fixture(t); await f.setup();
+  const gdocContent = JSON.stringify({
+    doc_id: "fictional-gdoc-123",
+    url: "https://docs.google.com/document/d/fictional-gdoc-123/edit",
+    email: "test@example.com",
+  });
+  const contentBase64 = Buffer.from(gdocContent, "utf8").toString("base64");
+  const uploaded = await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Career/Fictional Master CV.gdoc",
+      contentBase64,
+    },
+  });
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.data.kind, "cv");
+  assert.equal(uploaded.data.category, "master-cv");
+  assert.ok(uploaded.data.tags.includes("Google Doc"));
+  assert.equal(uploaded.data.externalSource?.provider, "google-docs");
+  assert.equal(uploaded.data.externalSource?.id, "fictional-gdoc-123");
+  assert.equal(uploaded.data.originalUrl, "https://docs.google.com/document/d/fictional-gdoc-123/edit");
+
+  const prepare = await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [uploaded.data.id], force: true },
+  });
+  assert.equal(prepare.status, 200);
+  const docSummary = prepare.data.documents.find((d) => d.id === uploaded.data.id);
+  assert.equal(docSummary.extraction.status, "ready");
+  assert.ok(docSummary.extraction.chunkCount > 0);
+
+  const storedRow = JSON.parse(
+    f.app.db.prepare("SELECT data FROM document_text WHERE id=?").get(uploaded.data.id).data,
+  );
+  assert.match(storedRow.text, /Google Doc: Fictional Master CV/);
+  assert.match(storedRow.text, /fictional-gdoc-123/);
+
+  // Upload and index Google Sheet (.gsheet)
+  const gsheetUploaded = await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Financials/Career Budget.gsheet",
+      contentBase64: Buffer.from(
+        JSON.stringify({ doc_id: "sheet-abc", url: "https://docs.google.com/spreadsheets/d/sheet-abc/edit" }),
+      ).toString("base64"),
+    },
+  });
+  assert.equal(gsheetUploaded.status, 201);
+  assert.ok(gsheetUploaded.data.tags.includes("Google Sheet"));
+  assert.equal(gsheetUploaded.data.originalUrl, "https://docs.google.com/spreadsheets/d/sheet-abc/edit");
+
+  // Upload and index Google Slides (.gslides)
+  const gslidesUploaded = await f.request("/api/documents", {
+    method: "POST",
+    body: {
+      name: "Presentations/Portfolio Deck.gslides",
+      contentBase64: Buffer.from(
+        JSON.stringify({ doc_id: "slides-xyz", url: "https://docs.google.com/presentation/d/slides-xyz/edit" }),
+      ).toString("base64"),
+    },
+  });
+  assert.equal(gslidesUploaded.status, 201);
+  assert.ok(gslidesUploaded.data.tags.includes("Google Slides"));
+  assert.equal(gslidesUploaded.data.originalUrl, "https://docs.google.com/presentation/d/slides-xyz/edit");
+
+  const prepareAll = await f.request("/api/buddy/index", {
+    method: "POST",
+    body: { documentIds: [gsheetUploaded.data.id, gslidesUploaded.data.id], force: true },
+  });
+  assert.equal(prepareAll.status, 200);
+  assert.equal(prepareAll.data.documents.find((d) => d.id === gsheetUploaded.data.id).extraction.status, "ready");
+  assert.equal(prepareAll.data.documents.find((d) => d.id === gslidesUploaded.data.id).extraction.status, "ready");
+});
+
 test("backup inspection checks real snapshot hashes without changing the board", async (t) => {
   const f = await fixture(t); await f.setup();
   const doc = await f.request("/api/documents", {method:"POST",body:{name:"fictional.txt",kind:"reference",contentBase64:Buffer.from("fictional original").toString("base64")}});

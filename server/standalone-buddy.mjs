@@ -96,7 +96,10 @@ export function createStandaloneBuddy(ctx) {
             400,
             "Remove older chat attachments before adding more (100 file limit).",
           );
-        const extracted = await extractDocument(name, bytes);
+        const extracted = await extractDocument(name, bytes, {
+          googleDocuments: ctx.googleDocuments,
+          fetcher: ctx.fetcher,
+        });
         const a = {
           ...extracted,
           id: randomUUID(),

@@ -1,5 +1,5 @@
 import { Worker } from "node:worker_threads";
-import { extname } from "node:path";
+import { extname, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { load } from "cheerio";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
@@ -95,7 +95,36 @@ export function chunkText(text, size = 1500) {
   }
   return chunks;
 }
-export async function extractDocument(name, bytes) {
+const GOOGLE_SHORTCUTS = {
+  ".gdoc": {
+    label: "Google Doc",
+    subpath: "document",
+    exportMime:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    workerExt: ".docx",
+    publicExport: (id) =>
+      `https://docs.google.com/document/d/${id}/export?format=txt`,
+  },
+  ".gsheet": {
+    label: "Google Sheet",
+    subpath: "spreadsheets",
+    exportMime: "text/csv",
+    workerExt: null,
+    publicExport: (id) =>
+      `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`,
+  },
+  ".gslides": {
+    label: "Google Slide",
+    subpath: "presentation",
+    exportMime:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    workerExt: ".pptx",
+    publicExport: (id) =>
+      `https://docs.google.com/presentation/d/${id}/export/txt`,
+  },
+};
+
+export async function extractDocument(name, bytes, options = {}) {
   const extension = extname(name).toLowerCase();
   if (bytes.length > 20 * 1024 * 1024)
     return {
@@ -104,6 +133,198 @@ export async function extractDocument(name, bytes) {
       chunks: [],
       warnings: ["This file exceeds the 20 MB extraction limit."],
     };
+  if (GOOGLE_SHORTCUTS[extension]) {
+    const config = GOOGLE_SHORTCUTS[extension];
+    const raw = bytes.toString("utf8").replace(/^\uFEFF/, "").trim();
+    let docId = "";
+    let url = "";
+    let email = "";
+    try {
+      const data = JSON.parse(raw);
+      docId =
+        data.doc_id ||
+        data.id ||
+        (typeof data.resource_id === "string"
+          ? data.resource_id.replace(
+              /^(?:document|spreadsheet|presentation):/,
+              "",
+            )
+          : "");
+      url = data.url || "";
+      email = data.email || "";
+    } catch {
+      const match = raw.match(
+        /https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/,
+      );
+      if (match) {
+        docId = match[1];
+        url = match[0];
+      }
+    }
+    if (!docId && url) {
+      const match =
+        url.match(
+          /\/(?:document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/,
+        ) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      if (match) docId = match[1];
+    }
+    if (!url && docId) {
+      url = `https://docs.google.com/${config.subpath}/d/${docId}/edit`;
+    }
+
+    if (!docId && !url) {
+      return {
+        status: "unavailable",
+        text: "",
+        chunks: [],
+        warnings: [
+          `This ${extension} file does not contain a valid Google reference (ID or URL).`,
+        ],
+      };
+    }
+
+    let exportedBytes = null;
+
+    if (options.googleDocuments?.exportDocument && docId) {
+      try {
+        exportedBytes = await options.googleDocuments.exportDocument(
+          docId,
+          config.exportMime,
+        );
+      } catch {
+        // Fall back to public export or pointer summary
+      }
+    }
+
+    if (
+      !exportedBytes &&
+      docId &&
+      (options.fetcher || typeof fetch === "function")
+    ) {
+      const fetcher = options.fetcher || fetch;
+      try {
+        const publicUrl = config.publicExport(docId);
+        const res = await fetcher(publicUrl, {
+          signal: AbortSignal.timeout(5000),
+          redirect: "follow",
+        });
+        if (res && res.ok) {
+          const contentType = res.headers?.get?.("content-type") || "";
+          if (!contentType.includes("text/html")) {
+            const bodyText = await res.text();
+            if (
+              bodyText &&
+              !bodyText.includes("<!DOCTYPE html>") &&
+              !bodyText.includes("<html")
+            ) {
+              const clean = bodyText
+                .replace(/\0/g, "")
+                .replace(/\r\n?/g, "\n")
+                .trim();
+              if (clean.length > 0) {
+                const chunks = chunkText(clean);
+                return {
+                  status: chunks.length ? "ready" : "unavailable",
+                  text: clean.slice(0, 300000),
+                  chunks,
+                  warnings: [
+                    `${config.label} data extracted from public export.`,
+                  ],
+                  metadata: { docId, url, email },
+                };
+              }
+            }
+          }
+        }
+      } catch {
+        // Fall through to pointer summary
+      }
+    }
+
+    if (exportedBytes) {
+      if (!config.workerExt) {
+        const bodyText = exportedBytes.toString("utf8");
+        const clean = bodyText
+          .replace(/\0/g, "")
+          .replace(/\r\n?/g, "\n")
+          .trim();
+        if (clean.length > 0) {
+          const chunks = chunkText(clean);
+          return {
+            status: chunks.length ? "ready" : "unavailable",
+            text: clean.slice(0, 300000),
+            chunks,
+            warnings: [
+              `${config.label} data extracted live via connected Google account.`,
+            ],
+            metadata: { docId, url, email },
+          };
+        }
+      } else {
+        try {
+          const result = await new Promise((resolve) => {
+            const worker = new Worker(
+              new URL("./buddy-extract-worker.mjs", import.meta.url),
+              {
+                workerData: {
+                  bytes: exportedBytes,
+                  extension: config.workerExt,
+                },
+                resourceLimits: { maxOldGenerationSizeMb: 256 },
+              },
+            );
+            const timer = setTimeout(() => {
+              void worker.terminate();
+              resolve({
+                error: "Extraction timed out. Try re-preparing this document.",
+              });
+            }, 25000);
+            const finish = (value) => {
+              clearTimeout(timer);
+              void worker.terminate();
+              resolve(value);
+            };
+            worker.once("message", finish);
+            worker.once("error", (e) => finish({ error: e.message }));
+          });
+          if (result?.text) {
+            const chunks = chunkText(result.text);
+            return {
+              status: chunks.length ? "ready" : "unavailable",
+              text: result.text.slice(0, 300000),
+              chunks,
+              warnings: [
+                `${config.label} text extracted live via connected Google account.`,
+                ...(result.warnings || []),
+              ],
+              metadata: { docId, url, email },
+            };
+          }
+        } catch {
+          // Fall through to pointer summary
+        }
+      }
+    }
+
+    const title = basename(name).replace(/\.(?:gdoc|gsheet|gslides)$/i, "");
+    const lines = [
+      `${config.label}: ${title}`,
+      url ? `URL: ${url}` : "",
+      docId ? `Document ID: ${docId}` : "",
+      email ? `Account: ${email}` : "",
+    ].filter(Boolean);
+    const text = lines.join("\n");
+    const chunks = chunkText(text);
+    return {
+      status: "ready",
+      text,
+      chunks,
+      warnings: [
+        `${config.label} shortcut (${extension}). Connect Google Docs in Career Hub → Connections to read live document text.`,
+      ],
+      metadata: { docId, url, email },
+    };
+  }
   if (
     TEXT_EXTENSIONS.includes(extension) ||
     [".vtt", ".srt", ".html", ".htm", ".rtf"].includes(extension)
@@ -154,7 +375,7 @@ export async function extractDocument(name, bytes) {
       text: "",
       chunks: [],
       warnings: [
-        "Use PDF, DOCX, PPTX, TXT, Markdown, HTML, RTF, or caption (.vtt/.srt) files for Career Buddy. The original is still stored.",
+        "Use PDF, DOCX, PPTX, Google Workspace (.gdoc/.gsheet/.gslides), TXT, Markdown, HTML, RTF, or caption (.vtt/.srt) files for Career Buddy. The original is still stored.",
       ],
     };
   const result = await new Promise((resolve) => {

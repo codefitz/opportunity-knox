@@ -1,6 +1,6 @@
 # Opportunity Knox
 
-[Latest stable release: v0.4.7](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current version: v0.4.7**
+[Latest stable release: v0.4.7](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current development version: v0.4.8-dev.0** (`main`)
 
 A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
@@ -8,7 +8,7 @@ A private career workspace, from a saved job description to the final hiring dec
 
 ## Releases and development
 
-Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch may contain changes beyond the latest release.
+Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release; it can contain changes beyond v0.4.7.
 
 The sidebar and Settings show the installed version, development/release label, and short Git commit linked to GitHub. Builds made with uncommitted changes also show **+ local changes**, because the commit alone does not describe their complete source. The **Latest release** link always opens GitHub's latest published release. Build labels describe the running app, not newer code waiting on the host.
 
@@ -85,7 +85,7 @@ The initial manual workflow covers opportunity capture, dated stage history and 
 - **Opportunities:** searchable list for detailed application tracking.
 - **Kanban board:** full-page eight-stage drag-and-drop board with a compact search/filter/Add opportunity bar. Stage headings stay visible while long columns scroll independently; scroll sideways to reach every stage. The back arrow returns to the opportunity list, and the actions menu retains clear-all. The sidebar remains visible; its hide/show control slides navigation out of view and lets the board expand. The same control works across workspace pages and with the bottom navigation on phones.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link tasks to opportunities.
-- **Career Hub & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click.
+- **Career Hub & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click. Read Google Workspace shortcut files (`.gdoc`, `.gsheet`, `.gslides`) with live Google Drive export, public export fallback, or metadata indexing, and open originals directly.
 - **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.
 - **Smarter job intake:** supports public URLs (HTML/PDF), pasted job text, and document uploads (PDF/DOCX/TXT/MD). Features bounded local English PDF OCR, original source snapshots, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
 - **Calendar export (RFC 5545 ICS):** export single interview events, an opportunity-specific `.ics` calendar, or subscribe to a global live interview feed across all opportunities.

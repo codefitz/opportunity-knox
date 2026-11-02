@@ -30,6 +30,9 @@ const extensions = new Set([
   ".json",
   ".yaml",
   ".yml",
+  ".gdoc",
+  ".gsheet",
+  ".gslides",
 ]);
 export function createDirectorySources({
   db,

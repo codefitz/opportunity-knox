@@ -1,5 +1,9 @@
 # Implementation roadmap
 
+## Google Workspace (.gdoc, .gsheet, .gslides) support in Career Hub — 2 November 2026
+
+Career Hub now supports Google Docs, Sheets, and Slides desktop shortcut and pointer files (`.gdoc`, `.gsheet`, `.gslides`) across uploads, read-only directory sources, Obsidian vault syncing, text preparation, semantic vector search, and standalone chat attachments. Uploaded or selected files automatically extract document IDs and URLs, infer document classification (e.g., CV or cover letter), and tag records with `Google Doc`, `Google Sheet`, or `Google Slides`. When Google Docs is connected via the app's OAuth configuration, text preparation exports and extracts live contents (DOCX for Docs, CSV for Sheets, PPTX for Slides); when offline, unconnected, or using public exports, Career Hub preserves pointer metadata, chunks, and direct Google Workspace links with open actions in the document list and Document Studio. Automated tests cover offline pointer parsing, live Google Drive export extraction, public export fallback, invalid file handling, and server upload/preparation workflows; live account consent remains separate.
+
 ## Document upload defaults — 2 November 2026
 
 File and folder uploads start without a status. Type and category default to per-file inference from filenames and folder names, with manual overrides; unclear files use Other. Existing records retain their statuses, and approval/submission remain explicit later actions. Saved upload attempts retain their original options for safe retries. Automated coverage includes mixed imports, overrides, idempotent retries, restart persistence and approval/submission of documents imported without status; running-app/browser validation is separate.
