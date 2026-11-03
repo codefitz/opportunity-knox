@@ -3286,10 +3286,12 @@ test('previous CV gallery thumbnails are private, cached, invalidated and reusab
  const source=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional CV.txt',kind:'cv',contentBase64:Buffer.from('New Candidate. Verified new content.').toString('base64')}})).data;sourceId=source.id;
  const bytes=await layoutDraft('Previous CV','# Prior Candidate\n\nOld private content.','executive');
  const style=(await f.request('/api/documents',{method:'POST',body:{name:'Previous CV.docx',kind:'cv',contentBase64:bytes.toString('base64')}})).data;
- await f.request('/api/documents',{method:'POST',body:{name:'CV template.docx',kind:'cv',category:'template',contentBase64:bytes.toString('base64')}});
+ const tpl=(await f.request('/api/documents',{method:'POST',body:{name:'CV template.docx',kind:'cv',category:'template',contentBase64:bytes.toString('base64')}})).data;
  const gallery='/api/document-studio/cv-styles';
  assert.equal((await f.request(gallery,{auth:false})).status,401);
- const listing=(await f.request(gallery)).data.documents;assert.deepEqual(listing.map(d=>d.id),[style.id]);
+ const galleryRes=(await f.request(gallery)).data;
+ const listing=galleryRes.documents;assert.deepEqual(listing.map(d=>d.id),[style.id]);
+ assert.deepEqual(galleryRes.templates.map(d=>d.id),[tpl.id]);
  const thumb=listing[0].thumbnailUrl;
  assert.equal((await f.request(thumb,{auth:false})).status,401);
  assert.equal((await f.request(thumb,{binary:true})).data.toString(),'fictional-png');
@@ -3315,6 +3317,10 @@ test('previous CV gallery thumbnails are private, cached, invalidated and reusab
  const manualReply = manualDraft.data.messages.at(-1);
  assert.match(manualReply.content,/Missing from Experience \(JD Gaps\)/);
  assert.equal(manualReply.draft.kind,'cv');
+ const tplDraft = await f.request(base+'/chat',{method:'POST',body:{...body,styleDocumentId:tpl.id,styleDocumentRevision:tpl.revision,requestId:'fictional-template-style'}});
+ assert.equal(tplDraft.status,200);
+ const tplReply = tplDraft.data.messages.at(-1);
+ assert.equal(tplReply.tailoring.styleDocumentId,tpl.id);
 });
 
 test('PDF and connected Google CV styles are selectable and applied to separate Word drafts',async t=>{

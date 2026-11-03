@@ -726,11 +726,12 @@ export function createCareerBuddy(ctx) {
           allowed.map((d) => d.id),
         );
         const autoTailor=body.autoTailor===true;
-        if(autoTailor && (!["cv","cover"].includes(action)||!["auto","classic","compact","executive"].includes(body.templateLayout||"auto")))
+        const validLayouts = ["auto", ...layouts.map((l) => l.id)];
+        if(autoTailor && (!["cv","cover"].includes(action)||!validLayouts.includes(body.templateLayout||"auto")))
           throw buddyError(400,"Choose a CV layout for tailoring.");
         const styleDocument=autoTailor&&action==="cv"&&body.styleDocumentId ? getDocuments().find(d=>d.id===body.styleDocumentId) : null;
-        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||styleDocument.category==="template"||!(styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé)\b/i.test(styleDocument.name))))
-          throw buddyError(400,"Choose an available previous CV style.");
+        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||!(styleDocument.category==="template"||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template)\b/i.test(styleDocument.name))))
+          throw buddyError(400,"Choose an available previous CV style or template.");
         if(styleDocument&&styleDocument.revision!==body.styleDocumentRevision)throw buddyError(409,"The style CV changed. Refresh the style selection.");
         if (body.passToAi !== undefined && typeof body.passToAi !== "boolean")
           throw buddyError(400, "passToAi must be a boolean.");

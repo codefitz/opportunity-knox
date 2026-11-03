@@ -13,3 +13,61 @@ test('previous CV styling reuses typography and page settings without carrying o
  assert.equal(await result.file('word/styles.xml').async('string'),await previous.file('word/styles.xml').async('string'));
  await assert.rejects(()=>layoutDraft('CV','New content','previous'),/previous Word CV/);
 });
+test('structured templates with tables preserve sidebar columns and layout containers',async()=>{
+ const templateZip=await JSZip.loadAsync(await layoutDraft('Template','# Old Person\n\n## Experience\nOld data.','classic'));
+ let xml=await templateZip.file('word/document.xml').async('string');
+ const tableXml='<w:tbl><w:tblPr><w:tblW w:w="9000" w:type="dxa"/></w:tblPr><w:tr><w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:fill="E0E6ED"/></w:tcPr><w:p><w:pPr><w:b/></w:pPr><w:r><w:t>SKILLS</w:t></w:r></w:p><w:p><w:r><w:t>Old skill 1</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="6000" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:b/></w:pPr><w:r><w:t>EXPERIENCE</w:t></w:r></w:p><w:p><w:r><w:t>Old job 1</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+ xml=xml.replace('</w:body>',tableXml+'</w:body>');
+ templateZip.file('word/document.xml',xml);
+ const templateBytes=await templateZip.generateAsync({type:'nodebuffer'});
+ const resultBytes=await layoutDraft('New Candidate','# Verified Candidate\n\n## Skills\n- TypeScript & React\n- Node & SQL\n\n## Experience\n- Lead Developer on verified platform.','previous',templateBytes);
+ const resultZip=await safeWord(resultBytes);
+ const resultXml=await resultZip.file('word/document.xml').async('string');
+ assert.match(resultXml,/<w:tbl/);
+ assert.match(resultXml,/w:fill="E0E6ED"/);
+ assert.match(resultXml,/TypeScript &amp; React/);
+ assert.match(resultXml,/Lead Developer on verified platform/);
+ assert.doesNotMatch(resultXml,/Old skill 1|Old job 1/);
+});
+
+test('executive template with multi-row experience table and sidebar vMerge preserves layout without retaining dummy text', async () => {
+ const templateZip = await JSZip.loadAsync(await layoutDraft('Executive Template', '# Dummy\n\nDummy text.', 'classic'));
+ let xml = await templateZip.file('word/document.xml').async('string');
+ const headerXml = '<w:p><w:r><w:t xml:space="preserve">CHARLOTTE </w:t></w:r><w:r><w:t>EXECUTE</w:t></w:r></w:p>' +
+  '<w:p><w:r><w:t>Chief Marketing Officer</w:t></w:r></w:p>' +
+  '<w:p><w:r><w:t>111 Pine St. New York, NY | (555)999-9999 | c@email.com</w:t></w:r></w:p>';
+ const tableXml = '<w:tbl>' +
+  '<w:tr><w:tc><w:p><w:r><w:t>Work Experience</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Sidebar</w:t></w:r></w:p></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p><w:r><w:t>2014 - Present</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Marketing Consultancy Inc.</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Chief Marketing Officer</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Duties: Responsible for digital marketing.</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p><w:r><w:t>EDUCATION</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p><w:r><w:t>May 2010</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Stanford University</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>MBA</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Summa Cum Laude</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+  '</w:tbl>';
+ xml = xml.replace('</w:body>', headerXml + tableXml + '</w:body>');
+ templateZip.file('word/document.xml', xml);
+ const templateBytes = await templateZip.generateAsync({ type: 'nodebuffer' });
+
+ const candidateMd = '# Wayne Fitzpatrick\nTechnology Consultant & Enterprise Architect\nwayne@example.com | +44 7000 000000 | London, UK\n\n' +
+  '## Professional Summary\nExperienced technology consultant.\n\n' +
+  '## Work Experience\n' +
+  '### Principal Architect | Global Consulting\n2020 – Present\n- Led enterprise cloud platforms.\n\n' +
+  '## Education\n- University of Liverpool: MSc Artificial Intelligence — expected Nov 2027';
+
+ const resultBytes = await layoutDraft('New Candidate', candidateMd, 'previous', templateBytes);
+ const resultZip = await safeWord(resultBytes);
+ const resultXml = await resultZip.file('word/document.xml').async('string');
+
+ assert.match(resultXml, /Wayne/);
+ assert.match(resultXml, /Fitzpatrick/);
+ assert.match(resultXml, /Technology Consultant &amp; Enterprise Architect/);
+ assert.match(resultXml, /wayne@example.com/);
+ assert.match(resultXml, /Global Consulting/);
+ assert.match(resultXml, /Principal Architect/);
+ assert.match(resultXml, /Led enterprise cloud platforms/);
+ assert.match(resultXml, /University of Liverpool/);
+ assert.match(resultXml, /MSc Artificial Intelligence/);
+ assert.doesNotMatch(resultXml, /CHARLOTTE|EXECUTE|Marketing Consultancy|Stanford University/);
+});

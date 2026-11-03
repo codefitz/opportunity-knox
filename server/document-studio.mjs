@@ -99,7 +99,9 @@ export function createDocumentStudio({
 }) {
   const previews = new Map(), thumbnails=new Map(), pendingThumbnails=new Map();
   let thumbnailQueue=Promise.resolve();
+  const cleanDocName = name => (String(name || "").split(/[/\\]/).pop() || name);
   const isCV=d=>/\.(docx|pdf|gdoc)$/i.test(d.name)&&d.category!=="template"&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
+  const isTemplate=d=>/\.(docx|pdf|gdoc)$/i.test(d.name)&&(d.category==="template"||/\btemplate\b/i.test(d.name));
   let busy = false;
   function clean() {
     for (const [id, p] of previews)
@@ -132,7 +134,11 @@ export function createDocumentStudio({
     async handle(path, method, req, res, { json, readBody }) {
       clean();
       if(path==="/api/document-studio/cv-styles"&&method==="GET"){
-        json(res,{documents:getDocuments().filter(isCV).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id}))});return true;
+        json(res,{
+          googleConnected: !!googleDocuments?.isConnected?.(),
+          documents:getDocuments().filter(isCV).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:cleanDocName(d.name),fullName:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id})),
+          templates:getDocuments().filter(isTemplate).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:cleanDocName(d.name),fullName:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id}))
+        });return true;
       }
       const thumbnailMatch=path.match(/^\/api\/document-studio\/cv-styles\/([^/]+)\/thumbnail$/)||path.match(/^\/api\/document-studio\/thumbnails\/([^/]+)$/);
       if(thumbnailMatch&&method==="GET"){
@@ -196,7 +202,7 @@ export function createDocumentStudio({
         return true;
       }
       const templateMatch = path.match(
-        /^\/api\/document-studio\/templates\/([a-z]+)$/,
+        /^\/api\/document-studio\/templates\/([a-z-]+)$/,
       );
       if (templateMatch && method === "GET") {
         const layout = layouts.find((l) => l.id === templateMatch[1]);

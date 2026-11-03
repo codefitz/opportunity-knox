@@ -1,5 +1,46 @@
 # Implementation roadmap
 
+## Structural CV template population and refined tailoring workflow — 3 November 2026
+
+Resolved formatting/sidebar loss in AI-tailored CVs and refined the opportunity Documents tab creation workflow:
+- **Automatic save on generation:** Clicking "Generate with AI" automatically creates the tailored CV/cover drafts and immediately saves the editable Word (.docx) files to Opportunity Documents without requiring a separate "Save" click. The manual "Save" action remains available for re-saving if edits are made in the collapsible draft review section.
+- **Structural template preservation engine:** When tailoring against structured Word templates or previous CVs containing tables or sidebar columns (`<w:tbl>`, `<w:tc>`):
+  - Parses candidate markdown into structured sections (Name, Role, Contact, Summary, Accomplishments, Skills, Experience, Education).
+  - Replaces all header placeholder identity elements (e.g. multi-run names like `CHARLOTTE` + `EXECUTE`, subtitle/role lines, contact info, and narrative objectives) with verified candidate information.
+  - Handles nested sidebar tables (e.g. Accomplishments and Competencies) by cloning paragraph styling and clearing all dummy items.
+  - Handles multi-row table sections (e.g. Experience and Education) by detecting heading rows, cloning template row clusters (dates, company/institution, title/degree, duties/bullets), preserving vertical merge sidebar cells (`<w:vMerge/>`), and purging old template rows.
+  - Handles sibling and in-cell paragraph sections across single-table and body layouts without leaving obsolete placeholders.
+- **Compact document listbox:** Scaled down list font sizes (`0.83rem` title, `0.74rem` description, `0.65rem` badge) and compacted spacing (`0.38rem` vertical padding) to allow dense browsing of templates and previous CVs.
+- **Clean titles without path clutter:** Cleaned up the document list display to show only clean titles and basenames, stripping folder paths both on the frontend and in `/api/document-studio/cv-styles`.
+- **Conditional Google Docs shortcuts:** Filtered out `.gdoc` shortcuts from the listbox unless Google Drive is authenticated (`googleConnected`), preventing broken selections.
+- **Streamlined action controls:** Removed the redundant "Pass to AI" checkbox (defaulting to enabled). Replaced the single "Tailor a fresh version" button with two distinct choices:
+  - **Use this CV/Template (Download):** Directly downloads the selected preset or library template without AI invocation.
+  - **Generate with AI:** Generates and auto-saves an ATS-aligned tailored draft preserving the selected template's structural layout.
+- **Renamed save action:** Renamed "Save to Opportunity Documents" to "Save".
+- **Collapsible pre-generation editor:** Tucked custom instructions and pre-generation tailoring adjustments away into an expandable `<details>` section placed before the action buttons, collapsed by default.
+- Automated test suite passes (279 Node tests, 43 Python launcher tests); production build verified (`tsc --noEmit && vite build`). Running-container browser verification remains distinct.
+
+## Listbox style selector and large preview pane on Opportunity Documents — 3 November 2026
+
+Redesigned the CV creation and style selection experience in the Opportunity Documents tab (`TailorApplication.tsx`):
+- **Single text list box with category filtering:** Replaced horizontal thumbnail strips with a clean listbox displaying all style options. Users can filter by **All**, **Templates** (built-in presets and library templates), or **Previous CVs**, with live text search across titles, descriptions, and formats.
+- **Dedicated AI creation alternative:** Positioned "✨ Let AI choose / create" prominently at the top of the listbox, allowing users to opt for automatic ATS-optimized role matching at any time.
+- **Large rendered thumbnail preview pane:** Added a prominent preview pane on the right that renders the single selected item:
+  - For Word templates and previous CVs, renders a large first-page document thumbnail (via `/api/document-studio/thumbnails/:id`) showing page typography, headers, margins, and column layouts with high fidelity.
+  - For built-in presets, renders high-resolution layout preview cards.
+  - For AI generation, displays a structured layout strategy card highlighting role matching, ATS semantic headings, and evidence grounding.
+- **Responsive & accessible:** Supports keyboard radio group navigation (`role="radiogroup"`, `role="radio"`, Enter/Space selection), sticky preview scrolling on desktop, and clean vertical stacking on mobile.
+- Automated tests pass (277 Node tests, 43 Python launcher tests); production build verified (`tsc --noEmit && vite build`). Running-container browser verification remains distinct.
+
+## Template selection in Opportunity Documents tab — 3 November 2026
+
+Expanded the Opportunity Documents tab style picker to include library templates alongside built-in presets and previous CVs:
+- **Library Templates strip:** Surfaces uploaded/saved templates from the Career Library (documents with category `template` or template markers), rendering lazy first-page thumbnails, search filtering, version badges, and radio selection.
+- **Expanded built-in presets:** Added IT & Technical, Combination, and Career Change presets to the built-in layout options in Document Studio and tailoring.
+- **Marked Word template (`{{content}}`) auto-detection:** When selecting a Word template containing a `{{content}}` placeholder, the tailoring draft engine routes to custom template insertion to preserve headers, borders, tables, and branding.
+- **Server validation:** Enabled documents with category `template` as valid tailoring style references in `/api/opportunities/:id/buddy/chat`.
+- Automated test suite passes (277 Node tests, 43 Python launcher tests); container browser verification remains distinct.
+
 ## Clean Career Buddy tab with top composer and bottom historic chats — 2 November 2026
 
 The opportunity Career Buddy tab has been streamlined to eliminate embedded visual clutter and provide an intuitive conversational flow:
