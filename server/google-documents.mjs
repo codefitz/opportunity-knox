@@ -146,6 +146,50 @@ export function createGoogleDocuments({
         true,
       );
     },
+    async searchDrive(query = "", pageToken = null, supportedOnly = true) {
+      const escaped = String(query || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const mimeClause = supportedOnly
+        ? `(mimeType='${DOC}' or mimeType='${DOCX}' or mimeType='application/pdf')`
+        : `mimeType='${DOC}'`;
+      const q = `trashed=false and ${mimeClause}` + (escaped ? ` and name contains '${escaped}'` : "");
+      const params = new URLSearchParams({
+        q,
+        fields: "nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink,version)",
+        pageSize: "50",
+        orderBy: "modifiedTime desc",
+        supportsAllDrives: "true",
+        includeItemsFromAllDrives: "true",
+        ...(pageToken ? { pageToken: String(pageToken) } : {}),
+      });
+      const result = await api("files?" + params);
+      return {
+        files: (result.files || []).map((f) => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.mimeType,
+          modifiedTime: f.modifiedTime,
+          version: String(f.version || f.modifiedTime || ""),
+          webViewLink: f.webViewLink || "",
+        })),
+        nextPageToken: result.nextPageToken || null,
+      };
+    },
+    async getFile(id) {
+      return await api(
+        "files/" +
+          fileId(id) +
+          "?fields=id,name,mimeType,modifiedTime,version,webViewLink&supportsAllDrives=true",
+      );
+    },
+    async downloadFileContent(id, mimeType) {
+      if (mimeType === DOC) {
+        return await api(
+          "files/" + fileId(id) + "/export?" + new URLSearchParams({ mimeType: DOCX }),
+          true,
+        );
+      }
+      return await api("files/" + fileId(id) + "?alt=media", true);
+    },
     async handle(path, method, req, res, { json, readBody }) {
       if (path === "/api/connections/google/callback" && method === "GET") {
         const q = new URL(req.url, "http://board").searchParams,

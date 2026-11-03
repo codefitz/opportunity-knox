@@ -38,5 +38,34 @@ class CodexBridgeTests(unittest.TestCase):
     for _ in range(100):
      if response.exists():break
      time.sleep(.01)
-    self.assertEqual(json.loads(response.read_text())['errorCode'],'cancelled')
+     self.assertEqual(json.loads(response.read_text())['errorCode'],'cancelled')
+   finally:worker.close()
+ def test_document_generation_command_flags(self):
+  args=bridge.command('codex','/tmp/workspace','schema.json','manifest.json','default',kind='document-generation',images=['/tmp/p1.png','/tmp/p2.png'])
+  self.assertIn('workspace-write',args)
+  self.assertNotIn('features.shell_tool=false',args)
+  self.assertIn('-i',args)
+  self.assertIn('/tmp/p1.png',args)
+  self.assertIn('/tmp/p2.png',args)
+  self.assertIn('-C',args)
+  self.assertIn('/tmp/workspace',args)
+ def test_document_generation_worker_and_validation(self):
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d);fake=p/'fake-doc-codex'
+   fake.write_text('#!'+sys.executable+'\nimport sys,pathlib\nif sys.argv[1:]==["login","status"]:print("Logged in using ChatGPT");sys.exit(0)\nsys.stdin.read()\nc_idx=sys.argv.index("-C")+1\nws=pathlib.Path(sys.argv[c_idx])\n(ws/"output.docx").write_bytes(b"PK\\x03\\x04fictional-docx")\nout_idx=sys.argv.index("-o")+1\nmanifest_path=pathlib.Path(sys.argv[out_idx])\nmanifest_path.write_text(\'{"outputDocx":"output.docx","pageCount":2}\')\n');fake.chmod(0o700)
+   worker=bridge.CodexWorker(p,str(fake));root=p/'codex-buddy';jobid='33333333-3333-4333-8333-333333333333'
+   try:
+    job_dir=root/(jobid+'.job');(job_dir/'workspace').mkdir(parents=True,exist_ok=True);(job_dir/'inputs').mkdir(parents=True,exist_ok=True)
+    req_file=root/(jobid+'.request.json');resp_file=root/(jobid+'.response.json')
+    req_file.write_text(json.dumps({'id':jobid,'kind':'document-generation','jobDir':str(job_dir),'prompt':'Generate CV','schema':{'type':'object'},'model':'default','expiresAt':time.time()+30}))
+    for _ in range(100):
+     if resp_file.exists():break
+     time.sleep(.05)
+    self.assertTrue(resp_file.exists())
+    data=json.loads(resp_file.read_text())
+    self.assertIn('output',data)
+    manifest=json.loads(data['output'])
+    self.assertEqual(manifest['outputDocx'],'output.docx')
+    self.assertEqual(manifest['pageCount'],2)
+    self.assertTrue((job_dir/'workspace'/'output.docx').exists())
    finally:worker.close()

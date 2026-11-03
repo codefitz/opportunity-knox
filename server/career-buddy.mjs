@@ -1,4 +1,5 @@
 import { readCVTemplate, populateCVTemplate } from "./cv-template.mjs";
+import { runCodexDocumentGeneration } from "./codex-local.mjs";
 import {requireAIStage} from "./ai-workflow.mjs";
 import {createBuddyRequests} from "./buddy-requests.mjs";
 import {createOpportunityAutomation} from "./opportunity-automation.mjs";
@@ -731,7 +732,7 @@ export function createCareerBuddy(ctx) {
         if(autoTailor && (!["cv","cover"].includes(action)||!validLayouts.includes(body.templateLayout||"auto")))
           throw buddyError(400,"Choose a CV layout for tailoring.");
         const styleDocument=autoTailor&&action==="cv"&&body.styleDocumentId ? getDocuments().find(d=>d.id===body.styleDocumentId) : null;
-        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||!(styleDocument.category==="template"||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template)\b/i.test(styleDocument.name))))
+        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||!(["template","cv-template","cover-letter-template"].includes(styleDocument.category)||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template)\b/i.test(styleDocument.name))))
           throw buddyError(400,"Choose an available previous CV style or template.");
         if(styleDocument&&styleDocument.revision!==body.styleDocumentRevision)throw buddyError(409,"The style CV changed. Refresh the style selection.");
         if (body.passToAi !== undefined && typeof body.passToAi !== "boolean")
@@ -767,7 +768,7 @@ export function createCareerBuddy(ctx) {
           const tailoringDeadline=Date.now()+(c.requestTimeoutSeconds||(c.provider==="codex"?300:120))*1000;
           let selectionUsage={};
           if(autoTailor){
-            const available=allowed.filter(d=>!d.generation&&d.category!=="template"&&d.kind!=="jd");
+            const available=allowed.filter(d=>!d.generation&&!["template","cv-template","cover-letter-template"].includes(d.category)&&d.kind!=="jd");
             const cvs=available.filter(d=>d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
             const query=(opportunity.role+"\n"+opportunity.description).slice(0,12000);
             const shortlist=body.sourceCvId ? [body.sourceCvId] : await vectors.selectSources(query,cvs,5);
@@ -804,7 +805,7 @@ export function createCareerBuddy(ctx) {
           const semantic = await vectors.search(indexed, message.slice(0,1200)+"\n"+opportunity.role.slice(0,300));
           indexed = semantic.documents;
           const evidence = indexed.filter(
-            (d) => d.status === "ready" && !d.generation && d.category!=="template",
+            (d) => d.status === "ready" && !d.generation && !["template","cv-template","cover-letter-template"].includes(d.category),
           );
           if (
             ["cv", "cover"].includes(action) &&
@@ -885,6 +886,7 @@ export function createCareerBuddy(ctx) {
               "This opportunity history is too long for one request. Use a smaller source selection.",
             );
           let parsed;
+          let generatedArtifact = null;
           if (autoTailor && !passToAi) {
             task.progress("preparing");
             parsed = {
@@ -912,6 +914,72 @@ export function createCareerBuddy(ctx) {
                   action === "cv"
                     ? selectedCv.text
                     : `# Cover Letter\n\nDear Hiring Team,\n\nI am writing to express my interest in the ${opportunity.role} position at ${opportunity.company}.\n\nSincerely,\nCandidate`,
+              },
+              sourceIds: [selectedCv.id],
+            };
+          } else if (
+            autoTailor &&
+            action === "cv" &&
+            c.provider === "codex" &&
+            styleDocument &&
+            /\.docx$/i.test(styleDocument.name)
+          ) {
+            task.progress("preparing");
+            const styleBytes = readFileSync(documentPath(styleDocument));
+            const genResult = await runCodexDocumentGeneration({
+              config: c,
+              styleDocument: {
+                name: styleDocument.name,
+                bytes: styleBytes,
+                kind: styleDocument.kind,
+              },
+              sourceCv: {
+                id: selectedCv.id,
+                name: selectedCv.name,
+                text: selectedCv.text,
+              },
+              opportunity: {
+                company: opportunity.company,
+                role: opportunity.role,
+                description: opportunity.description,
+              },
+              brief: message,
+              instructions: body.instructions || "",
+              evidence: evidence.map((d) => ({ name: d.name, text: d.text })),
+              root: ctx.codexQueueDir,
+            });
+            task.check();
+            generatedArtifact = {
+              bytes: genResult.docx.toString("base64"),
+              manifest: genResult.manifest,
+            };
+            const manifestNotes =
+              genResult.manifest.notes ||
+              "Tailored CV preserving reference visual layout.";
+            const compromises = genResult.manifest.layoutCompromises
+              ? `\n\n### Layout Notes\n- ${genResult.manifest.layoutCompromises}`
+              : "";
+            parsed = {
+              reply: [
+                "### Matched Strengths",
+                `- Structural layout, sidebar and typography preserved from ${styleDocument.name}.`,
+                `- Candidate career history and factual qualifications tailored for ${opportunity.role}.`,
+                "",
+                "### Missing from Experience (JD Gaps)",
+                "- Direct comparison against role requirements completed during document generation.",
+                "",
+                "### Tailoring Focus",
+                `- ${manifestNotes}${compromises}`,
+              ].join("\n"),
+              changes: [],
+              draft: {
+                kind: "cv",
+                title:
+                  "CV - " +
+                  opportunity.company +
+                  " - " +
+                  opportunity.role,
+                content: selectedCv.text,
               },
               sourceIds: [selectedCv.id],
             };
@@ -1003,6 +1071,8 @@ export function createCareerBuddy(ctx) {
             content: parsed.reply,
             changes: parsed.changes,
             draft: parsed.draft,
+            artifactBytes: generatedArtifact?.bytes || null,
+            artifactManifest: generatedArtifact?.manifest || null,
             sourceIds: parsed.sourceIds,
             sources,
             context: {
@@ -1116,25 +1186,31 @@ export function createCareerBuddy(ctx) {
           const styleId=saved.draft.kind==="cv"?saved.tailoring?.styleDocumentId:null;
           const styleDoc=styleId?getDocuments().find(d=>d.id===styleId):null;
           if(styleId&&(!styleDoc||styleDoc.revision!==saved.tailoring.styleDocumentRevision||styleDoc.sha256!==saved.tailoring.styleDocumentHash))throw buddyError(409,"The previous CV style changed. Generate a fresh draft before saving.");
-          const hash = fingerprint(Buffer.from(content + "\n" + title+(layout?"\n"+layout:"")+(styleId?"\n"+styleId+":"+styleDoc.revision:"")));
+          const hash = fingerprint(Buffer.from(content + "\n" + title+(layout?"\n"+layout:"")+(styleId?"\n"+styleId+":"+styleDoc.revision:"")+(saved.artifactBytes ? "\nartifact:" + saved.artifactBytes.length : "")));
           if (saved.savedHash !== hash) {
-            let styleBytes;
-            if(styleDoc){
-              if(/\.pdf$/i.test(styleDoc.name)){
-                if(!saved.tailoring.styleProfile)throw buddyError(409,"Generate a fresh draft to read this PDF’s style.");
-                styleBytes=await pdfStyleTemplate(saved.tailoring.styleProfile);
-              }else if(/\.gdoc$/i.test(styleDoc.name)){
-                styleBytes=await ctx.googleDocuments.exportDocument(styleDoc.externalSource.id);
-                if(await styleSnapshot(styleBytes)!==saved.tailoring.styleSnapshotHash)throw buddyError(409,"The live Google CV changed. Generate a fresh draft before saving.");
-              }else styleBytes=readFileSync(documentPath(styleDoc));
+            let bytes;
+            if (saved.artifactBytes) {
+              bytes = Buffer.from(saved.artifactBytes, "base64");
+              await safeWord(bytes);
+            } else {
+              let styleBytes;
+              if(styleDoc){
+                if(/\.pdf$/i.test(styleDoc.name)){
+                  if(!saved.tailoring.styleProfile)throw buddyError(409,"Generate a fresh draft to read this PDF’s style.");
+                  styleBytes=await pdfStyleTemplate(saved.tailoring.styleProfile);
+                }else if(/\.gdoc$/i.test(styleDoc.name)){
+                  styleBytes=await ctx.googleDocuments.exportDocument(styleDoc.externalSource.id);
+                  if(await styleSnapshot(styleBytes)!==saved.tailoring.styleSnapshotHash)throw buddyError(409,"The live Google CV changed. Generate a fresh draft before saving.");
+                }else styleBytes=readFileSync(documentPath(styleDoc));
+              }
+              bytes = styleDoc && saved.tailoring?.preserveTemplate
+                ? await populateCVTemplate(styleBytes, content, (outputSchema, system, payload) => {
+                    const c = config();
+                    assertConfigured(c);
+                    return callProvider({ ...c, outputSchema }, system, [{ role: "user", content: JSON.stringify(payload) }], ctx.buddyFetch);
+                  })
+                : styleDoc ? await layoutDraft(title,content,"previous",styleBytes) : layout ? await layoutDraft(title,content,saved.draft.kind==="cover"?"letter":layout) : await wordDraft(title, content);
             }
-            const bytes = styleDoc && saved.tailoring?.preserveTemplate
-              ? await populateCVTemplate(styleBytes, content, (outputSchema, system, payload) => {
-                  const c = config();
-                  assertConfigured(c);
-                  return callProvider({ ...c, outputSchema }, system, [{ role: "user", content: JSON.stringify(payload) }], ctx.buddyFetch);
-                })
-              : styleDoc ? await layoutDraft(title,content,"previous",styleBytes) : layout ? await layoutDraft(title,content,saved.draft.kind==="cover"?"letter":layout) : await wordDraft(title, content);
             // A template may have changed while the model was preparing replacements.
             if(styleDoc && getDocuments().find(d=>d.id===styleId)?.revision!==styleDoc.revision)
               throw buddyError(409,"The CV template changed. Generate a fresh draft before saving.");
@@ -1156,9 +1232,11 @@ export function createCareerBuddy(ctx) {
               notes:
                 "Career Buddy draft. Review factual accuracy and layout before approval.",
               generation: {
-                title,content,layout,
+                title,content,
+                layout: saved.artifactBytes ? "artifact" : (styleDoc ? "previous" : layout),
                 ...(saved.tailoring?{sourceCvId:saved.tailoring.sourceCvId}:{}),
-                ...(styleDoc?{layout:"previous",styleDocumentId:styleDoc.id,styleDocumentRevision:styleDoc.revision,styleMatch:/\.pdf$/i.test(styleDoc.name)?"recreated":"native"}:{}),
+                ...(styleDoc?{styleDocumentId:styleDoc.id,styleDocumentRevision:styleDoc.revision,styleMatch:saved.artifactBytes ? "artifact" : /\.pdf$/i.test(styleDoc.name)?"recreated":"native"}:{}),
+                ...(saved.artifactManifest?{artifactManifest:saved.artifactManifest}:{}),
                 messageId: saved.id,
                 provider: saved.provider,
                 model: saved.model,

@@ -27,6 +27,7 @@ import {documentCategory,inferDocumentClassification,validateCategory as categor
 import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
 import {createDirectorySources} from "./directory-sources.mjs";
+import { createMcpIntegration } from "./mcp-integration.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -941,7 +942,7 @@ export function createApp(options = {}) {
   const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
   const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
-  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,googleDocuments});
+  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,pdfPages:options.documentPages,googleDocuments,obsidian:()=>obsidian,getConfig,putConfig,getRecord,listRecords,buddyFetch:options.buddyFetch});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
   const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
@@ -963,6 +964,7 @@ export function createApp(options = {}) {
     embeddingFn: options.embeddingFn,
     automationEnabled:options.automationEnabled,
     scheduler:aiScheduler,
+    codexQueueDir: options.codexQueueDir,
     createOpportunity,putTask,
   });
   const feedback=createFeedback({getConfig,putConfig,fetcher:options.buddyFetch,requests:buddy.requests});
@@ -992,6 +994,21 @@ export function createApp(options = {}) {
   const workspaceActions = createWorkspaceActions({db,getConfig,putConfig,settings,dataDir,createBackup,
     otherWrites:()=>activeWrites>1,
     invalidate:({reset,documentIds})=>{studio.invalidate(reset?null:documentIds);if(reset)buddy.resetWorkspace();},
+  });
+  const mcp = createMcpIntegration({
+    db,
+    getConfig,
+    putConfig,
+    getRecord,
+    putRecord,
+    listRecords,
+    fullRecord,
+    getDocuments: () => [
+      ...getDocuments(),
+      ...(obsidian?.sourceDocuments() || []),
+      ...directories.sourceDocuments(),
+    ],
+    buddy,
   });
   async function readBody(req) {
     if (!(req.headers["content-type"] || "").startsWith("application/json"))
@@ -1143,10 +1160,20 @@ export function createApp(options = {}) {
         return json(res, { authenticated: false });
       }
       if(path==="/api/connections/google/callback") {try{if(await googleDocuments.handle(path,method,req,res,{json,readBody}))return;}catch(e){if(e.status)fail(e.status,e.message);throw e;}}
+      if (path.startsWith("/api/mcp/v1/")) {
+        try {
+          if (await mcp.handle(path, method, req, res, { json, readBody, fail }))
+            return;
+        } catch (e) {
+          if (e.status) fail(e.status, e.message);
+          throw e;
+        }
+      }
       if (path.startsWith("/api/")) {
         if (!authCookie(req)) fail(401, "Sign in to access your board.");
         if(reliability.applying()&&!['GET','HEAD'].includes(method)&&!path.startsWith('/api/reliability/')&&path!=='/api/logout')fail(503,"Workspace maintenance is in progress. Wait for it to finish.");
         try {if(await workspaceActions.handle(path,method,req,res,{json,readBody}))return;
+        if(await mcp.handle(path,method,req,res,{json,readBody,fail}))return;
         if(await aiActivity.handle(path,method,req,res,{json,readBody}))return;
         if(await aiScheduler.handle(path,method,req,res,{json,readBody}))return;
         if(await recordImports.handle(path,method,req,res,{json,readBody}))return;
@@ -1958,10 +1985,10 @@ export function createApp(options = {}) {
             documents: updatedDocs.map(publicDocument),
           });
         }
-        const docMatch = path.match(/^\/api\/documents\/([^/]+)(\/content)?$/);
+        const docMatch = path.match(/^\/api\/documents\/([^/]+)(?:\/(content|duplicate))?$/);
         if (docMatch) {
           const doc = getDocument(docMatch[1]);
-          if (docMatch[2] && method === "GET") {
+          if (docMatch[2] === "content" && method === "GET") {
             let file;
             try {
               file = documentPath(doc);
@@ -1975,15 +2002,39 @@ export function createApp(options = {}) {
               );
             }
             const content = readFileSync(file);
+            const ext = extname(doc.name).toLowerCase();
             res.writeHead(200, {
               "Content-Type":
-                extname(doc.name).toLowerCase() === ".pdf"
+                ext === ".pdf"
                   ? "application/pdf"
+                  : ext === ".md" || ext === ".markdown"
+                  ? "text/markdown; charset=utf-8"
+                  : ext === ".txt"
+                  ? "text/plain; charset=utf-8"
                   : "application/octet-stream",
               "Content-Length": content.length,
               "Content-Disposition": `attachment; filename="${(doc.name.split("/").pop() || doc.name).replace(/[^a-zA-Z0-9._ -]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(doc.name.split("/").pop() || doc.name)}`,
             });
             return res.end(content);
+          }
+          if (docMatch[2] === "duplicate" && method === "POST") {
+            const bytes = readFileSync(documentPath(doc));
+            const oldName = doc.name;
+            const dotIdx = oldName.lastIndexOf(".");
+            const ext = dotIdx > 0 ? oldName.slice(dotIdx) : "";
+            const baseName = dotIdx > 0 ? oldName.slice(0, dotIdx) : oldName;
+            const newName = cleanDocumentName(`${baseName} (copy)${ext}`, true);
+            const duplicated = saveDocument({
+              name: newName,
+              kind: doc.kind,
+              category: doc.category,
+              status: doc.status === "submitted" ? "draft" : (doc.status || "draft"),
+              opportunityId: doc.opportunityId || "",
+              content: bytes,
+              notes: doc.notes || "",
+              tags: Array.isArray(doc.tags) ? [...doc.tags] : undefined,
+            });
+            return json(res, publicDocument(duplicated), 201);
           }
           if (!docMatch[2] && method === "PATCH") {
             const body = await readBody(req);
@@ -1991,18 +2042,25 @@ export function createApp(options = {}) {
               fail(409, "Document changed. Reload before saving.");
             if (
               Object.keys(body).some(
-                (key) => !["status", "tags", "notes", "revision", "category"].includes(key),
+                (key) => !["status", "tags", "notes", "revision", "category", "name"].includes(key),
               )
             )
               fail(
                 400,
                 "Document contents cannot be overwritten. Upload a new version.",
               );
-            if (doc.status === "submitted" && body.status !== undefined)
+            if (doc.status === "submitted" && (body.status !== undefined || body.name !== undefined))
               fail(
                 409,
                 "Submitted document versions are preserved. Upload a new version to make changes.",
               );
+            if (body.name !== undefined) {
+              const cleanName = cleanDocumentName(body.name, true);
+              const oldExt = extname(doc.name).toLowerCase();
+              const newExt = extname(cleanName).toLowerCase();
+              if (oldExt !== newExt) fail(400, "Document extension cannot be changed.");
+              doc.name = cleanName;
+            }
             if (body.status !== undefined)
               doc.status = choice(
                 body.status,

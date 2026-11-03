@@ -37,6 +37,14 @@ type Draft = {
   content: string;
   draft: { kind: string; title: string; content: string };
   editedDraft?: { title: string; content: string };
+  artifactBytes?: string | null;
+  artifactManifest?: {
+    outputDocx: string;
+    outputPdf?: string;
+    pageCount: number;
+    notes?: string;
+    layoutCompromises?: string;
+  } | null;
   tailoring: {
     styleDocumentId?: string;
     styleDocumentRevision?: number;
@@ -840,6 +848,30 @@ export default function TailorApplication({
 
                   {d.content && <AINotesView content={d.content} />}
 
+                  {d.artifactManifest && (
+                    <div className="artifact-banner" role="status">
+                      <div className="artifact-banner-badge">
+                        ✨ High-Fidelity Word Artifact
+                      </div>
+                      <div className="artifact-banner-text">
+                        <strong>
+                          Multi-column layout, sidebar and typography preserved from reference
+                        </strong>
+                        {d.artifactManifest.pageCount > 0 && (
+                          <span> · {d.artifactManifest.pageCount} {d.artifactManifest.pageCount === 1 ? "page" : "pages"}</span>
+                        )}
+                        {d.artifactManifest.notes && (
+                          <p className="artifact-banner-notes">{d.artifactManifest.notes}</p>
+                        )}
+                        {d.artifactManifest.layoutCompromises && (
+                          <p className="artifact-banner-compromises">
+                            ⚠ Layout notes: {d.artifactManifest.layoutCompromises}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="draft-editor-fields">
                     <label className="field">
                       <span>Document title</span>
@@ -859,27 +891,46 @@ export default function TailorApplication({
                       />
                     </label>
 
-                    <label className="field">
-                      <span>
-                        Edit {d.draft.kind === "cv" ? "CV content" : "Cover letter content"}{" "}
-                        (Markdown)
-                      </span>
-                      <textarea
-                        rows={14}
-                        disabled={busy || saved}
-                        value={d.draft.content}
-                        maxLength={60000}
-                        onChange={(e) =>
-                          setDrafts((current) =>
-                            current.map((x) =>
-                              x.id === d.id
-                                ? { ...x, draft: { ...x.draft, content: e.target.value } }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
-                    </label>
+                    {!d.artifactBytes ? (
+                      <label className="field">
+                        <span>
+                          Edit {d.draft.kind === "cv" ? "CV content" : "Cover letter content"}{" "}
+                          (Markdown)
+                        </span>
+                        <textarea
+                          rows={14}
+                          disabled={busy || saved}
+                          value={d.draft.content}
+                          maxLength={60000}
+                          onChange={(e) =>
+                            setDrafts((current) =>
+                              current.map((x) =>
+                                x.id === d.id
+                                  ? { ...x, draft: { ...x.draft, content: e.target.value } }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <div className="artifact-saved-preview">
+                        <p className="artifact-preview-desc">
+                          Word package generated directly. Exact sidebars, table cells, and document structure are preserved.
+                        </p>
+                        {d.savedDocuments && d.savedDocuments.length > 0 && (
+                          <div className="artifact-preview-actions">
+                            <a
+                              href={d.savedDocuments[0].url}
+                              className="button secondary"
+                              download={d.savedDocuments[0].name}
+                            >
+                              Download {d.savedDocuments[0].name}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </section>
               ))

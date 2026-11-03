@@ -109,7 +109,9 @@ import JobLookup, {
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
 import CareerBuddySettings from "./components/CareerBuddySettings";
+import DocumentStudio from "./components/DocumentStudio";
 import EmbeddingSettings from "./components/EmbeddingSettings";
+import MCPSettings from "./components/MCPSettings";
 import Todos from "./components/Todos";
 import ProfileSettings, {
   ThemeSettings,
@@ -119,13 +121,22 @@ import ProfileSettings, {
 import "./themes.css";
 
 type Page =
-  "dashboard" | "opportunities" | "board" | "todos" | "library" | "buddy" | "activity" | "settings";
+  | "dashboard"
+  | "opportunities"
+  | "board"
+  | "todos"
+  | "library"
+  | "studio"
+  | "buddy"
+  | "activity"
+  | "settings";
 const PAGE_LABELS: Record<Page, string> = {
   dashboard: "Dashboard",
   opportunities: "Opportunities",
   board: "Kanban board",
   todos: "To-do list",
   library: "Career Hub",
+  studio: "Document Studio",
   buddy: "Career Buddy",
   activity: "AI activity",
   settings: "Settings",
@@ -310,6 +321,7 @@ export default function App() {
   const restartingRef = useRef(false);
   const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
+    [studioOpportunityId, setStudioOpportunityId] = useState<string>(""),
     [dragging, setDragging] = useState(""),
     [dropStage, setDropStage] = useState("");
   const [token] = useState(
@@ -729,6 +741,7 @@ export default function App() {
               { id: "board", label: "Kanban board", icon: LayoutGrid },
               { id: "todos", label: "To-do list", icon: ListTodo },
               { id: "library", label: "Career Hub", icon: FolderOpen },
+              { id: "studio", label: "Document Studio", icon: FileText },
               { id: "buddy", label: "Career Buddy", icon: Sparkles },
               { id: "activity", label: "AI activity", icon: Clock3 },
               { id: "settings", label: "Settings", icon: Settings2 },
@@ -1227,6 +1240,15 @@ export default function App() {
             timezone={settings?.timezone || "Europe/London"}
           />
         )}
+        {page === "studio" && (
+          <DocumentStudio
+            onError={report}
+            onNotice={setNotice}
+            onChanged={() => void load(true)}
+            timezone={settings?.timezone || "Europe/London"}
+            initialOpportunityId={studioOpportunityId}
+          />
+        )}
         {page === "settings" && settings && (
           <SettingsPage
             settings={settings}
@@ -1285,6 +1307,11 @@ export default function App() {
                 .getElementById("career-buddy-settings")
                 ?.scrollIntoView({ block: "start" }),
             );
+          }}
+          onOpenStudio={(opId) => {
+            if (opId) setStudioOpportunityId(opId);
+            setSelected(null);
+            navigate("studio");
           }}
         />
       )}
@@ -1809,6 +1836,7 @@ function OpportunityDetail({
   onError,
   onReload,
   onConfigureBuddy,
+  onOpenStudio,
   onDeleted,
 }: {
   initialTab?:string;
@@ -1819,6 +1847,7 @@ function OpportunityDetail({
   onError: (e: unknown) => void;
   onReload: () => void;
   onConfigureBuddy: () => void;
+  onOpenStudio?: (opId?: string) => void;
   onDeleted: (result: import("./components/WorkspaceAction").WorkspaceActionResult) => void;
 }) {
   const [tab, setTab] = useState(initialTab),
@@ -1928,6 +1957,18 @@ function OpportunityDetail({
         )}{" "}
         {tab === "documents" && (
           <>
+            {onOpenStudio && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "8px" }}>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => onOpenStudio(o.id)}
+                  title="Open Document Studio"
+                >
+                  <FileText size={14} /> Open Document Studio
+                </button>
+              </div>
+            )}
             <ApplicationPacks
               opportunity={o}
               timezone={timezone}
@@ -5938,6 +5979,9 @@ function SettingsPage({
         { id: "decisions", label: "Fit & decision model", content: <>
       <FitCriteria onError={onError} />
       <CareerBuddySettings decision onError={onError} />
+        </> },
+        { id: "mcp", label: "MCP Server", content: <>
+      <MCPSettings onError={onError} />
         </> },
       ]} />
     </main>

@@ -76,3 +76,130 @@ export async function populateCVTemplate(bytes, content, generate) {
   }
   return zip.generateAsync({ type: "nodebuffer" });
 }
+
+export async function deriveTemplate(bytes, { isCoverLetter = false } = {}) {
+  const zip = await safeWord(bytes);
+  for (const file of Object.values(zip.files).filter((f) =>
+    /^word\/(document|header\d*|footer\d*)\.xml$/.test(f.name),
+  )) {
+    const $ = load(await file.async("string"), { xml: true });
+    // Remove hyperlinks to ensure no previous links leak
+    $("w\\:hyperlink").each((_, link) => $(link).replaceWith($(link).contents()));
+
+    let currentSectionKind = "header";
+    let isFirstNonEmpty = true;
+
+    $("w\\:p").each((_, p) => {
+      const texts = $(p)
+        .find("w\\:t")
+        .filter((_, t) => $(t).parents("w\\:p").first()[0] === p);
+      const rawText = texts
+        .map((_, t) => $(t).text())
+        .get()
+        .join("")
+        .trim();
+      if (!rawText || $(p).find("w\\:instrText,w\\:fldSimple").length) return;
+
+      const lower = rawText.toLowerCase();
+
+      // Check if this paragraph is a section heading
+      let isHeading = false;
+      if (
+        /^(core\s+|technical\s+|it\/technical\s+|key\s+|professional\s+)?(skills?(\s+highlights?)?|competenc(ies|y)|proficienc(ies|y)|tools?):?$/i.test(
+          lower,
+        )
+      ) {
+        currentSectionKind = "skills";
+        isHeading = true;
+      } else if (
+        /^(work\s+|professional\s+|career\s+|employment\s+)?(experienc(e|es)|histor(y|ies)|career\s+summary|roles?):?$/i.test(
+          lower,
+        )
+      ) {
+        currentSectionKind = "experience";
+        isHeading = true;
+      } else if (
+        /^(education(\s+and\s+qualifications?)?|qualifications?|academics?|degrees?):?$/i.test(
+          lower,
+        )
+      ) {
+        currentSectionKind = "education";
+        isHeading = true;
+      } else if (
+        /^(professional\s+)?(summary|profile|about(\s+me)?|overview|objective):?$/i.test(
+          lower,
+        )
+      ) {
+        currentSectionKind = "summary";
+        isHeading = true;
+      } else if (/^(accomplishments?|highlights?|achievements?|strengths?):?$/i.test(lower)) {
+        currentSectionKind = "accomplishments";
+        isHeading = true;
+      } else if (/^(projects?|certifications?|publications?|awards?|languages?):?$/i.test(lower)) {
+        currentSectionKind = "other";
+        isHeading = true;
+      }
+
+      if (isHeading) {
+        return;
+      }
+
+      let replacement = "";
+      if (isCoverLetter) {
+        if (isFirstNonEmpty) {
+          replacement = "[Candidate Full Name]";
+          isFirstNonEmpty = false;
+        } else if (/@|[|]|\b\d{3}[- ]?\d{3}\b/.test(rawText)) {
+          replacement = "[Email Address] | [Phone Number] | [City, Country]";
+        } else if (/^(dear|to\s+the|attention|hiring\s+team)/i.test(lower)) {
+          replacement = "Dear Hiring Team,";
+        } else if (/^(sincerely|best\s+regards|yours\s+truly|warm\s+regards|yours\s+sincerely)/i.test(lower)) {
+          replacement = "Yours sincerely,";
+        } else {
+          replacement =
+            "[Detailed letter paragraph outlining your interest, key relevant qualifications, and specific value for the target role.]";
+        }
+      } else {
+        if (isFirstNonEmpty) {
+          replacement = "[Candidate Full Name]";
+          isFirstNonEmpty = false;
+        } else if (currentSectionKind === "header" && (/@|[|]|\b\d{3}[- ]?\d{3}\b/.test(rawText))) {
+          replacement = "[Email Address] | [+44 7000 000000] | [City, Country] | [LinkedIn]";
+        } else if (currentSectionKind === "header" && rawText.length < 80) {
+          replacement = "[Professional Title / Target Role]";
+        } else if (currentSectionKind === "summary") {
+          replacement =
+            "[Professional summary highlighting your core expertise, career achievements, and value proposition for the target role.]";
+        } else if (currentSectionKind === "skills") {
+          replacement = "[Skill 1, Skill 2, Skill 3, Skill 4, Skill 5]";
+        } else if (currentSectionKind === "experience") {
+          if (/\b(19\d\d|20\d\d|present|current)\b/i.test(rawText) && rawText.length < 40) {
+            replacement = "[Month Year – Present]";
+          } else if (rawText.includes("|") || rawText.includes("—") || rawText.includes(" - ")) {
+            replacement = "[Job Title] | [Company Name]";
+          } else if (/^[-*•]\s*/.test(rawText) || rawText.length > 50) {
+            replacement =
+              "[Key accomplishment or responsibility delivering measurable business outcome.]";
+          } else {
+            replacement = "[Job Title / Organization Detail]";
+          }
+        } else if (currentSectionKind === "education") {
+          replacement = "[Degree Title] — [Institution / University Name] ([Year])";
+        } else if (currentSectionKind === "accomplishments") {
+          replacement = "[Notable career accomplishment with quantified metrics.]";
+        } else {
+          replacement = "[Template content placeholder]";
+        }
+      }
+
+      if (texts.length > 0) {
+        $(texts[0]).text(replacement);
+        texts.slice(1).remove();
+      }
+    });
+
+    zip.file(file.name, $.xml());
+  }
+
+  return zip.generateAsync({ type: "nodebuffer" });
+}

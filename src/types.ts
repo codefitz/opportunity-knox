@@ -49,6 +49,19 @@ export type BoardDocument = {
   revision?: number;
   notes: string;
   tags?: string[];
+  generation?: {
+    title?: string;
+    content?: string;
+    layout?: string;
+    sourceCvId?: string;
+    sourceCvName?: string;
+    styleDocumentId?: string;
+    styleDocumentName?: string;
+    provider?: string;
+    model?: string;
+    aiNotes?: string;
+    [key: string]: unknown;
+  };
   url: string;
   originalUrl?: string;
   externalSource?: {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from 'cheerio';
 import { layoutDraft, safeWord } from '../server/document-layout.mjs';
-import { readCVTemplate, populateCVTemplate } from '../server/cv-template.mjs';
+import { readCVTemplate, populateCVTemplate, deriveTemplate } from '../server/cv-template.mjs';
 
 test('CV template population edits text only, including headers, while preserving Word layout and rejecting incomplete output', async () => {
   const zip = await safeWord(await layoutDraft('Template', '# Example Person\n\nExample experience.', 'executive'));
@@ -49,4 +49,35 @@ test('long names and additional history expand in the existing cell with templat
   assert.equal($('w\\:tc w\\:spacing[w\\:after="80"]').length,3);
   assert.match($('w\\:tc').text(),/Third employer/);
   assert.match($('w\\:body').text(),/A Fictional Candidate With A Longer Name/);
+});
+
+test('deriveTemplate sanitizes private details into neutral template slots while preserving layout and headings', async () => {
+  const originalCV = '# Dr. Alex Fictional\nTechnology Leader & Principal Architect\nalex@private-domain.test | +44 7700 900000 | London, UK\n\n' +
+    '## Professional Summary\nAccomplished leader driving distributed cloud systems at scale.\n\n' +
+    '## Work Experience\n' +
+    '### Principal Architect | Fictional Tech Global\n2021 – Present\n- Led 20 engineers and scaled platform to 10M events.\n\n' +
+    '## Education\n- MSc Computer Science — University of London (2017)';
+
+  const sourceBytes = await layoutDraft('Dr Alex Fictional CV', originalCV, 'classic');
+  const templateBytes = await deriveTemplate(sourceBytes, { isCoverLetter: false });
+  const resultZip = await safeWord(templateBytes);
+  const docXml = await resultZip.file('word/document.xml').async('string');
+
+  // Headings preserved
+  assert.match(docXml, /Professional Summary/);
+  assert.match(docXml, /Work Experience/);
+  assert.match(docXml, /Education/);
+
+  // Placeholders inserted
+  assert.match(docXml, /\[Candidate Full Name\]/);
+  assert.match(docXml, /\[Professional Title \/ Target Role\]/);
+  assert.match(docXml, /\[Email Address\]/);
+  assert.match(docXml, /\[Job Title\] \| \[Company Name\]/);
+  assert.match(docXml, /\[Month Year (?:–|&#x2013;|-) Present\]/);
+
+  // Private data eradicated
+  assert.doesNotMatch(docXml, /Alex Fictional/);
+  assert.doesNotMatch(docXml, /private-domain\.test/);
+  assert.doesNotMatch(docXml, /Fictional Tech Global/);
+  assert.doesNotMatch(docXml, /Led 20 engineers/);
 });

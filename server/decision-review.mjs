@@ -155,7 +155,7 @@ export function createDecisionReview(ctx) {
           const doc = docs.get(id);
           if (!doc) throw Error();
           const st = statSync(ctx.documentPath(doc));
-          return [id, `${st.size}:${st.mtimeMs}:${st.ctimeMs}${doc.category==="template"?":template":""}`];
+          return [id, `${st.size}:${st.mtimeMs}:${st.ctimeMs}${["template","cv-template","cover-letter-template"].includes(doc.category)?":template":""}`];
         } catch {
           return [id, "unavailable"];
         }
@@ -322,7 +322,7 @@ export function createDecisionReview(ctx) {
             profile.items.map((i) => i.description).join(" ") +
               " " +
               opportunity.role + " " + opportunity.description,
-            getDocuments().filter((d) => (!d.opportunityId || d.opportunityId === opportunity.id) && !d.generation && d.category!=="template"),
+            getDocuments().filter((d) => (!d.opportunityId || d.opportunityId === opportunity.id) && !d.generation && !["template","cv-template","cover-letter-template"].includes(d.category)),
             body.generalFit ? 6 : 20,
           );
         const docs = await indexDocuments([...new Set(body.documentIds)]),
@@ -385,7 +385,7 @@ export function createDecisionReview(ctx) {
           let fit=fitReport(raw,ids);
           if(fit.searchQuery.trim()){
             task.check();task.progress("searching-evidence");
-            const extraIds=await vectors.selectSources(fit.searchQuery,getDocuments().filter(d=>(!d.opportunityId||d.opportunityId===opportunity.id)&&!d.generation&&d.category!=="template"),6);
+            const extraIds=await vectors.selectSources(fit.searchQuery,getDocuments().filter(d=>(!d.opportunityId||d.opportunityId===opportunity.id)&&!d.generation&&!["template","cv-template","cover-letter-template"].includes(d.category)),6);
             const extraDocs=await indexDocuments(extraIds);
             const extraSemantic=await vectors.search(extraDocs,fit.searchQuery);
             const extra=retrieveHybridChunks(extraSemantic.documents,fit.searchQuery,extraSemantic.scores,Math.min(c.contextCharacters||36000,12000));

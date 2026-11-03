@@ -1,5 +1,96 @@
 # Implementation roadmap
 
+## Document Studio Phase 5: Finish and verify — 3 November 2026
+
+Completed Phase 5 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)), delivering accessibility, responsive handling, empty/error state polish, persistence, safeguards, and verification:
+- **Keyboard navigation:**
+  - Added global `Escape` key handling to dismiss active modals (Google Drive conflict/search, version history, bulk category, move target, rename, upload, generate), close active overflow menus, and exit mobile preview.
+  - Added `ArrowLeft` / `ArrowRight` (and `PageUp` / `PageDown`) page navigation shortcuts for multi-page previews when typing focus is not inside an input, textarea, select, or editable element.
+  - Added keyboard selection on document list rows (`role="button"`, `tabIndex={0}`, `aria-pressed`, `aria-label`, and `Enter`/`Space` listeners with focus indicator styling).
+  - Isolated action menu keyboard events from triggering row selection.
+- **Empty & error state polish:**
+  - Added onboarding empty state when the document library is empty (`docs.length === 0`), offering direct action buttons for *Upload Master CV*, *Upload Template*, and *Import from Drive* (when connected).
+  - Differentiated whole-library empty state from active filter returning zero matching documents (with *Reset filters* CTA).
+  - Added Studio Assistant empty thread greeting card with feature description and starter suggestion chips (*Tweak spacing*, *Create template*, *Draft cover letter*).
+  - Added *Retry Preview* action alongside direct file download when document preview encounters an error or requires external conversion tools.
+  - Added informative Google Drive search empty results messaging distinguishing between query-specific searches and general unsupported file lists.
+- **Limits, validation, and safeguards:**
+  - Added client-side pre-flight file size checks (> 20MB limit) and format validation before encoding or uploading.
+  - Enforced server-side document file size limit (20MB) and streaming limits (30MB base64 JSON payload) returning HTTP 413.
+  - Verified submitted application snapshot protections: documents with `status: "submitted"` cannot be deleted (HTTP 409) or renamed (HTTP 409), and are safely preserved during bulk library deletions.
+- **Persistence & cleanup:**
+  - Verified Document Studio defaults (`masterCvId`, `cvTemplateId`, `coverLetterTemplateId`) persist across server restarts on disk.
+  - Preview folder lifecycle cleanup runs periodically and on server shutdown, with cache invalidation on document mutations.
+- **Verification:**
+  - Automated client build: `npm run build` passed (`tsc --noEmit && vite build`).
+  - Unit & integration test suite: 287/287 tests passing (`node --test tests/*.test.mjs`), including dedicated Document Studio Phase 1–5 tests.
+  - Launcher test suite: 43/43 tests passing (`python3 -m unittest discover -s tests -p 'test_*.py'`).
+  - Per AGENTS.md, automated build and unit test success is distinguished from live browser and Docker container runtime verification.
+
+## Document Studio Phase 4: Connected documents & button style polish — 3 November 2026
+
+Implemented Phase 4 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)) and polished UI controls across Document Studio:
+- **Button & dialog styling polish:** Replaced ad-hoc/unstyled button classes (`btn-primary`, `btn-secondary`, `btn-ghost`, `btn-icon`) with the application's established design system (`.button.primary`, `.button.secondary`, `.button.secondary.small`, `.button.danger.small`, `.icon-button`, `.text-button`). Replaced unstyled custom modal tags with standard `.modal-overlay`, `.modal`, `.modal-heading`, and `.form-actions` across all modals (Generate, Upload, Rename, Move, Category, History, and Connected Sources).
+- **Obsidian Vault integration:**
+  - Added `GET /api/document-studio/connections` exposing real-time connection status for both Obsidian and Google Drive.
+  - Added `POST /api/document-studio/obsidian/sync` triggering manual sync from the connected vault with imported/updated note counters.
+  - Added `POST /api/document-studio/obsidian/export` enabling non-destructive document export to the configured writable vault location (`Generated/`), while respecting read-only vaults with explicit validation.
+  - Added top-level Obsidian connection status badge, "Sync Obsidian" action, and contextual "Export to Obsidian" button in the document preview toolbar.
+- **Google Drive integration & format support:**
+  - Extended Drive discovery via `POST /api/document-studio/google/search` to search Google Docs (`.gdoc`), Word DOCX (`.docx`), and PDF files (`.pdf`).
+  - Added `POST /api/document-studio/google/import` to snapshot external Drive files directly into the Studio library under chosen document categories (`master-cv`, `cv-template`, `cover-letter-template`, `reference`).
+  - Added Drive Browse & Import modal with live search, format indicators, and role selection.
+- **Conflict detection & non-destructive resolution:**
+  - Added `POST /api/document-studio/google/refresh` comparing external revision/modified timestamps with local document state.
+  - If external file is newer and local is unmodified, automatically refreshes the document and bumps version.
+  - If both local and external files have changed, detects the conflict and presents 3 explicit choices:
+    1. *Import as New Version* (`v{N+1}` preserving version lineage).
+    2. *Save External Update as Separate Copy* (`[Name] (Google Drive Copy)`).
+    3. *Keep Local Version* (acknowledges external update without altering local files).
+  - Preserves local documents when Google Drive is disconnected.
+- **Verification:** Added integration test in `tests/server.test.mjs` verifying connection reporting, Google Drive search/import/refresh, three-way conflict resolution, and Obsidian sync/export (both writable and read-only). Verified via `npm run build`, `npm test` (all 286 tests passing), and launcher tests (43/43 passing).
+
+## Document Studio Phase 3: AI document workspace — 3 November 2026
+
+Implemented Phase 3 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)):
+- **Template derivation engine:** Added `deriveTemplate` (`server/cv-template.mjs`) to convert existing DOCX CVs or cover letters into reusable templates. Strips hyperlink leak risks, identifies structural sections (Summary, Experience, Education, Skills), and replaces factual candidate details (names, contact lines, dates, companies, degree details, achievements) with neutral template placeholders (`[Candidate Full Name]`, `[Job Title] | [Company Name]`, `[Month Year – Present]`, etc.) while preserving 100% of OpenXML styles, tables, borders, and margins. Added `POST /api/document-studio/create-template`.
+- **Contextual Studio Assistant chat:** Added `POST /api/document-studio/chat` with in-flight cancellation via `POST /api/document-studio/chat/cancel` (`AbortController`). Handles:
+  - Template derivation requests ("Turn this into a template", "Derive cover letter template").
+  - Contextual layout/spacing tweaks ("Make spacing tighter", "Compact layout", "Executive style", "Letter style").
+  - Content revisions ("Shorten summary", "Strengthen tone") validating candidate facts without fabrication when AI is enabled, with clean offline fallback instructions when disabled.
+- **Document version history & non-destructive restore:**
+  - Added `GET /api/document-studio/documents/:id/history` tracking document lineage through `parentDocumentId` and base names.
+  - Added `POST /api/document-studio/documents/:id/restore` allowing non-destructive restoration of previous revisions into new active versions without mutating or deleting original records.
+- **Studio Assistant UI & version modal:**
+  - Added toggleable Studio Assistant panel alongside the document preview with quick action chips (*"Turn into template"*, *"Tighter spacing"*, *"Executive layout"*, *"Shorten summary"*, *"Draft cover letter"*), streaming/cancellation indicator, and document draft action cards.
+  - Added Version History modal displaying full lineage, active version badges, and one-click version restoration.
+  - Contextual "Turn into Template" top action in document preview.
+- **Verification:** Unit tests added in `tests/cv-template.test.mjs` and integration tests in `tests/server.test.mjs`.
+
+## Document Studio Phase 2: Reliable generation and export — 3 November 2026
+
+Implemented Phase 2 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)):
+- **Shared generation service:** Added `POST /api/document-studio/generate` serving both Document Studio and Opportunity workflows. Resolves source CV, candidate career evidence, target opportunity or role brief, and preferred or custom template.
+- **Template-preserving layout mapping:** When slots exist and AI is configured, uses `populateCVTemplate`; when AI is disabled or an unslotted Word template is chosen, maps candidate facts via `layoutDraft` (`previous` reference mode or built-in layout presets: Classic, Compact, Executive, Letter). Preserves OpenXML tables, vertical cell merging (`<w:vMerge>`), and template formatting while replacing dummy/old employment content without XML corruption.
+- **Exact-artifact saving & opportunity attachment:** Persists exact `.docx` bytes via `saveDocument`, links the generated document to the opportunity when specified, records generation metadata (`sourceCvId`, `templateId`, `opportunityId`, `layout`, `instructions`, `aiNotes`, `passToAi`), and immediately triggers multi-page preview generation.
+- **Studio generation UI:** Added top-bar "Generate" button opening a generation modal with document role switcher (Tailored CV vs Cover Letter), source CV picker, template selector, target opportunity dropdown, and custom focus notes. Preview pane includes contextual "Generate with this template" and "Tailor from this CV" actions, and displays generation AI notes.
+- **Verification:** Verified via `npm run check` with all 283 server tests and 43 launcher tests passing.
+
+## Document Studio Phase 1: Studio workspace and library organisation — 3 November 2026
+
+Implemented Phase 1 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)):
+- **Dedicated sidebar workspace:** Added Document Studio (`studio`) to the primary sidebar navigation beside Career Hub and Career Buddy.
+- **Unified library organisation:** Studio uses the same underlying document storage and SQLite records as Career Hub without duplicate stores. Offers search, folder grouping, category filters (*All*, *Master CVs*, *Templates*, *Generated*), and multi-select bulk actions (Move, Assign Category, Delete).
+- **Typed upload:** Top-bar upload modal supports explicit document roles on ingress: Master CV (`master-cv`), CV Template (`cv-template`), Cover Letter Template (`cover-letter-template`), and Other Reference (`reference`), with optional folder target.
+- **Preferred defaults:** Added persisted configuration (`documentStudioDefaults`) for preferred Master CV, CV Template, and Cover Letter Template via `GET/PATCH /api/document-studio/defaults`, with header chips and one-click default assignment.
+- **Document operations:** Added safe document renaming via `PATCH /api/documents/:id` (validating extensions and protecting submitted versions) and non-destructive duplication via `POST /api/documents/:id/duplicate` (allocating new versions/copies while preserving original links and attachments).
+- **Multi-page preview:** Extended `/api/document-studio/preview` to support PDF, DOCX, and connected Google Doc shortcuts with page navigation (`Page X of Y`), direct original/PDF/Word downloads, and graceful fallback when headless LibreOffice is unavailable.
+- **In-browser Markdown rendering:** Built a dedicated, secure Markdown viewer supporting frontmatter metadata, structured headings, task lists, tables, blockquotes, syntax code blocks, and a rendered/raw source view toggle. Directly fetches and renders `.md` and `.txt` files in the browser without headless converter overhead.
+- **Filetype filter:** Added an explicit filetype filter (All, DOCX, PDF, Markdown, Text, Google Workspace) with document counts in the Studio browse bar, complemented by format badges on document rows.
+- **Opportunity integration:** Added "Open Document Studio" action from opportunity Documents tabs.
+
+Phase 3 (AI contextual chat) and Phase 4 (Connected documents) remain planned.
+
 ## Word CV template text replacement — 3 November 2026
 
 AI-assisted tailoring with a selected Word template or Word-exported Google reference now supplies the template's paragraph text and example lengths to the model. Saving uses a separate structured text-replacement request and edits a copy of that Word package, retaining existing paragraphs, runs, tables, styles, headers/footers, graphics and page settings. All text slots must be returned exactly once; incomplete output fails without saving. Changed contact links are removed to avoid linking to a template author's address. Existing originals are untouched.
@@ -441,3 +532,29 @@ Kanban now uses the full viewport, replacing the sidebar, large heading, totals 
 ## Collapsible workspace sidebar — 1 November 2026
 
 This supersedes the sidebar removal in the focused Kanban increment. Kanban retains workspace navigation by default. The shared hide/show control slides the sidebar away and expands content, with a visible restore button, keyboard operation, hidden-navigation focus protection and reduced-motion support. On phones the same control hides/restores the existing bottom navigation. The choice remains while navigating within the app; reload starts with navigation visible.
+
+## Sidebar Document Studio — 3 November 2026
+
+Delivered all 5 phases of Document Studio: Phase 1 (dedicated Studio navigation, document library organisation, typed uploads with default roles, rename/duplication, multi-page preview, in-browser Markdown rendering, and format/category filtering), Phase 2 (unified document generation service, template-preserving layout mapping, exact-artifact saving, opportunity attachment and multi-page preview/download), Phase 3 (AI document workspace, Studio Assistant chat, OpenXML template derivation with neutral placeholders, contextual layout/content revisions, in-flight cancellation, and version lineage/restore), Phase 4 (connected documents: Obsidian vault sync/export, Google Drive search/import for Docs/Word/PDF, and non-destructive conflict resolution with native UI controls), and Phase 5 (accessibility & responsiveness: Escape dismiss, Arrow preview pagination, Enter/Space list keyboard selection; library, filter & assistant empty states; file size (>20MB) & format checks; preview retry; defaults persistence across restarts; submitted document safeguards).
+
+## High-fidelity AI layout preservation (R7) — 3 November 2026
+
+Implements the Codex document-generation pipeline preserving reference structural formatting (sidebars, multi-column tables, margins, typography and page structure):
+- Host bridge (`scripts/codex_buddy.py`): added `kind='document-generation'` with `--sandbox workspace-write`, shell tools, `-i` rendered reference page images, strictly checked bounded job folders, and manifest OpenXML validation.
+- Server queue (`server/codex-local.mjs`): implemented `runCodexDocumentGeneration` staging `inputs/reference.docx`, `inputs/source_cv.txt`, `inputs/job_context.json`, and `workspace/draft.docx`. Validates manifest paths against traversal, verifies OpenXML package structure with `safeWord`, and returns exact artifacts without linear Markdown flattening.
+- Opportunity tailoring (`server/career-buddy.mjs` & `src/components/TailorApplication.tsx`): wires `runCodexDocumentGeneration` into the CV tailoring flow when Codex is configured with a reference style document. Bypasses text flattening, saves exact OpenXML bytes, displays high-fidelity artifact badges with page counts and review notes, and preserves idempotent saves and 409 conflict checks.
+- Comprehensive automated verification: unit tests in `tests/test_codex_buddy.py` (45/45 launcher tests passing) and `tests/codex-local.test.mjs` (7/7 tests passing); end-to-end integration test in `tests/server.test.mjs` verifying fictional two-column sidebar Word reference retention, candidate factual history preservation, and exact-artifact saving (290/290 Node tests passing).
+
+## Opportunity Knox MCP Server — 3 November 2026
+
+Delivers Model Context Protocol (MCP) server integration for Claude Desktop via local stdio (`server/mcp-server.mjs`) using `@modelcontextprotocol/sdk`:
+- Tool suite:
+  - `search_opportunities`: search by keyword or filter by stage with paginated summaries.
+  - `get_opportunity`: full description, requirements, existing strengths/gaps review, and revision.
+  - `search_career_evidence`: hybrid keyword/vector search across verified career library documents, excluding templates and job descriptions.
+  - `read_career_evidence`: retrieve full prepared text or indexed excerpts by passage index, enforcing workspace and security bounds.
+  - `save_fit_review`: attach validated strengths, gaps, and review timestamps to Opportunity cards; protects against concurrent edits with 409 revision checks and supports idempotent retries. Preserves user decision, reason, stage, and outcome without mutation.
+- Settings UI (`src/components/MCPSettings.tsx`): enable/disable toggle, write permission toggle, API key generation and rotation, and one-click copyable `claude_desktop_config.json` snippet with macOS/Windows setup instructions.
+- Automated verification: `tests/mcp-server.test.mjs` verifies Settings API, Bearer token authentication, 401/403/409 enforcement, and live end-to-end communication with an actual MCP client over `StdioClientTransport` (293/293 Node tests and 45/45 Python launcher tests passing).
+
+

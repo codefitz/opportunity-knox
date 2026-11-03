@@ -1,6 +1,6 @@
 # Opportunity Knox
 
-[Latest stable release: v0.4.7](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current development version: v0.4.8-dev.0** (`main`)
+[Latest stable release: v0.4.8](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current version: v0.4.8**
 
 A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
@@ -8,7 +8,7 @@ A private career workspace, from a saved job description to the final hiring dec
 
 ## Releases and development
 
-Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release; it can contain changes beyond v0.4.7.
+Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch may contain changes beyond the latest release.
 
 The sidebar and Settings show the installed version, development/release label, and short Git commit linked to GitHub. Builds made with uncommitted changes also show **+ local changes**, because the commit alone does not describe their complete source. The **Latest release** link always opens GitHub's latest published release. Build labels describe the running app, not newer code waiting on the host.
 
@@ -89,8 +89,10 @@ The initial manual workflow covers opportunity capture, dated stage history and 
 - **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.
 - **Smarter job intake:** supports public URLs (HTML/PDF), pasted job text, and document uploads (PDF/DOCX/TXT/MD). Features bounded local English PDF OCR, original source snapshots, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
 - **Calendar export (RFC 5545 ICS):** export single interview events, an opportunity-specific `.ics` calendar, or subscribe to a global live interview feed across all opportunities.
-- **Document Studio:** built-in and marked DOCX template previews, PDF export, and snapshot versioning for submitted application packs.
-- **Career Buddy (optional AI):** choose OpenAI, Claude, Gemini, Ollama, or custom OpenAI-compatible endpoints. Extract job details with quote-backed evidence, review fit/salary/skills against career evidence, and generate reviewable Word drafts without modifying original files. Keep AI off whenever preferred.
+- **Document Studio:** dedicated document library and authoring workspace. Manage master CVs and templates by category, view multi-page rendered previews, derive OpenXML templates with placeholder neutralisation, perform contextual chat revisions, sync/export with Obsidian vaults, and import Google Docs/Word/PDF documents with non-destructive conflict handling.
+- **High-Fidelity AI Document Generation:** tailor complete CVs from a visual reference Word (.docx) document using local Codex CLI without flattening structure into Markdown. Preserves sidebars, multi-column tables, margins, and typography while grounding content strictly in verified candidate evidence.
+- **Model Context Protocol (MCP) Server:** connect Claude Desktop over local stdio (`server/mcp-server.mjs`) to search opportunities, retrieve relevant career evidence, and save candidate fit assessments (strengths and gaps) directly from your chat client. Protected by bearer token authentication, revision conflict handling, and idempotent retries.
+- **Career Buddy (optional AI):** choose OpenAI, Claude, Gemini, Ollama, Codex, or custom OpenAI-compatible endpoints. Extract job details with quote-backed evidence, review fit/salary/skills against career evidence, and generate reviewable Word drafts without modifying original files. Keep AI off whenever preferred.
 - **AI Task Scheduler & Activity:** background task queuing with persistent SQLite tracking, cooperative cancellation, restart recovery, token usage reporting, and exportable activity logs.
 - **Settings & Themes:** customizable profiles, themes (Forest, Cappuccino, Ocean, Midnight) with light/dark contrast and custom accents, storage location migration, verified backups/restores, and update checking.
 

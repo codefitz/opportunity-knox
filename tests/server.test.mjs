@@ -16,6 +16,7 @@ import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../server/app.mjs";
+import { layoutDraft } from "../server/document-layout.mjs";
 
 async function fixture(t, extras = {}) {
   const root = mkdtempSync(join(tmpdir(), "board-server-"));
@@ -4405,4 +4406,859 @@ test('reset remains blocked while disconnected document processing is still runn
  try{assert.equal((await actionPreview(f,'reset-workspace')).status,409);}finally{release();}
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal((await actionPreview(f,'reset-workspace')).status,200);
+});
+
+test('document studio phase 1 supports typed defaults, document rename, and duplication', async t => {
+  const f = await fixture(t);
+  await f.setup();
+  const cvBytes = Buffer.from('Fictional CV content');
+  const tplBytes = Buffer.from('Fictional template content');
+  const masterDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: { name: 'Master_CV.docx', kind: 'cv', category: 'master-cv', contentBase64: cvBytes.toString('base64') },
+  })).data;
+  assert.equal(masterDoc.category, 'master-cv');
+
+  const cvTplDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: { name: 'Executive_CV_Template.docx', kind: 'cv', category: 'cv-template', contentBase64: tplBytes.toString('base64') },
+  })).data;
+  assert.equal(cvTplDoc.category, 'cv-template');
+
+  const coverTplDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: { name: 'Standard_Cover_Template.docx', kind: 'cover', category: 'cover-letter-template', contentBase64: tplBytes.toString('base64') },
+  })).data;
+  assert.equal(coverTplDoc.category, 'cover-letter-template');
+
+  const initialDefaults = (await f.request('/api/document-studio/defaults')).data;
+  assert.equal(initialDefaults.masterCvId, '');
+
+  const setDefaults = await f.request('/api/document-studio/defaults', {
+    method: 'PATCH',
+    body: {
+      masterCvId: masterDoc.id,
+      cvTemplateId: cvTplDoc.id,
+      coverLetterTemplateId: coverTplDoc.id,
+    },
+  });
+  assert.equal(setDefaults.status, 200);
+  assert.equal(setDefaults.data.masterCvId, masterDoc.id);
+  assert.equal(setDefaults.data.cvTemplateId, cvTplDoc.id);
+  assert.equal(setDefaults.data.coverLetterTemplateId, coverTplDoc.id);
+
+  const getDefaults = (await f.request('/api/document-studio/defaults')).data;
+  assert.equal(getDefaults.masterCvId, masterDoc.id);
+
+  const renamed = await f.request('/api/documents/' + masterDoc.id, {
+    method: 'PATCH',
+    body: { revision: masterDoc.revision, name: 'Senior_Master_CV.docx' },
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.data.name, 'Senior_Master_CV.docx');
+
+  const invalidRename = await f.request('/api/documents/' + masterDoc.id, {
+    method: 'PATCH',
+    body: { revision: renamed.data.revision, name: 'Senior_Master_CV.pdf' },
+  });
+  assert.equal(invalidRename.status, 400);
+
+  const duplicated = await f.request('/api/documents/' + masterDoc.id + '/duplicate', {
+    method: 'POST',
+  });
+  assert.equal(duplicated.status, 201);
+  assert.notEqual(duplicated.data.id, masterDoc.id);
+  assert.equal(duplicated.data.name, 'Senior_Master_CV (copy).docx');
+  assert.equal(duplicated.data.category, 'master-cv');
+
+  const dupContent = (await f.request('/api/documents/' + duplicated.data.id + '/content', { binary: true })).data;
+  assert.deepEqual(dupContent, cvBytes);
+
+  // Markdown document preview and content handling
+  const mdContent = '# Verified Fictional Candidate\n\n- Senior Developer 2021-2024\n- Tech Lead 2024-Present';
+  const mdDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: { name: 'Fictional_Resume.md', kind: 'cv', category: 'master-cv', contentBase64: Buffer.from(mdContent).toString('base64') },
+  })).data;
+  assert.equal(mdDoc.category, 'master-cv');
+
+  const mdContentRes = await f.request('/api/documents/' + mdDoc.id + '/content');
+  assert.equal(mdContentRes.status, 200);
+  assert.match(mdContentRes.response.headers.get('content-type') || '', /text\/markdown/);
+
+  const mdPreview = await f.request('/api/document-studio/preview', {
+    method: 'POST',
+    body: { documentId: mdDoc.id, revision: mdDoc.revision, layout: 'original' },
+  });
+  assert.equal(mdPreview.status, 200);
+  assert.equal(mdPreview.data.format, 'markdown');
+  assert.equal(mdPreview.data.content, mdContent);
+});
+
+test('document studio phase 2 generates tailored CV and cover letter, preserves template layout and attaches to opportunity', async t => {
+  const f = await fixture(t, {
+    documentConvert: async (bytes, folder) => {
+      const { writeFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      writeFileSync(join(folder, 'page-1.png'), Buffer.from('fictional-page'));
+      return { pages: 1, pdf: Buffer.from('%PDF-fictional') };
+    },
+  });
+  await f.setup();
+
+  // 1. Create candidate master CV
+  const masterCVText = '# Dr. Alex Fictional\nTechnology Leader & Principal Architect\nalex@example.test | +44 7700 900000 | London, UK\n\n' +
+    '## Professional Summary\nAccomplished engineering leader with 10+ years driving distributed systems and cloud platforms.\n\n' +
+    '## Work Experience\n' +
+    '### Principal Architect | Fictional Tech Global\n2021 – Present\n- Architected multi-region platform scaling to 10M daily events with 99.99% uptime.\n\n' +
+    '## Education\n- University of London: MSc Computer Science — 2017';
+
+  const masterDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Dr_Alex_Fictional_Master_CV.docx',
+      kind: 'cv',
+      category: 'master-cv',
+      contentBase64: Buffer.from(await layoutDraft('Dr Alex Fictional', masterCVText, 'classic')).toString('base64'),
+    },
+  })).data;
+  assert.equal(masterDoc.category, 'master-cv');
+
+  // 2. Create custom CV template with structured table layout
+  const templateZip = await (await import('jszip')).default.loadAsync(await layoutDraft('Executive Template', '# Dummy\n\nDummy text.', 'classic'));
+  let xml = await templateZip.file('word/document.xml').async('string');
+  const headerXml = '<w:p><w:r><w:t xml:space="preserve">CHARLOTTE </w:t></w:r><w:r><w:t>EXECUTE</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t>Chief Marketing Officer</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t>111 Pine St. New York, NY | (555)999-9999 | c@email.com</w:t></w:r></w:p>';
+  const tableXml = '<w:tbl>' +
+    '<w:tr><w:tc><w:p><w:r><w:t>Work Experience</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Sidebar</w:t></w:r></w:p></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p><w:r><w:t>2014 - Present</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Old Company Inc.</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Old Job Title</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Old achievements.</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p><w:r><w:t>EDUCATION</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p><w:r><w:t>May 2010</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Old School University</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Old Degree</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '<w:tr><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>Old Honors</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>' +
+    '</w:tbl>';
+  xml = xml.replace('</w:body>', headerXml + tableXml + '</w:body>');
+  templateZip.file('word/document.xml', xml);
+  const cvTemplateBytes = await templateZip.generateAsync({ type: 'nodebuffer' });
+
+  const cvTemplateDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Custom_Executive_Template.docx',
+      kind: 'cv',
+      category: 'cv-template',
+      contentBase64: Buffer.from(cvTemplateBytes).toString('base64'),
+    },
+  })).data;
+  assert.equal(cvTemplateDoc.category, 'cv-template');
+
+  // 3. Create target opportunity
+  const op = (await f.request('/api/opportunities', {
+    method: 'POST',
+    body: {
+      company: 'Acme Cloud Solutions',
+      role: 'Staff Infrastructure Architect',
+      description: 'Looking for a Staff Infrastructure Architect with deep distributed systems and team leadership experience.',
+    },
+  })).data;
+
+  // 4. Generate tailored CV without AI (deterministic factual generation)
+  const genCVRes = await f.request('/api/document-studio/generate', {
+    method: 'POST',
+    body: {
+      kind: 'cv',
+      sourceCvId: masterDoc.id,
+      templateId: cvTemplateDoc.id,
+      opportunityId: op.id,
+      passToAi: false,
+    },
+  });
+  assert.equal(genCVRes.status, 201);
+  const generatedCv = genCVRes.data.document;
+  assert.equal(generatedCv.kind, 'cv');
+  assert.equal(generatedCv.category, 'tailored-cv');
+  assert.equal(generatedCv.opportunityId, op.id);
+  assert.match(generatedCv.name, /Acme Cloud Solutions/);
+  assert.match(generatedCv.name, /Staff Infrastructure Architect/);
+
+  // Verify generated bytes preserved template layout and candidate facts
+  const cvDocContent = (await f.request('/api/documents/' + generatedCv.id + '/content', { binary: true })).data;
+  const cvDocZip = await (await import('jszip')).default.loadAsync(cvDocContent);
+  const cvDocXml = await cvDocZip.file('word/document.xml').async('string');
+  assert.match(cvDocXml, /<w:tbl/);
+  assert.match(cvDocXml, /w:vMerge/);
+  assert.match(cvDocXml, /Alex Fictional/);
+  assert.match(cvDocXml, /Principal Architect/);
+  assert.match(cvDocXml, /Fictional Tech Global/);
+  assert.doesNotMatch(cvDocXml, /Old Company|Old Job Title|Old achievements/);
+
+  // 5. Verify opportunity now has the generated CV attached
+  const opAfter = (await f.request('/api/opportunities/' + op.id)).data;
+  assert.ok(opAfter.documents.some(d => d.id === generatedCv.id));
+
+  // 6. Generate cover letter using built-in letter layout
+  const genCoverRes = await f.request('/api/document-studio/generate', {
+    method: 'POST',
+    body: {
+      kind: 'cover',
+      sourceCvId: masterDoc.id,
+      opportunityId: op.id,
+      layout: 'letter',
+      passToAi: false,
+    },
+  });
+  assert.equal(genCoverRes.status, 201);
+  const generatedCover = genCoverRes.data.document;
+  assert.equal(generatedCover.kind, 'cover');
+  assert.equal(generatedCover.category, 'cover-letter');
+  assert.equal(generatedCover.opportunityId, op.id);
+  assert.match(generatedCover.name, /Cover letter/);
+
+  const coverDocContent = (await f.request('/api/documents/' + generatedCover.id + '/content', { binary: true })).data;
+  const coverDocZip = await (await import('jszip')).default.loadAsync(coverDocContent);
+  const coverDocXml = await coverDocZip.file('word/document.xml').async('string');
+  assert.match(coverDocXml, /Acme Cloud Solutions/);
+  assert.match(coverDocXml, /Staff Infrastructure Architect/);
+
+  // 7. Verify preview was generated or is previewable
+  const previewRes = await f.request('/api/document-studio/preview', {
+    method: 'POST',
+    body: { documentId: generatedCv.id, revision: generatedCv.revision, layout: 'original' },
+  });
+  assert.equal(previewRes.status, 200);
+  assert.ok(previewRes.data.pages >= 1);
+});
+
+test('document studio phase 3 supports template derivation, contextual chat revisions, cancellation and version restore', async t => {
+  const f = await fixture(t, {
+    documentConvert: async (bytes, folder) => {
+      const { writeFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      writeFileSync(join(folder, 'page-1.png'), Buffer.from('fictional-page'));
+      return { pages: 1, pdf: Buffer.from('%PDF-fictional') };
+    },
+  });
+  await f.setup();
+
+  const originalCvText = '# Jane Doe\nPrincipal Cloud Engineer\njane@private.test | +44 7900 111222 | London, UK\n\n' +
+    '## Professional Summary\nExpert in distributed cloud architecture and systems.\n\n' +
+    '## Work Experience\n' +
+    '### Principal Engineer | Tech Enterprises\n2020 – Present\n- Led microservices migration serving 5M users.\n\n' +
+    '## Education\n- BSc Computer Systems — University of Bristol (2016)';
+
+  const sourceDoc = (await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Jane_Doe_CV.docx',
+      kind: 'cv',
+      category: 'master-cv',
+      contentBase64: Buffer.from(await layoutDraft('Jane Doe', originalCvText, 'classic')).toString('base64'),
+    },
+  })).data;
+  assert.equal(sourceDoc.category, 'master-cv');
+
+  // 1. Create reusable template from uploaded CV
+  const templateRes = await f.request('/api/document-studio/create-template', {
+    method: 'POST',
+    body: {
+      sourceDocumentId: sourceDoc.id,
+    },
+  });
+  assert.equal(templateRes.status, 201);
+  const derivedTemplate = templateRes.data.document;
+  assert.equal(derivedTemplate.kind, 'cv');
+  assert.equal(derivedTemplate.category, 'cv-template');
+  assert.match(derivedTemplate.name, /Template/);
+
+  // Check template bytes have sanitized private claims
+  const tplContent = (await f.request('/api/documents/' + derivedTemplate.id + '/content', { binary: true })).data;
+  const tplZip = await (await import('jszip')).default.loadAsync(tplContent);
+  const tplXml = await tplZip.file('word/document.xml').async('string');
+  assert.match(tplXml, /\[Candidate Full Name\]/);
+  assert.match(tplXml, /\[Job Title\] \| \[Company Name\]/);
+  assert.match(tplXml, /Work Experience/);
+  assert.doesNotMatch(tplXml, /Jane Doe/);
+  assert.doesNotMatch(tplXml, /private\.test/);
+  assert.doesNotMatch(tplXml, /Tech Enterprises/);
+
+  // 2. Chat: layout tweak
+  const chatLayoutRes = await f.request('/api/document-studio/chat', {
+    method: 'POST',
+    body: {
+      documentId: sourceDoc.id,
+      message: 'Switch to compact layout with tighter spacing',
+    },
+  });
+  assert.equal(chatLayoutRes.status, 200);
+  assert.equal(chatLayoutRes.data.action, 'revised_document');
+  const revisedDoc = chatLayoutRes.data.revisedDocument;
+  assert.equal(revisedDoc.generation.layout, 'compact');
+
+  // 3. Chat: create template via chat prompt
+  const chatTplRes = await f.request('/api/document-studio/chat', {
+    method: 'POST',
+    body: {
+      documentId: sourceDoc.id,
+      message: 'Turn this into a cover letter template',
+    },
+  });
+  assert.equal(chatTplRes.status, 200);
+  assert.equal(chatTplRes.data.action, 'created_template');
+  const chatTpl = chatTplRes.data.createdDocument;
+  assert.equal(chatTpl.category, 'cover-letter-template');
+
+  // 4. Version history
+  const historyRes = await f.request('/api/document-studio/documents/' + revisedDoc.id + '/history');
+  assert.equal(historyRes.status, 200);
+  assert.ok(Array.isArray(historyRes.data.history));
+  assert.ok(historyRes.data.history.length >= 2);
+
+  // 5. Version restore
+  const restoreRes = await f.request('/api/document-studio/documents/' + revisedDoc.id + '/restore', {
+    method: 'POST',
+    body: { targetId: sourceDoc.id },
+  });
+  assert.equal(restoreRes.status, 201);
+  const restoredDoc = restoreRes.data.document;
+  assert.equal(restoredDoc.name, sourceDoc.name);
+  assert.ok(restoredDoc.version >= 2);
+
+  // 6. Chat cancel
+  const cancelRes = await f.request('/api/document-studio/chat/cancel', {
+    method: 'POST',
+    body: { requestId: 'non-existent-request' },
+  });
+  assert.equal(cancelRes.status, 200);
+  assert.equal(cancelRes.data.cancelled, true);
+});
+
+test('document studio phase 4 supports connected documents (Obsidian sync/export and Google Drive search/import/refresh/conflict)', async t => {
+  let googleFiles = [
+    {
+      id: 'drive-doc-1',
+      name: 'External CV.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      modifiedTime: '2026-11-03T10:00:00Z',
+      version: '1',
+      webViewLink: 'https://drive.google.com/file/d/drive-doc-1/view',
+    },
+  ];
+  let externalContent = 'Initial Google Drive content';
+
+  const f = await fixture(t, {
+    googleFetch: async (url) => {
+      const u = String(url);
+      if (u.includes('oauth2.googleapis.com/token')) {
+        return new Response(JSON.stringify({ access_token: 'mock-token', expires_in: 3600 }));
+      }
+      if (u.includes('files?')) {
+        return new Response(JSON.stringify({ files: googleFiles }));
+      }
+      if (u.includes('files/drive-doc-1?fields=')) {
+        return new Response(JSON.stringify(googleFiles[0]));
+      }
+      if (u.includes('files/drive-doc-1?alt=media')) {
+        return new Response(externalContent);
+      }
+      return new Response('Not found', { status: 404 });
+    },
+  });
+  await f.setup();
+
+  // 1. Check connections endpoint
+  const connRes = await f.request('/api/document-studio/connections');
+  assert.equal(connRes.status, 200);
+  assert.equal(connRes.data.obsidian.enabled, false);
+  assert.equal(connRes.data.google.connected, false);
+
+  // 2. Google search fails when disconnected
+  assert.equal((await f.request('/api/document-studio/google/search', { method: 'POST', body: { query: 'test' } })).status, 400);
+
+  // 3. Connect Google Drive
+  testConfig(f, 'googleDocuments', {
+    revision: 1,
+    tokens: { access_token: 'mock-token', expiresAt: Date.now() + 3600000 },
+  });
+
+  const connRes2 = await f.request('/api/document-studio/connections');
+  assert.equal(connRes2.data.google.connected, true);
+
+  // 4. Google search succeeds
+  const searchRes = await f.request('/api/document-studio/google/search', {
+    method: 'POST',
+    body: { query: 'External' },
+  });
+  assert.equal(searchRes.status, 200);
+  assert.equal(searchRes.data.files.length, 1);
+  assert.equal(searchRes.data.files[0].id, 'drive-doc-1');
+
+  // 5. Google import
+  const importRes = await f.request('/api/document-studio/google/import', {
+    method: 'POST',
+    body: { id: 'drive-doc-1', category: 'master-cv' },
+  });
+  assert.equal(importRes.status, 201);
+  const importedDoc = importRes.data.document;
+  assert.equal(importedDoc.name, 'External CV.docx');
+  assert.equal(importedDoc.category, 'master-cv');
+  assert.equal(importedDoc.externalSource.provider, 'google-drive');
+  assert.equal(importedDoc.externalSource.id, 'drive-doc-1');
+  assert.equal(importedDoc.externalSource.version, '1');
+
+  // 6. Google refresh when up-to-date
+  const refreshUpToDate = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: importedDoc.id },
+  });
+  assert.equal(refreshUpToDate.status, 200);
+  assert.equal(refreshUpToDate.data.status, 'up-to-date');
+
+  // 7. Automatic refresh when external changed and local is unmodified
+  googleFiles[0].version = '2';
+  externalContent = 'Updated Google Drive content';
+
+  const refreshUpdated = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: importedDoc.id },
+  });
+  assert.equal(refreshUpdated.status, 200);
+  assert.equal(refreshUpdated.data.status, 'refreshed');
+  const v2Doc = refreshUpdated.data.document;
+  assert.equal(v2Doc.externalSource.version, '2');
+
+  // 8. Conflict handling when BOTH sides have changed
+  // Modify local document by marking it restored or revised
+  const docRow = JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(v2Doc.id).data);
+  docRow.notes = 'Revised by Studio Assistant';
+  f.app.db.prepare('UPDATE documents SET data=? WHERE id=?').run(JSON.stringify(docRow), v2Doc.id);
+  googleFiles[0].version = '3';
+  externalContent = 'Third revision in Google Drive';
+
+  // Conflict detected without resolution
+  const conflictCheck = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: v2Doc.id },
+  });
+  assert.equal(conflictCheck.status, 200);
+  assert.equal(conflictCheck.data.conflict, true);
+  assert.equal(conflictCheck.data.externalVersion, '3');
+
+  // Resolution: keep-local
+  const keepLocal = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: v2Doc.id, resolution: 'keep-local' },
+  });
+  assert.equal(keepLocal.status, 200);
+  assert.equal(keepLocal.data.status, 'kept-local');
+
+  // Resolution: separate-copy
+  const separateCopy = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: v2Doc.id, resolution: 'separate-copy' },
+  });
+  assert.equal(separateCopy.status, 200);
+  assert.equal(separateCopy.data.status, 'separate-copy');
+  assert.match(separateCopy.data.document.name, /Google Drive Copy/);
+
+  // Resolution: new-version
+  const newVer = await f.request('/api/document-studio/google/refresh', {
+    method: 'POST',
+    body: { documentId: v2Doc.id, resolution: 'new-version' },
+  });
+  assert.equal(newVer.status, 200);
+  assert.equal(newVer.data.status, 'new-version');
+  assert.equal(newVer.data.document.externalSource.version, '3');
+
+  // 9. Obsidian Vault integration
+  const vaultPath = join(f.options.dataDir, 'test-studio-vault');
+  mkdirSync(join(vaultPath, '.obsidian'), { recursive: true });
+
+  // Configure writable vault
+  const configVault = await f.request('/api/obsidian/configure', {
+    method: 'POST',
+    body: {
+      action: 'connect',
+      locationType: 'hostPath',
+      hostPath: vaultPath,
+      readOnly: false,
+    },
+  });
+  assert.equal(configVault.status, 200);
+
+  // Obsidian sync
+  const obsSync = await f.request('/api/document-studio/obsidian/sync', {
+    method: 'POST',
+  });
+  assert.equal(obsSync.status, 200);
+  assert.equal(obsSync.data.ok, true);
+
+  // Obsidian export
+  const obsExport = await f.request('/api/document-studio/obsidian/export', {
+    method: 'POST',
+    body: { documentId: importedDoc.id, subfolder: 'Generated' },
+  });
+  assert.equal(obsExport.status, 200);
+  assert.equal(obsExport.data.ok, true);
+  assert.ok(existsSync(join(vaultPath, 'Generated', 'External CV.docx')));
+
+  // Read-only vault rejects export
+  await f.request('/api/obsidian/configure', {
+    method: 'POST',
+    body: {
+      action: 'connect',
+      locationType: 'hostPath',
+      hostPath: vaultPath,
+      readOnly: true,
+    },
+  });
+  const obsReadOnlyExport = await f.request('/api/document-studio/obsidian/export', {
+    method: 'POST',
+    body: { documentId: importedDoc.id },
+  });
+  assert.equal(obsReadOnlyExport.status, 400);
+  assert.match(obsReadOnlyExport.data.error, /read-only/i);
+});
+
+test('Document Studio Phase 5: Verification, persistence, safeguards, and limits', async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  // 1. Upload sample master CV and templates
+  const cvRes = await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Master-CV.docx',
+      kind: 'cv',
+      category: 'master-cv',
+      contentBase64: Buffer.from('CV content').toString('base64'),
+    },
+  });
+  assert.equal(cvRes.status, 201);
+  const cvDoc = cvRes.data;
+
+  const tplRes = await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Template.docx',
+      kind: 'cv',
+      category: 'cv-template',
+      contentBase64: Buffer.from('Template content').toString('base64'),
+    },
+  });
+  assert.equal(tplRes.status, 201);
+  const tplDoc = tplRes.data;
+
+  // 2. Set defaults
+  const setDefRes = await f.request('/api/document-studio/defaults', {
+    method: 'PATCH',
+    body: {
+      masterCvId: cvDoc.id,
+      cvTemplateId: tplDoc.id,
+    },
+  });
+  assert.equal(setDefRes.status, 200);
+  assert.equal(setDefRes.data.masterCvId, cvDoc.id);
+  assert.equal(setDefRes.data.cvTemplateId, tplDoc.id);
+
+  // 3. Verify defaults persist across app restart with same dataDir
+  await f.restart();
+  await f.login();
+
+  const getDefRes = await f.request('/api/document-studio/defaults');
+  assert.equal(getDefRes.status, 200);
+  assert.equal(getDefRes.data.masterCvId, cvDoc.id);
+  assert.equal(getDefRes.data.cvTemplateId, tplDoc.id);
+
+  // 4. Submitted Document Preservation
+  const subRes = await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Submitted-Application.docx',
+      kind: 'cv',
+      status: 'submitted',
+      contentBase64: Buffer.from('Submitted content').toString('base64'),
+    },
+  });
+  assert.equal(subRes.status, 201);
+  const subDoc = subRes.data;
+
+  // Attempting to delete submitted document fails with HTTP 409
+  const delRes = await f.request(`/api/documents/${subDoc.id}`, {
+    method: 'DELETE',
+  });
+  assert.equal(delRes.status, 409);
+  assert.match(delRes.data.error, /submitted/i);
+
+  // Attempting to rename submitted document fails with HTTP 409
+  const renameRes = await f.request(`/api/documents/${subDoc.id}`, {
+    method: 'PATCH',
+    body: { name: 'Renamed-Application.docx' },
+  });
+  assert.equal(renameRes.status, 409);
+  assert.match(renameRes.data.error, /submitted/i);
+
+  // Bulk delete preserves submitted documents
+  const bulkDelRes = await f.request(`/api/documents?scope=library&ids=${subDoc.id}`, {
+    method: 'DELETE',
+  });
+  assert.equal(bulkDelRes.status, 200);
+  assert.equal(bulkDelRes.data.preservedSubmittedCount, 1);
+  assert.equal(bulkDelRes.data.deletedCount, 0);
+
+  // 5. File limit checks (>20MB)
+  const largeBuffer = Buffer.alloc(20 * 1024 * 1024 + 1024, 0);
+  const largeRes = await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Too-Large.docx',
+      contentBase64: largeBuffer.toString('base64'),
+    },
+  });
+  assert.equal(largeRes.status, 413);
+});
+
+test('high-fidelity AI document generation preserves two-column sidebar structure, factual candidate history, and saves exact artifact', async t => {
+  const codexQueueDir = mkdtempSync(join(tmpdir(), 'knox-hifi-queue-'));
+  writeFileSync(join(codexQueueDir, 'status.json'), JSON.stringify({ ready: true, time: Date.now() / 1000 }));
+  t.after(() => rmSync(codexQueueDir, { recursive: true, force: true }));
+
+  const f = await fixture(t, { codexQueueDir });
+  await f.setup();
+
+  // 1. Configure Codex provider
+  const current = (await f.request('/api/buddy/settings')).data;
+  await f.request('/api/buddy/settings', {
+    method: 'PATCH',
+    body: {
+      revision: current.revision,
+      enabled: true,
+      provider: 'codex',
+      model: 'default',
+    },
+  });
+
+  // 2. Create opportunity
+  const op = (await f.request('/api/opportunities', {
+    method: 'POST',
+    body: {
+      company: 'Acme Corp',
+      role: 'Principal Systems Architect',
+      description: 'Looking for a distributed systems leader with strong consensus experience.',
+    },
+  })).data;
+
+  // 3. Upload candidate source CV with verified facts
+  const source = (await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Jane-Doe-CV.txt',
+      kind: 'cv',
+      contentBase64: Buffer.from(
+        'Jane Doe\nStaff Engineer\nExperience: Fictional Corp (2020-2026). Led distributed database architecture and fault-tolerant replication.\nSkills: Distributed Systems, Rust, Go, Raft, Paxos.\nEducation: B.S. Computer Science.',
+      ).toString('base64'),
+    },
+  })).data;
+
+  // 4. Create fictional two-column sidebar Word reference document
+  const { Document, Table, TableRow, TableCell, Paragraph, WidthType, Packer } = await import('docx');
+  const refDocx = await Packer.toBuffer(
+    new Document({
+      sections: [
+        {
+          children: [
+            new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      width: { size: 30, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph('SIDEBAR: Skills & Contact'),
+                        new Paragraph('Old Contact: prior.applicant@example.com'),
+                        new Paragraph('Old Skill: Legacy Fortran'),
+                      ],
+                    }),
+                    new TableCell({
+                      width: { size: 70, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph('MAIN: Professional Experience'),
+                        new Paragraph('Old Company XYZ: Junior Developer (2010-2015)'),
+                      ],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        },
+      ],
+    }),
+  );
+
+  const style = (await f.request('/api/documents', {
+    method: 'POST',
+    body: {
+      name: 'Sidebar-Reference.docx',
+      kind: 'cv',
+      category: 'template',
+      contentBase64: refDocx.toString('base64'),
+    },
+  })).data;
+
+  // 5. Tailor CV with high-fidelity document generation
+  const base = `/api/opportunities/${op.id}/buddy`;
+  const chatPromise = f.request(base + '/chat', {
+    method: 'POST',
+    body: {
+      action: 'cv',
+      message: 'Tailor a high-fidelity CV highlighting distributed systems.',
+      autoTailor: true,
+      templateLayout: 'classic',
+      sourceCvId: source.id,
+      styleDocumentId: style.id,
+      styleDocumentRevision: style.revision,
+      documentIds: [],
+      includeOtherOpportunities: false,
+      requestId: 'fictional-hifi-cv',
+    },
+  });
+
+  // Mock Codex worker processes the job
+  let reqFile;
+  for (let i = 0; i < 50; i++) {
+    reqFile = readdirSync(codexQueueDir).find((n) => n.endsWith('.request.json'));
+    if (reqFile) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.ok(reqFile, 'Request file was staged in Codex queue');
+  const reqData = JSON.parse(readFileSync(join(codexQueueDir, reqFile), 'utf8'));
+  assert.equal(reqData.kind, 'document-generation');
+  assert.ok(reqData.jobDir);
+  assert.ok(existsSync(join(reqData.jobDir, 'inputs', 'reference.docx')));
+  assert.ok(existsSync(join(reqData.jobDir, 'inputs', 'source_cv.txt')));
+  assert.ok(existsSync(join(reqData.jobDir, 'inputs', 'job_context.json')));
+  assert.ok(existsSync(join(reqData.jobDir, 'workspace', 'draft.docx')));
+
+  // Verify staged source CV facts
+  const stagedSourceCv = readFileSync(join(reqData.jobDir, 'inputs', 'source_cv.txt'), 'utf8');
+  assert.match(stagedSourceCv, /Jane Doe/);
+  assert.match(stagedSourceCv, /Fictional Corp/);
+
+  // Worker generates output Word document preserving two-column sidebar structure
+  const tailoredDocx = await Packer.toBuffer(
+    new Document({
+      sections: [
+        {
+          children: [
+            new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      width: { size: 30, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph('SIDEBAR: Core Competencies'),
+                        new Paragraph('Distributed Systems, Raft, Paxos'),
+                        new Paragraph('Rust, Go'),
+                      ],
+                    }),
+                    new TableCell({
+                      width: { size: 70, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph('Jane Doe - Principal Systems Architect'),
+                        new Paragraph(
+                          'Fictional Corp (2020-2026): Led distributed database architecture and fault-tolerant replication.',
+                        ),
+                      ],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        },
+      ],
+    }),
+  );
+
+  writeFileSync(join(reqData.jobDir, 'workspace', 'output.docx'), tailoredDocx);
+  writeFileSync(
+    join(codexQueueDir, reqFile.replace('.request.json', '.response.json')),
+    JSON.stringify({
+      output: JSON.stringify({
+        outputDocx: 'output.docx',
+        pageCount: 2,
+        notes: 'Preserved two-column sidebar format with verified candidate facts.',
+      }),
+      timings: { executionMs: 320 },
+      usage: { input_tokens: 280, output_tokens: 110 },
+    }),
+  );
+
+  const chatResult = await chatPromise;
+  assert.equal(chatResult.status, 200);
+  const reply = chatResult.data.messages.at(-1);
+  assert.ok(reply.artifactBytes);
+  assert.equal(reply.artifactManifest.pageCount, 2);
+  assert.match(reply.content, /Sidebar-Reference\.docx/);
+
+  // 6. Save the draft
+  const saveResult = await f.request(base + '/draft/' + reply.id, {
+    method: 'POST',
+    body: {
+      title: reply.draft.title,
+      content: reply.draft.content,
+    },
+  });
+  assert.equal(saveResult.status, 200);
+  const doc = saveResult.data.opportunity.documents.at(-1);
+  assert.equal(doc.generation.layout, 'artifact');
+  assert.equal(doc.generation.styleMatch, 'artifact');
+  assert.equal(doc.generation.artifactManifest.pageCount, 2);
+
+  // 7. Verify exact artifact bytes and structural OpenXML XML inspection
+  const jszip = (await import('jszip')).default;
+  const docxData = (await f.request(doc.url, { binary: true })).data;
+  assert.deepEqual(docxData, tailoredDocx);
+
+  const zip = await jszip.loadAsync(docxData);
+  const xml = await zip.file('word/document.xml').async('string');
+  assert.match(xml, /<w:tbl[\s>]/);
+  assert.match(xml, /<w:tc[\s>]/);
+  assert.match(xml, /SIDEBAR: Core Competencies/);
+  assert.match(xml, /Jane Doe - Principal Systems Architect/);
+  assert.match(xml, /Fictional Corp/);
+  assert.doesNotMatch(xml, /prior\.applicant@example\.com/);
+  assert.doesNotMatch(xml, /Junior Developer/);
+  assert.doesNotMatch(xml, /Legacy Fortran/);
+
+  // 8. Idempotent repeated save
+  const repeatSave = await f.request(base + '/draft/' + reply.id, {
+    method: 'POST',
+    body: {
+      title: reply.draft.title,
+      content: reply.draft.content,
+    },
+  });
+  assert.equal(repeatSave.status, 200);
+  assert.equal(repeatSave.data.opportunity.documents.length, 1);
+
+  // 9. Style document change produces 409 conflict
+  await f.request(`/api/documents/${style.id}`, {
+    method: 'PATCH',
+    body: { revision: style.revision, notes: 'Modified style metadata' },
+  });
+  const staleSave = await f.request(base + '/draft/' + reply.id, {
+    method: 'POST',
+    body: {
+      title: 'New Title',
+      content: reply.draft.content,
+    },
+  });
+  assert.equal(staleSave.status, 409);
 });

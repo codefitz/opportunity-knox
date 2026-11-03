@@ -157,12 +157,29 @@ export async function layoutDraft(
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           const hMatch = line.match(/^(#{1,2})\s+(.+)/);
+          const plainHeadingMatch = !hMatch && line.match(/^(\*{2})?([A-Za-z\s&/]{3,40})(\*{2})?:?\s*$/);
+          let heading = "";
+          let isHeading = false;
+          let lower = "";
+
           if (hMatch) {
+            heading = hMatch[2].trim();
+            lower = heading.toLowerCase();
+            isHeading = true;
+          } else if (plainHeadingMatch) {
+            const candidateTitle = plainHeadingMatch[2].trim();
+            const candLower = candidateTitle.toLowerCase();
+            if (/^(?:work\s+experience|professional\s+experience|experience|employment(?:\s+history)?|career(?:\s+history)?|education(?:\s+and\s+qualifications?)?|qualifications|skills?(?:\s+&\s+competencies)?|key\s+skills|technical\s+skills|competencies|professional\s+summary|summary|profile|about(?:\s+me)?|accomplishments|achievements|strengths)$/i.test(candLower)) {
+              heading = candidateTitle;
+              lower = candLower;
+              isHeading = true;
+            }
+          }
+
+          if (isHeading) {
             if (currentSection.lines.length || currentSection.heading) {
               sections.push(currentSection);
             }
-            const heading = hMatch[2].trim();
-            const lower = heading.toLowerCase();
             let kind = "general";
             if (/skill|competenc|technolog|proficienc|tool/i.test(lower)) kind = "skills";
             else if (/accomplish|highlight|achievement|strength/i.test(lower)) kind = "accomplishments";
@@ -232,11 +249,12 @@ export async function layoutDraft(
             for (const l of sec.lines) {
               const h3Match = l.match(/^#{3,4}\s+(.+)/);
               const boldMatch = l.match(/^\*\*([^*]+)\*\*(.*)/);
-              if (h3Match || (boldMatch && !l.trim().startsWith("-"))) {
+              const pipeMatch = !l.trim().startsWith("-") && l.includes("|") && !/@|[|].*@/.test(l);
+              if (h3Match || (boldMatch && !l.trim().startsWith("-")) || pipeMatch) {
                 if (currentJob) res.experience.push(currentJob);
                 const rawTitle = h3Match
                   ? h3Match[1]
-                  : boldMatch[1] + (boldMatch[2] || "");
+                  : (boldMatch ? boldMatch[1] + (boldMatch[2] || "") : l.trim());
                 let jobTitle = rawTitle;
                 let jobCompany = "";
                 let jobDates = "";
@@ -398,8 +416,8 @@ export async function layoutDraft(
         const rows = $(tbl).children("w\\:tr");
         if (rows.length <= 10) {
           rows.each((rIdx, tr) => {
-            const rowTxt = getVisibleText(tr).toLowerCase();
-            if (/accomplishment|highlight|achievement|strength/i.test(rowTxt)) {
+            const rowTxt = getVisibleText(tr).trim().toLowerCase();
+            if (/^(key\s+|notable\s+|selected\s+|core\s+)?(accomplishments?|highlights?|achievements?|strengths?):?\s*$/i.test(rowTxt)) {
               const nextRow = rows.eq(rIdx + 1);
               if (nextRow.length) {
                 const tc = nextRow.find("w\\:tc").first();
@@ -416,7 +434,7 @@ export async function layoutDraft(
                   tc.append(p);
                 });
               }
-            } else if (/competenc|skills?(\s+highlights?)?/i.test(rowTxt)) {
+            } else if (/^(key\s+|core\s+|technical\s+)?(competenc(ies|y)|skills?(\s+highlights?)?):?\s*$/i.test(rowTxt)) {
               const nextRow = rows.eq(rIdx + 1);
               if (nextRow.length) {
                 const tc = nextRow.find("w\\:tc").first();

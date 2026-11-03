@@ -1,6 +1,6 @@
 {
   "name": "opportunity-board",
-  "version": "0.4.8-dev.0",
+  "version": "0.4.8",
   "private": true,
   "description": "Opportunity Knox: a private career workspace with a Docker launcher",
   "type": "module",
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "cheerio": "^1.2.0",
     "docx": "9.13.0",
     "ipaddr.js": "^2.5.0",

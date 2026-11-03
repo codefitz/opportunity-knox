@@ -1028,6 +1028,23 @@ export function createObsidianIntegration({
     return false;
   }
 
+  async function exportDocumentToVault(doc, { subfolder = "Generated" } = {}) {
+    const cfg = getSettings();
+    if (!cfg.enabled) fail(400, "Obsidian vault is not enabled.");
+    if (cfg.readOnly) fail(400, "Obsidian vault is configured as read-only. Export is disabled.");
+    const resolved = resolveActiveVault(cfg);
+    if (resolved.mountPending || !resolved.localDir || !existsSync(resolved.localDir)) {
+      fail(400, "Obsidian vault directory is currently unavailable.");
+    }
+    const vaultDir = realpathSync(resolved.localDir);
+    const fileName = basename(doc.name);
+    const targetRelPath = subfolder ? `${subfolder}/${fileName}` : fileName;
+    const targetFile = safeVaultChild(vaultDir, targetRelPath, { createDirs: true });
+    const bytes = readFileSync(documentPath(doc));
+    writeAtomic(targetFile, bytes);
+    return { ok: true, relPath: targetRelPath, vaultName: cfg.vaultName || "Opportunity Knox Vault" };
+  }
+
   return {
     status,
     sourceDocuments,
@@ -1035,6 +1052,7 @@ export function createObsidianIntegration({
     configure,
     importSourcesToVault,
     syncFromVault,
+    exportDocumentToVault,
     handle,
   };
 }

@@ -335,7 +335,7 @@ export function createStandaloneBuddy(ctx) {
         try {
           task.check();
           const available = getDocuments().filter(
-            (d) => !d.opportunityId && !d.generation && d.category!=="template",
+            (d) => !d.opportunityId && !d.generation && !["template","cv-template","cover-letter-template"].includes(d.category),
           );
           const ids = body.useLibrary
             ? await vectors.selectSources(body.message, available)

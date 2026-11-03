@@ -2,12 +2,32 @@
 import json, os, re, shutil, signal, subprocess, tempfile, threading, time
 from pathlib import Path
 
-def command(executable, directory, schema, output, model, effort=None):
-    args=[executable,'exec','--json','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','-C',str(directory),'--output-schema',str(schema),'-o',str(output)]
-    for key,value in {'features.shell_tool':'false','features.apps':'false','features.plugins':'false','features.memories':'false','features.request_permissions_tool':'false','skills.bundled.enabled':'false','skills.include_instructions':'false','web_search':'"disabled"','project_doc_max_bytes':'0','approval_policy':'"never"'}.items():args+=['-c',key+'='+value]
-    if effort in ('low','medium','high'):args+=['-c','model_reasoning_effort='+json.dumps(effort)]
-    if model!='default':args+=['-m',model]
-    return args+['-']
+def command(executable, directory, schema, output, model, effort=None, kind='inference', images=None):
+    sandbox = 'workspace-write' if kind == 'document-generation' else 'read-only'
+    args = [executable, 'exec', '--json', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', sandbox, '-C', str(directory), '--output-schema', str(schema), '-o', str(output)]
+    features = {
+        'features.apps': 'false',
+        'features.plugins': 'false',
+        'features.memories': 'false',
+        'features.request_permissions_tool': 'false',
+        'skills.bundled.enabled': 'false',
+        'skills.include_instructions': 'false',
+        'web_search': '"disabled"',
+        'project_doc_max_bytes': '0',
+        'approval_policy': '"never"',
+    }
+    if kind != 'document-generation':
+        features['features.shell_tool'] = 'false'
+    for key, value in features.items():
+        args += ['-c', key + '=' + value]
+    if effort in ('low', 'medium', 'high'):
+        args += ['-c', 'model_reasoning_effort=' + json.dumps(effort)]
+    if model != 'default':
+        args += ['-m', model]
+    if images:
+        for img in images:
+            args += ['-i', str(img)]
+    return args + ['-']
 
 def normalize_models(catalog):
     models=[{'id':'default','name':'Codex default model'}];seen={'default'}
@@ -56,52 +76,96 @@ class CodexWorker:
                     if not isinstance(job['prompt'],str) or not isinstance(job['schema'],dict) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}',model):raise ValueError()
                     if not self.executable or not auth:raise RuntimeError('Sign in to Codex on the board host, then restart the board.')
                     self.write(self.root/'status.json',{'ready':True,'time':time.time(),'busyUntil':job['expiresAt']})
-                    with tempfile.TemporaryDirectory(prefix='knox-codex-') as temp:
-                        schema=Path(temp)/'schema.json';schema.write_text(json.dumps(job['schema']));output=Path(temp)/'answer.json'
-                        env={k:v for k,v in os.environ.items() if k not in ('OPENAI_API_KEY','CODEX_API_KEY','CODEX_ACCESS_TOKEN')}
-                        execution_started=time.monotonic()
-                        prompt=Path(temp)/'prompt.txt';prompt.write_text(job['prompt']);prompt.chmod(0o600)
-                        details={'stage':'running-codex','eventCount':0}
+                    is_doc = job.get('kind') == 'document-generation'
+                    temp_dir = None
+                    if is_doc:
+                        req_job_dir = job.get('jobDir', '')
+                        job_dir = (self.root / Path(req_job_dir).name).resolve() if req_job_dir else (self.root / f"{job.get('id', '')}.job").resolve()
+                        if not job_dir.is_relative_to(self.root.resolve()) or not job_dir.is_dir():
+                            raise ValueError('Invalid job directory for document generation')
+                        workspace = job_dir / 'workspace'
+                        workspace.mkdir(mode=0o700, exist_ok=True)
+                        schema = job_dir / 'schema.json'
+                        schema.write_text(json.dumps(job['schema']), encoding='utf8')
+                        output = job_dir / 'manifest.json'
+                        prompt = job_dir / 'prompt.txt'
+                        prompt.write_text(job['prompt'], encoding='utf8'); prompt.chmod(0o600)
+                        images = [Path(img) for img in job.get('images', []) if Path(img).exists()]
+                        run_dir = workspace
+                    else:
+                        temp_dir = tempfile.TemporaryDirectory(prefix='knox-codex-')
+                        temp = Path(temp_dir.name)
+                        schema = temp / 'schema.json'; schema.write_text(json.dumps(job['schema'])); output = temp / 'answer.json'
+                        prompt = temp / 'prompt.txt'; prompt.write_text(job['prompt']); prompt.chmod(0o600)
+                        images = None
+                        run_dir = temp
+                    try:
+                        env = {k: v for k, v in os.environ.items() if k not in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN')}
+                        execution_started = time.monotonic()
+                        details = {'stage': 'running-codex', 'eventCount': 0}
                         def events(process):
                             while True:
-                                line=process.stdout.readline(65537)
-                                if not line:break
-                                if len(line)>65536:
-                                    while line and not line.endswith('\n'):line=process.stdout.readline(65537)
+                                line = process.stdout.readline(65537)
+                                if not line: break
+                                if len(line) > 65536:
+                                    while line and not line.endswith('\n'): line = process.stdout.readline(65537)
                                     continue
-                                try:event=json.loads(line)
-                                except (ValueError,TypeError):continue
-                                if not isinstance(event,dict):continue
-                                kind=event.get('type')
-                                if kind not in ('thread.started','turn.started','turn.completed','turn.failed','item.started','item.updated','item.completed','error'):continue
-                                details['eventCount']+=1;details['lastEventAt']=time.time()
-                                if kind in ('error','turn.failed'):
-                                    details['stage']='codex-error'
-                                    message=str(event.get('message',event.get('error',''))).lower()
-                                    details['issue']='rate-limit' if 'rate limit' in message or '429' in message else 'authentication' if '401' in message or 'unauthorized' in message else 'connection' if 'connect' in message or 'stream' in message else 'schema' if 'schema' in message else 'provider-error'
+                                try: event = json.loads(line)
+                                except (ValueError, TypeError): continue
+                                if not isinstance(event, dict): continue
+                                kind = event.get('type')
+                                if kind not in ('thread.started', 'turn.started', 'turn.completed', 'turn.failed', 'item.started', 'item.updated', 'item.completed', 'error'): continue
+                                details['eventCount'] += 1; details['lastEventAt'] = time.time()
+                                if kind in ('error', 'turn.failed'):
+                                    details['stage'] = 'codex-error'
+                                    message = str(event.get('message', event.get('error', ''))).lower()
+                                    details['issue'] = 'rate-limit' if 'rate limit' in message or '429' in message else 'authentication' if '401' in message or 'unauthorized' in message else 'connection' if 'connect' in message or 'stream' in message else 'schema' if 'schema' in message else 'provider-error'
                                 elif kind.startswith('item.'):
-                                    details['stage']='codex-reasoning' if event.get('item',{}).get('type')=='reasoning' else 'receiving-response'
-                                elif kind=='turn.started':details['stage']='running-codex'
-                                if kind=='turn.completed':
-                                    usage=event.get('usage',{});details['usage']={k:v for k,v in usage.items() if k in ('input_tokens','cached_input_tokens','output_tokens','reasoning_output_tokens') and type(v) is int and v>=0}
-                                self.write(progress,dict(details))
+                                    details['stage'] = 'codex-reasoning' if event.get('item', {}).get('type') == 'reasoning' else 'receiving-response'
+                                elif kind == 'turn.started': details['stage'] = 'running-codex'
+                                if kind == 'turn.completed':
+                                    usage = event.get('usage', {})
+                                    details['usage'] = {k: v for k, v in usage.items() if k in ('input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens') and type(v) is int and v >= 0}
+                                self.write(progress, dict(details))
+                        cmd = command(self.executable, run_dir, schema, output, model, job.get('reasoningEffort'), kind=job.get('kind', 'inference'), images=images)
                         with prompt.open() as input_file:
-                            self.process=subprocess.Popen(command(self.executable,temp,schema,output,model,job.get('reasoningEffort')),stdin=input_file,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,start_new_session=True,env=env)
-                        self.write(progress,dict(details))
-                        reader=threading.Thread(target=events,args=(self.process,),daemon=True);reader.start()
-                        deadline=min(job['expiresAt'],time.time()+900)
+                            self.process = subprocess.Popen(cmd, stdin=input_file, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True, env=env)
+                        self.write(progress, dict(details))
+                        reader = threading.Thread(target=events, args=(self.process,), daemon=True); reader.start()
+                        deadline = min(job['expiresAt'], time.time() + 900)
                         while self.process.poll() is None:
-                            if cancel.exists() or self.stop.is_set() or time.time()>=deadline:
-                                try:os.killpg(self.process.pid,signal.SIGKILL)
-                                except ProcessLookupError:pass
-                                self.process.wait();reader.join(timeout=1);self.process.stdout.close()
+                            if cancel.exists() or self.stop.is_set() or time.time() >= deadline:
+                                try: os.killpg(self.process.pid, signal.SIGKILL)
+                                except ProcessLookupError: pass
+                                self.process.wait(); reader.join(timeout=1); self.process.stdout.close()
                                 raise RuntimeError('Codex request cancelled.' if cancel.exists() or self.stop.is_set() else 'Codex request exceeded its configured deadline.')
                             self.stop.wait(.1)
-                        reader.join(timeout=1);self.process.stdout.close()
-                        if self.process.returncode or not output.exists():raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
-                        if output.stat().st_size>2*1024*1024:raise ValueError()
-                        answer=output.read_text();json.loads(answer)
-                        if job['expiresAt']>=time.time():self.write(response,{'output':answer,'timings':{'executionMs':round((time.monotonic()-execution_started)*1000)},'usage':details.get('usage',{})})
+                        reader.join(timeout=1); self.process.stdout.close()
+                        if is_doc:
+                            if self.process.returncode or not output.exists():
+                                raise RuntimeError('Codex could not complete document generation. Check host CLI sign-in, account limits and model access.')
+                            if output.stat().st_size > 2 * 1024 * 1024: raise ValueError()
+                            manifest_raw = output.read_text(encoding='utf8')
+                            manifest = json.loads(manifest_raw)
+                            out_docx_rel = manifest.get('outputDocx')
+                            if not isinstance(out_docx_rel, str) or not out_docx_rel or '..' in out_docx_rel or out_docx_rel.startswith('/'):
+                                raise ValueError('Invalid outputDocx in manifest')
+                            target_docx = (workspace / out_docx_rel).resolve()
+                            if not target_docx.is_relative_to(workspace.resolve()) or not target_docx.is_file():
+                                raise ValueError('outputDocx missing from workspace')
+                            if target_docx.stat().st_size > 20 * 1024 * 1024:
+                                raise ValueError('outputDocx exceeds size limit')
+                            if job['expiresAt'] >= time.time():
+                                self.write(response, {'output': manifest_raw, 'timings': {'executionMs': round((time.monotonic() - execution_started) * 1000)}, 'usage': details.get('usage', {})})
+                        else:
+                            if self.process.returncode or not output.exists():
+                                raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
+                            if output.stat().st_size > 2 * 1024 * 1024: raise ValueError()
+                            answer = output.read_text(); json.loads(answer)
+                            if job['expiresAt'] >= time.time():
+                                self.write(response, {'output': answer, 'timings': {'executionMs': round((time.monotonic() - execution_started) * 1000)}, 'usage': details.get('usage', {})})
+                    finally:
+                        if temp_dir: temp_dir.cleanup()
                 except RuntimeError as e:self.write(response,{'error':str(e),'errorCode':'deadline' if 'exceeded its configured deadline' in str(e) else 'cancelled' if str(e)=='Codex request cancelled.' else 'codex-failed'})
                 except (OSError,ValueError,KeyError,TypeError):self.write(response,{'error':'The Codex request could not be processed.'})
                 finally:
@@ -117,6 +181,11 @@ class CodexWorker:
                 try:
                     if json.loads(marker.read_text()).get('expiresAt',0)<time.time():marker.unlink()
                 except (OSError,ValueError):pass
+            for job_dir in self.root.glob('*.job'):
+                try:
+                    if time.time() - job_dir.stat().st_mtime > 600:
+                        shutil.rmtree(job_dir, ignore_errors=True)
+                except OSError: pass
             self.stop.wait(0.25)
     def close(self):
         self.stop.set()
