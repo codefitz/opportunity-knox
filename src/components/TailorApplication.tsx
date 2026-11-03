@@ -330,10 +330,14 @@ export default function TailorApplication({
         const draft = result.messages.find(
           (m) => m.requestId === id && m.draft?.kind === action,
         );
-        if (!draft)
+        if (!draft) {
+          const explanation = result.messages.find(
+            (m) => m.requestId === id && m.draft,
+          )?.content;
           throw new Error(
-            "Did not return a complete document. Check Career Buddy for details before retrying.",
+            explanation || "The AI returned no document draft. Please retry.",
           );
+        }
         completed.push(draft);
         setDrafts([...completed]);
       }

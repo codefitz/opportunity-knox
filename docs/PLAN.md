@@ -42,6 +42,8 @@ These four groups are separate from unfinished implementation; they are not reas
 
 ## Feature Requests
 
+- [ ] **Sidebar Document Studio (requested 3 November 2026).** One workspace for master CVs, CV/letter templates, document organisation, template-preserving AI generation/editing, Word/PDF preview/download and selected Obsidian/Google Drive sync. Phased action plan: [DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md). Extends R7 and activates the relevant R6 connection work; implementation remains planned.
+
 - [ ] **AI-created CV artifacts preserving the chosen reference layout (R7, next priority).** The pipeline works, but Markdown-to-Word generation loses sidebars and page structure. Implement a scoped Codex file-generation/render/review path and exact-artifact saving; optional cover letter and existing application review remain. Full handover: [AI_DOCUMENT_GENERATION_PLAN.md](AI_DOCUMENT_GENERATION_PLAN.md).
 
 - [ ] Optional MCP server for chat-client access to opportunities, career evidence and fit-review saving. See [MCP_PLAN.md](MCP_PLAN.md); planned for later, client/transport choice pending.

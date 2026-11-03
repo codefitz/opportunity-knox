@@ -1,3 +1,4 @@
+import { readCVTemplate, populateCVTemplate } from "./cv-template.mjs";
 import {requireAIStage} from "./ai-workflow.mjs";
 import {createBuddyRequests} from "./buddy-requests.mjs";
 import {createOpportunityAutomation} from "./opportunity-automation.mjs";
@@ -747,9 +748,10 @@ export function createCareerBuddy(ctx) {
         const disconnected=()=>{if(!res.writableEnded)void requests.handle('/api/buddy/requests/'+requestId,'POST',null,null,{readBody:async()=>({cancel:true}),json:()=>{}});};res.on('close',disconnected);
         try {
           task.check();
-          let styleProfile,styleSnapshotHash;
+          let styleProfile,styleSnapshotHash,templateSlots;
           if(styleDocument){
             const bytes=readFileSync(documentPath(styleDocument));
+            if(/\.docx$/i.test(styleDocument.name))templateSlots=(await readCVTemplate(bytes)).slots;
             if(/\.pdf$/i.test(styleDocument.name))styleProfile=await (ctx.pdfStyle||extractPDFStyle)(bytes);
             if(/\.gdoc$/i.test(styleDocument.name)){
               if(!ctx.googleDocuments?.isConnected())throw buddyError(400,"Connect Google Docs in Career Hub to reuse this document’s style.");
@@ -757,6 +759,7 @@ export function createCareerBuddy(ctx) {
               if(!id)throw buddyError(400,"This Google shortcut has no usable document ID.");
               const word=await ctx.googleDocuments.exportDocument(id);
               styleSnapshotHash=await styleSnapshot(word);
+              templateSlots=(await readCVTemplate(word)).slots;
             }
           }
           task.check();
@@ -832,6 +835,7 @@ export function createCareerBuddy(ctx) {
           }).format(new Date());
           const full = fullRecord(opportunity);
           const context = {
+            ...(templateSlots?{cvTemplate:{slots:templateSlots,instructions:"Use the existing sections, ordering and example paragraph lengths. This is a visual template only; its example content is not candidate evidence. Example lengths and job counts are not limits. Additional paragraphs may repeat the existing formatting in the same section or cell; do not design a new layout."}}:{}),
             ...(autoTailor?{sourceCV:{id:selectedCv.id,name:selectedCv.name,text:selectedCv.text},layout:selectedLayout}:{}),
             opportunity: autoTailor ? {id:full.id,company:full.company,role:full.role,description:full.description.slice(0,35000),location:full.location,salary:full.salary} : {
               ...full,
@@ -915,6 +919,7 @@ export function createCareerBuddy(ctx) {
             const raw = await callProvider(
               c,
               systemPrompt(timezone, today, action) +
+                (templateSlots ? " The selected cvTemplate owns the document design. Follow its existing section order, headings and example paragraph lengths when drafting. Do not recreate or redesign the CV, introduce new sections, or add your own formatting. Use concise replacement text; example lengths are not character limits and example job counts are not history limits. Additional paragraphs can repeat the template formatting within existing sections or cells. Always return the complete factual CV when evidence is adequate; fitting and population happen separately at save time. Retain all material factual history. Its example text is not candidate evidence. The layout preset is subordinate to the selected template." : "") +
                 (autoTailor
                   ? " Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. Do not truncate employment history silently. Use layout " +
                     selectedLayout +
@@ -1006,7 +1011,7 @@ export function createCareerBuddy(ctx) {
               omittedChunks: retrieval.omittedChunks,
               otherOpportunities: context.otherOpportunities.length,
             },
-            ...(autoTailor?{tailoring:{groupId:typeof body.tailoringGroupId==="string"&&/^[a-zA-Z0-9-]{1,100}$/.test(body.tailoringGroupId)?body.tailoringGroupId:requestId,sourceCvId:selectedCv.id,sourceCvName:selectedCv.name,layout:selectedLayout,...(styleDocument?{styleDocumentId:styleDocument.id,styleDocumentRevision:styleDocument.revision,styleDocumentHash:styleDocument.sha256,styleDocumentName:styleDocument.name,...(styleProfile?{styleProfile}:{}),...(styleSnapshotHash?{styleSnapshotHash}:{})}:{})}}:{}),
+            ...(autoTailor?{tailoring:{preserveTemplate:passToAi && Boolean(templateSlots),groupId:typeof body.tailoringGroupId==="string"&&/^[a-zA-Z0-9-]{1,100}$/.test(body.tailoringGroupId)?body.tailoringGroupId:requestId,sourceCvId:selectedCv.id,sourceCvName:selectedCv.name,layout:selectedLayout,...(styleDocument?{styleDocumentId:styleDocument.id,styleDocumentRevision:styleDocument.revision,styleDocumentHash:styleDocument.sha256,styleDocumentName:styleDocument.name,...(styleProfile?{styleProfile}:{}),...(styleSnapshotHash?{styleSnapshotHash}:{})}:{})}}:{}),
             baseRevision: opportunity.revision,
             provider: c.provider,
             model: c.model,
@@ -1123,7 +1128,16 @@ export function createCareerBuddy(ctx) {
                 if(await styleSnapshot(styleBytes)!==saved.tailoring.styleSnapshotHash)throw buddyError(409,"The live Google CV changed. Generate a fresh draft before saving.");
               }else styleBytes=readFileSync(documentPath(styleDoc));
             }
-            const bytes = styleDoc ? await layoutDraft(title,content,"previous",styleBytes) : layout ? await layoutDraft(title,content,saved.draft.kind==="cover"?"letter":layout) : await wordDraft(title, content);
+            const bytes = styleDoc && saved.tailoring?.preserveTemplate
+              ? await populateCVTemplate(styleBytes, content, (outputSchema, system, payload) => {
+                  const c = config();
+                  assertConfigured(c);
+                  return callProvider({ ...c, outputSchema }, system, [{ role: "user", content: JSON.stringify(payload) }], ctx.buddyFetch);
+                })
+              : styleDoc ? await layoutDraft(title,content,"previous",styleBytes) : layout ? await layoutDraft(title,content,saved.draft.kind==="cover"?"letter":layout) : await wordDraft(title, content);
+            // A template may have changed while the model was preparing replacements.
+            if(styleDoc && getDocuments().find(d=>d.id===styleId)?.revision!==styleDoc.revision)
+              throw buddyError(409,"The CV template changed. Generate a fresh draft before saving.");
             const filename =
               (saved.draft.kind === "cv" ? "CV" : "Cover letter") +
               " - " +

@@ -3280,6 +3280,7 @@ test('previous CV gallery thumbnails are private, cached, invalidated and reusab
  const {layoutDraft}=await import('../server/document-layout.mjs');let renders=0,sourceId;
  const f=await fixture(t,{documentConvert:async(_,folder)=>{renders++;writeFileSync(join(folder,'page-1.png'),Buffer.from('fictional-png'));return {pages:1,pdf:Buffer.from('fictional-pdf')};},buddyFetch:async(_,opts)=>{
   const payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
+  if(payload.slots)return buddyResponse({replacements:payload.slots.map((slot,i)=>({id:slot.id,text:i===0?'New Candidate':'Verified new content.'}))});
   if(payload.candidates)return buddyResponse({sourceCvId,layout:'classic',reason:'Fictional source.'});
   return buddyResponse(buddyReply({reply:'Review this draft.',sourceIds:[sourceId],draft:{kind:'cv',title:'New CV',content:'# New Candidate\n\n## Experience\nVerified new content.'}}));
  }});await f.setup();await enableBuddy(f);
@@ -3328,7 +3329,7 @@ test('PDF and connected Google CV styles are selectable and applied to separate 
  let googleWord=await layoutDraft('Google reference','# Reference Person\n\nPrivate old text.','executive');
  const profile={body:{font:'Liberation Serif',size:11,color:'202820'},title:{font:'Liberation Serif',size:24,color:'204080'},heading:{font:'Liberation Serif',size:14,color:'204080'},page:{width:595,height:842,top:40,bottom:36,left:48,right:48},line:14};
  let sourceId;
- const f=await fixture(t,{pdfStyle:async bytes=>{assert.match(bytes.toString(),/^%PDF-/);return profile;},googleFetch:async()=>new Response(googleWord),buddyFetch:async()=>buddyResponse(buddyReply({reply:'Review layout.',sourceIds:[sourceId],draft:{kind:'cv',title:'New CV',content:'# New Candidate\n\n## Experience\nVerified new achievement.'}}))});await f.setup();await enableBuddy(f);
+ const f=await fixture(t,{pdfStyle:async bytes=>{assert.match(bytes.toString(),/^%PDF-/);return profile;},googleFetch:async()=>new Response(googleWord),buddyFetch:async(_,opts)=>{const payload=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);if(payload.slots)return buddyResponse({replacements:payload.slots.map((slot,i)=>({id:slot.id,text:i===0?'New Candidate':'Verified new achievement.'}))});return buddyResponse(buddyReply({reply:'Review layout.',sourceIds:[sourceId],draft:{kind:'cv',title:'New CV',content:'# New Candidate\n\n## Experience\nVerified new achievement.'}}));}});await f.setup();await enableBuddy(f);
  const source=(await f.request('/api/documents',{method:'POST',body:{name:'Source CV.txt',kind:'cv',contentBase64:Buffer.from('New Candidate. Verified new achievement.').toString('base64')}})).data;sourceId=source.id;
  const pdf=(await f.request('/api/documents',{method:'POST',body:{name:'Reference CV.pdf',kind:'cv',contentBase64:Buffer.from('%PDF-fictional-style').toString('base64')}})).data;
  const google=(await f.request('/api/documents',{method:'POST',body:{name:'Google reference CV.gdoc',kind:'cv',contentBase64:Buffer.from(JSON.stringify({doc_id:'fictionalGoogleStyle'})).toString('base64')}})).data;

@@ -1,6 +1,7 @@
 # Opportunity Knox
 
 - Read `docs/PLAN.md` for product intent and `docs/ROADMAP.md` for implementation status.
+- Keep all design changes tasteful, simple and intuitive. Maintain consistent formatting throughout the app interface, reusing established typography, spacing, colours, controls and interaction patterns.
 - Keep routine start/stop and storage configuration behind the launcher and app. Do not require users to edit Docker configuration.
 - Keep SQLite state outside cloud-synchronised document folders and outside disposable containers.
 - Preserve stage visits, effective dates and their correction history, repeatable interviews, and exact submitted documents.

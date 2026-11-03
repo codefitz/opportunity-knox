@@ -1,5 +1,11 @@
 # Implementation roadmap
 
+## Word CV template text replacement — 3 November 2026
+
+AI-assisted tailoring with a selected Word template or Word-exported Google reference now supplies the template's paragraph text and example lengths to the model. Saving uses a separate structured text-replacement request and edits a copy of that Word package, retaining existing paragraphs, runs, tables, styles, headers/footers, graphics and page settings. All text slots must be returned exactly once; incomplete output fails without saving. Changed contact links are removed to avoid linking to a template author's address. Existing originals are untouched.
+
+This is text population, not the full R7 visual document-authoring workflow. No font or spacing adjustments or rendered overflow correction are implemented here; content fit and factual completeness still need review with a real model and rendered pages. Example lengths and job counts are guidance, not limits: longer factual values and additional history can expand paragraphs within the existing section or table cell using its formatting. PDF references, AI-disabled copying and previously generated drafts retain their existing paths. A new draft is needed to use template text population.
+
 ## Structural CV template population and refined tailoring workflow — 3 November 2026
 
 Resolved formatting/sidebar loss in AI-tailored CVs and refined the opportunity Documents tab creation workflow:
