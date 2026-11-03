@@ -47,9 +47,25 @@ test('selects the specific matching job from multiple postings and rejects searc
   assert.throws(()=>parse(html([posting({'@id':url+'#one',url:undefined}),posting({title:'Data Engineer','@id':url+'#two',url:undefined})])),e=>e.status===422);
 });
 
-test('tracking query strings do not prevent matching a specific posting', () => {
-  const result=parse(html([posting(),posting({title:'Another Role',url:'https://jobs.example.test/roles/another'})]),url+'/?utm_source=fictional');
-  assert.equal(result.fields.role,'Solutions Architect'); assert.equal(result.fields.url,url+'/?utm_source=fictional');
+test('tracking query strings do not prevent matching a specific posting and are cleaned', () => {
+  const result=parse(html([posting(),posting({title:'Another Role',url:'https://jobs.example.test/roles/another'})]),url+'/?utm_source=fictional&gclid=test1234');
+  assert.equal(result.fields.role,'Solutions Architect'); assert.equal(result.fields.url,url);
+});
+
+test('Indeed and Greenhouse tracking parameters are cleaned while matching specific posting', () => {
+  const indeedUrl = 'https://uk.indeed.com/viewjob?jk=67bdb57bfedf4c87';
+  const indeedJob = { '@context':'https://schema.org', '@type':'JobPosting', title:'Staff Engineer', description, hiringOrganization:{ '@type':'Organization', name:'Indeed Co' }, url: indeedUrl };
+  const dirtyIndeed = `${indeedUrl}&tk=1k5qkv9cp2k7r001&from=email&rjptk=token&xpse=123`;
+  const indeedResult = parseJobPage(html([indeedJob]), { url: dirtyIndeed });
+  assert.equal(indeedResult.fields.role, 'Staff Engineer');
+  assert.equal(indeedResult.fields.url, indeedUrl);
+
+  const ghUrl = 'https://teachforall.org/jobs-and-graduate-programs/jobs?gh_jid=7727042003';
+  const ghJob = { '@context':'https://schema.org', '@type':'JobPosting', title:'Program Director', description, hiringOrganization:{ '@type':'Organization', name:'Teach For All' }, url: ghUrl };
+  const dirtyGh = `${ghUrl}&gh_src=h916zlja3us&utm_campaign=board`;
+  const ghResult = parseJobPage(html([ghJob]), { url: dirtyGh });
+  assert.equal(ghResult.fields.role, 'Program Director');
+  assert.equal(ghResult.fields.url, ghUrl);
 });
 
 test('invalid calendar deadlines are omitted with a warning, valid leap days retained', () => {

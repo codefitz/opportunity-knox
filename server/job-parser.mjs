@@ -1,4 +1,5 @@
 import { load } from 'cheerio';
+import { cleanJobUrl } from './url-cleaner.mjs';
 
 const MAX_DESCRIPTION = 200_000;
 const MAX_FIELD = 10_000;
@@ -97,10 +98,7 @@ function safeUrl(value, base) {
 }
 function matchUrl(value, base) {
   const str = safeUrl(value, base); if (!str) return '';
-  const url = new URL(str); url.hash = '';
-  for (const key of [...url.searchParams.keys()]) if (/^utm_|^(?:gclid|fbclid|msclkid)$/i.test(key)) url.searchParams.delete(key);
-  url.searchParams.sort(); url.pathname = url.pathname.replace(/\/+$/, '') || '/';
-  return url.href;
+  return cleanJobUrl(str);
 }
 function actualDate(value, warnings) {
   const input = typeof value === 'string' ? value.trim() : ''; const match = input.match(DATE);
@@ -349,7 +347,8 @@ export function parseJobPage(html, { url } = {}) {
     unreadable('A useful job description could not be found on this page. Open the individual listing or upload/paste the description instead.');
   }
   if (!fields.company) warnings.push('The employer could not be identified. Enter it manually.');
-  fields.url = sourceUrl;
+  const cleanSource = cleanJobUrl(sourceUrl);
+  fields.url = cleanSource;
   const output = {};
   for (const [key, value] of Object.entries(fields)) {
     if (typeof value !== 'string' || !value.trim()) continue;
@@ -357,5 +356,5 @@ export function parseJobPage(html, { url } = {}) {
     if (value.length > max) warnings.push(`The ${key === 'description' ? 'job description' : key} was truncated to ${max.toLocaleString('en-GB')} characters. Consult the source before saving.`);
     output[key] = value.slice(0, max);
   }
-  return { fields: output, method, warnings: unique(warnings), sourceUrl, resolvedUrl: sourceUrl, retrievedAt: new Date().toISOString() };
+  return { fields: output, method, warnings: unique(warnings), sourceUrl: cleanSource, resolvedUrl: cleanSource, retrievedAt: new Date().toISOString() };
 }

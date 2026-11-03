@@ -4,6 +4,7 @@ import { lookup as systemLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import ipaddr from "ipaddr.js";
+import { cleanJobUrl } from "./url-cleaner.mjs";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const DEADLINE_MS = 15_000;
@@ -375,7 +376,7 @@ function requestPage(url, address, deadline, maxBytes, injectedRequest, intakeOp
         decoded.on("end", () =>
           done({
             html: Buffer.concat(chunks).toString("utf8"),
-            url: url.href,
+            url: cleanJobUrl(url.href),
             contentType,
             ...(intakeOptions.includeBytes?{bytes:Buffer.concat(chunks)}:{}),
           }),
@@ -402,9 +403,11 @@ export async function fetchJobPage(inputUrl, options = {}) {
   let current = inputUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     const { url, hostname } = validateUrl(current);
+    const cleaned = cleanJobUrl(url.href);
+    const targetUrl = cleaned !== url.href ? validateUrl(cleaned).url : url;
     const address = await resolvePublic(hostname, lookup, deadline);
     const result = await requestPage(
-      url,
+      targetUrl,
       address,
       deadline,
       maxBytes,

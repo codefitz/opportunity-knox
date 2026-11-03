@@ -28,6 +28,7 @@ import {createDocumentStudio} from "./document-studio.mjs";
 import {createGoogleDocuments} from "./google-documents.mjs";
 import {createDirectorySources} from "./directory-sources.mjs";
 import { createMcpIntegration } from "./mcp-integration.mjs";
+import { cleanJobUrl } from "./url-cleaner.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -149,6 +150,7 @@ const safeURL = (value) => {
     }
     if (!["http:", "https:"].includes(url.protocol))
       fail(400, "Use an http or https job URL.");
+    return cleanJobUrl(str);
   }
   return str;
 };

@@ -512,3 +512,15 @@ test('intake can retain exact decoded source bytes and opt into public PDF downl
  const bytes=Buffer.from('%PDF-fictional-original\n');const result=await fetchJobPage('https://jobs.example.com/role.pdf',{lookup:publicLookup,request:transport([{headers:{'content-type':'application/pdf'},body:bytes}]),includeBytes:true,allowPdf:true});assert.equal(result.contentType,'application/pdf');assert.deepEqual(result.bytes,bytes);
  await assert.rejects(fetchJobPage('http://127.0.0.1/internal.pdf',{allowPdf:true,includeBytes:true}),e=>e.code==='UNSAFE_ADDRESS');
 });
+
+test('fetchJobPage strips tracking query parameters before sending request and in result url', async () => {
+  const calls = [];
+  const reqTransport = transport([{ body: '<html><body>Clean job</body></html>' }], calls);
+  const result = await fetchJobPage(
+    'https://jobs.example.com/role?utm_source=twitter&gclid=xyz&ref=rss&id=42',
+    { lookup: publicLookup, request: reqTransport }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://jobs.example.com/role?id=42');
+  assert.equal(result.url, 'https://jobs.example.com/role?id=42');
+});

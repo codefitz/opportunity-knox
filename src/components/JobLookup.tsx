@@ -9,6 +9,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { api, ApiError, json, formatDate } from "../api";
+import { cleanJobUrl, isHttpUrl } from "../lib/urls";
 import type { Opportunity } from "../types";
 
 export type JobLookupResult = {
@@ -83,9 +84,10 @@ export default function JobLookup({
       setApplied(false);
     }
   }, [url]);
-  async function fetchDetails() {
-    const requested = url.trim();
-    if (!/^https?:\/\//i.test(requested)) {
+  async function fetchDetails(overrideUrl?: string) {
+    const raw = typeof overrideUrl === "string" ? overrideUrl : url;
+    const requested = cleanJobUrl(raw.trim());
+    if (!isHttpUrl(requested)) {
       setError("Enter a complete http or https job link first.");
       return;
     }
@@ -100,7 +102,7 @@ export default function JobLookup({
         json({ url: requested }),
       );
       if (!alive.current || requestId.current !== id) return;
-      if (currentUrl.current.trim() !== requested) {
+      if (cleanJobUrl(currentUrl.current.trim()) !== requested) {
         setError(
           "The link changed while details were being retrieved. Fetch again for the current link.",
         );
@@ -113,7 +115,7 @@ export default function JobLookup({
       }
     } catch (e) {
       if (!alive.current || requestId.current !== id) return;
-      if (currentUrl.current.trim() === requested)
+      if (cleanJobUrl(currentUrl.current.trim()) === requested)
         setError(
           e instanceof Error
             ? e.message
@@ -123,6 +125,22 @@ export default function JobLookup({
     } finally {
       if (alive.current && requestId.current === id) setBusy(false);
     }
+  }
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const rawPasted = e.clipboardData.getData("text");
+    if (rawPasted && isHttpUrl(rawPasted.trim())) {
+      e.preventDefault();
+      const cleaned = cleanJobUrl(rawPasted.trim());
+      currentUrl.current = cleaned;
+      onUrlChange(cleaned);
+      void fetchDetails(cleaned);
+    }
+  }
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value;
+    const cleaned = isHttpUrl(raw.trim()) ? cleanJobUrl(raw.trim()) : raw;
+    currentUrl.current = cleaned;
+    onUrlChange(cleaned);
   }
   useEffect(() => {
     if (autoLookup && url && !autoRequested.current) {
@@ -150,7 +168,8 @@ export default function JobLookup({
             id={inputId}
             type="url"
             value={url}
-            onChange={(e) => onUrlChange(e.target.value)}
+            onChange={handleChange}
+            onPaste={handlePaste}
             placeholder="https://company.com/careers/job…"
             aria-label="Job link"
           />
@@ -175,7 +194,7 @@ export default function JobLookup({
         </div>
         <small>
           Retrieve details from the public listing, then review and edit them
-          below. No AI connection is needed.
+          below. Tracking codes are automatically removed on paste.
         </small>
       </div>
       {error && (
