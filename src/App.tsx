@@ -42,6 +42,7 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  ExternalLink,
   FileText,
   Folder,
   FolderOpen,
@@ -1154,13 +1155,29 @@ export default function App() {
                           </Badge>
                         </td>
                         <td>
-                          <button
-                            className="icon-button"
-                            aria-label={`Open ${o.role}`}
-                            onClick={() => void openOpportunity(o.id)}
-                          >
-                            <ArrowUpRight size={17} />
-                          </button>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            {o.url && (
+                              <a
+                                href={o.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="icon-button"
+                                aria-label={`Open job listing for ${o.role}`}
+                                title="Open original job listing in a new tab"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ExternalLink size={16} />
+                              </a>
+                            )}
+                            <button
+                              className="icon-button"
+                              aria-label={`Open ${o.role}`}
+                              onClick={() => void openOpportunity(o.id)}
+                              title="Open opportunity details"
+                            >
+                              <ArrowUpRight size={17} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1379,13 +1396,28 @@ function OpportunityCard({
         ) : (
           <span className="card-ref">{o.jobReference || "Opportunity"}</span>
         )}
-        <button
-          className="icon-button"
-          aria-label={`Open details for ${o.role}`}
-          onClick={onOpen}
-        >
-          <MoreHorizontal size={17} />
-        </button>
+        <div className="card-top-actions">
+          {o.url && (
+            <a
+              href={o.url}
+              target="_blank"
+              rel="noreferrer"
+              className="icon-button"
+              aria-label={`Open job listing for ${o.role}`}
+              title="Open job listing in new tab"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink size={15} />
+            </a>
+          )}
+          <button
+            className="icon-button"
+            aria-label={`Open details for ${o.role}`}
+            onClick={onOpen}
+          >
+            <MoreHorizontal size={17} />
+          </button>
+        </div>
       </div>
       <button className="card-main" onClick={onOpen}>
         <span className="card-company">{o.company}</span>
@@ -1691,7 +1723,40 @@ function NewOpportunity({
           onResult={applyLookup}
           onAuthError={onAuthError}
           autoLookup={!!initialUrl}
+          action={
+            <button
+              type="submit"
+              className="button primary"
+              disabled={busy || intakeBusy}
+              title="Add opportunity to board"
+              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              {busy ? (
+                <Busy text="Adding…" />
+              ) : (
+                <>
+                  <Plus size={16} />
+                  Add opportunity
+                </>
+              )}
+            </button>
+          }
         />
+        <div className="intake-mode-callout">
+          <span>Need deep quote-backed evidence or importing from a document?</span>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              const el = document.getElementById("job-intake-section");
+              el?.scrollIntoView({ behavior: "smooth" });
+              setDetailsOpen(true);
+            }}
+          >
+            <Sparkles size={14} />
+            Use Smarter AI Intake below
+          </button>
+        </div>
         <div className="form-grid">
           <Field label="Company">
             <input
@@ -1885,13 +1950,15 @@ function OpportunityDetail({
         </span>
         {o.url && (
           <a
-            className="text-link"
+            className="button secondary small"
             href={o.url}
             target="_blank"
             rel="noreferrer"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", fontSize: 11 }}
+            title="Open original job listing in a new tab"
           >
-            Original listing
-            <ArrowUpRight size={13} />
+            <ExternalLink size={13} />
+            Open job link
           </a>
         )}
       </div>

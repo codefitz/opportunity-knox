@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpRight,
   Check,
+  ExternalLink,
   Globe2,
   LoaderCircle,
   Search,
@@ -54,6 +55,7 @@ export default function JobLookup({
   onAuthError,
   autoLookup = false,
   preview = false,
+  action,
 }: {
   url: string;
   onUrlChange: (url: string) => void;
@@ -61,6 +63,7 @@ export default function JobLookup({
   onAuthError?: (error: unknown) => void;
   autoLookup?: boolean;
   preview?: boolean;
+  action?: React.ReactNode;
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -173,6 +176,19 @@ export default function JobLookup({
             placeholder="https://company.com/careers/job…"
             aria-label="Job link"
           />
+          {url.trim() && isHttpUrl(url.trim()) && (
+            <a
+              href={url.trim()}
+              target="_blank"
+              rel="noreferrer"
+              className="button secondary"
+              title="Open original job listing in a new tab"
+              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              <ExternalLink size={14} />
+              Open link
+            </a>
+          )}
           <button
             type="button"
             className="button secondary"
@@ -191,6 +207,7 @@ export default function JobLookup({
               </>
             )}
           </button>
+          {action}
         </div>
         <small>
           Retrieve details from the public listing, then review and edit them

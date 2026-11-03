@@ -730,6 +730,15 @@ small {
 .card-top .icon-button {
   margin-left: auto;
 }
+.card-top-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.card-top-actions .icon-button {
+  margin-left: 0;
+}
 .card-ref {
   font-size: 8px;
   color: var(--muted);
@@ -2624,6 +2633,34 @@ textarea {
   border-radius: 9px;
   padding: 16px;
   margin-bottom: 20px;
+}
+.intake-mode-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--panel-soft);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: -12px;
+  margin-bottom: 20px;
+  font-size: 11px;
+  color: var(--ink-secondary);
+}
+.intake-mode-callout .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--green);
+  font-weight: 600;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.intake-mode-callout .text-button:hover {
+  text-decoration: underline;
 }
 .job-lookup-existing {
   margin-bottom: 0;

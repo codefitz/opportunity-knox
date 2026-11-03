@@ -135,7 +135,7 @@ export default function JobIntake({
     }
   }
   return (
-    <section className="job-intake" aria-label="Smarter job intake">
+    <section id="job-intake-section" className="job-intake" aria-label="Smarter job intake">
       <div className="settings-section-heading">
         <div>
           <h3>
