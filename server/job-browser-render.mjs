@@ -131,6 +131,7 @@ export async function renderJobPageWithBrowser(
     "--metrics-recording-only",
     "--mute-audio",
     "--no-first-run",
+    "--virtual-time-budget=5000",
     `--user-data-dir=${tempDir}`,
     // Dump rendered DOM
     "--dump-dom",

@@ -97,6 +97,8 @@ const textFields = [
   "employmentType",
   "contact",
   "deadline",
+  "datePosted",
+  "applicantCount",
   "description",
   "nextAction",
   "nextActionDate",

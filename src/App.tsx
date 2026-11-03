@@ -1625,12 +1625,15 @@ function NewOpportunity({
     url: initialUrl,
     description: initialText,
     jobReference: "",
+    applicationRoute: "",
     location: "",
     workMode: "",
     salary: "",
     employmentType: "",
     contact: "",
     deadline: "",
+    datePosted: "",
+    applicantCount: "",
   });
   const [file, setFile] = useState<File | null>(initialFile),
     [error, setError] = useState(""),
@@ -1836,6 +1839,24 @@ function NewOpportunity({
                 placeholder="Employer portal, recruiter, email…"
               />
             </Field>
+            {form.datePosted && (
+              <Field label="Date posted">
+                <input
+                  value={form.datePosted}
+                  onChange={change("datePosted")}
+                  placeholder="Date or age"
+                />
+              </Field>
+            )}
+            {form.applicantCount && (
+              <Field label="Applicants">
+                <input
+                  value={form.applicantCount}
+                  onChange={change("applicantCount")}
+                  placeholder="Applicant count"
+                />
+              </Field>
+            )}
             <Field label="Job reference">
               <input
                 value={form.jobReference}
@@ -2121,6 +2142,8 @@ function Overview({
           "employmentType",
           "contact",
           "deadline",
+          "datePosted",
+          "applicantCount",
           "description",
           "priority",
           "nextAction",
@@ -2304,6 +2327,16 @@ function Overview({
             placeholder="Employer portal, recruiter, email…"
           />
         </Field>
+        {form.datePosted && (
+          <Field label="Date posted">
+            <input value={form.datePosted} onChange={set("datePosted")} />
+          </Field>
+        )}
+        {form.applicantCount && (
+          <Field label="Applicants">
+            <input value={form.applicantCount} onChange={set("applicantCount")} />
+          </Field>
+        )}
         <Field label="Job reference">
           <input value={form.jobReference} onChange={set("jobReference")} />
         </Field>

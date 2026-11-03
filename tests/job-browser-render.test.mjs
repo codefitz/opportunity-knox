@@ -38,11 +38,13 @@ test('detectBrowserExecutable returns null when no candidate passes', async () =
 
 test('renderJobPageWithBrowser renders HTML and sets rendered=true', async () => {
   resetBrowserExecutableCache();
+  let capturedArgs = [];
   const runner = async (cmd, args) => {
     if (args[0] === '--version') {
       return { stdout: 'Google Chrome 130.0.0.0' };
     }
     if (args.includes('--dump-dom')) {
+      capturedArgs = args;
       return {
         stdout: '<!doctype html><html><body><h1>Platform Architect</h1><p>Senior role description</p></body></html>',
       };
@@ -58,6 +60,7 @@ test('renderJobPageWithBrowser renders HTML and sets rendered=true', async () =>
   assert.equal(result.rendered, true);
   assert.match(result.html, /Platform Architect/);
   assert.equal(result.browser, '/usr/bin/chromium');
+  assert.ok(capturedArgs.includes('--virtual-time-budget=5000'));
 });
 
 test('renderJobPageWithBrowser throws JOB_PAGE_JS_REQUIRED when no browser is available', async () => {

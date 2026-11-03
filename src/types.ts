@@ -114,6 +114,8 @@ export type Opportunity = {
   employmentType: string;
   contact: string;
   deadline: string;
+  datePosted?: string;
+  applicantCount?: string;
   description: string;
   priority: "normal" | "high" | "low";
   nextAction: string;

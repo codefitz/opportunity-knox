@@ -158,3 +158,218 @@ test('JavaScript SPA shell without description throws JOB_PAGE_JS_REQUIRED', () 
     },
   );
 });
+
+test('workMode detects Remote, Hybrid, and On-site across structured data and fallback selectors', () => {
+  // Structured data workplaceType / jobLocationType
+  const hybridJob = posting({ workplaceType: 'Hybrid', jobLocation: { address: { addressLocality: 'Manchester' } } });
+  const hybridRes = parse(html(hybridJob));
+  assert.equal(hybridRes.fields.workMode, 'Hybrid');
+
+  const onsiteJob = posting({ jobLocationType: 'On-site', jobLocation: { address: { addressLocality: 'London' } } });
+  const onsiteRes = parse(html(onsiteJob));
+  assert.equal(onsiteRes.fields.workMode, 'On-site');
+
+  // Fallback selector for workplace-type badge
+  const fallbackHtml = page(`
+    <main>
+      <h1>Cloud Reliability Engineer</h1>
+      <span class="company-name">Fictional Ops</span>
+      <span class="jobs-unified-top-card__workplace-type">Hybrid</span>
+      <article>${description}</article>
+    </main>
+  `);
+  const fallbackRes = parse(fallbackHtml);
+  assert.equal(fallbackRes.fields.workMode, 'Hybrid');
+
+  // Work mode from job criteria list
+  const criteriaHtml = page(`
+    <main>
+      <h1>Full Stack Developer</h1>
+      <span class="company-name">Remote Co</span>
+      <ul class="description__job-criteria-list">
+        <li class="description__job-criteria-item">
+          <h3 class="description__job-criteria-subheader">Workplace type</h3>
+          <span class="description__job-criteria-text">Fully remote</span>
+        </li>
+      </ul>
+      <article>${description}</article>
+    </main>
+  `);
+  const criteriaRes = parse(criteriaHtml);
+  assert.equal(criteriaRes.fields.workMode, 'Remote');
+});
+
+test('salary extraction recognizes LinkedIn topcard insights, Indeed salary attributes and regex patterns', () => {
+  // LinkedIn insight chip with salary
+  const linkedinSalary = page(`
+    <main>
+      <h1>Senior Staff Engineer</h1>
+      <span class="company-name">LinkedIn Fictional</span>
+      <div class="job-details-jobs-unified-top-card__job-insight">
+        <span>£75,000 - £90,000 a year</span>
+      </div>
+      <article>${description}</article>
+    </main>
+  `);
+  const res1 = parse(linkedinSalary);
+  assert.equal(res1.fields.salary, '£75,000 - £90,000 a year');
+
+  // Indeed attribute snippet
+  const indeedSalary = page(`
+    <main>
+      <h1>DevOps Lead</h1>
+      <span class="company-name">Indeed Fictional</span>
+      <div data-testid="attribute_snippets_test_id">
+        <span>$140,000 - $160,000 a year</span>
+      </div>
+      <article>${description}</article>
+    </main>
+  `);
+  const res2 = parse(indeedSalary);
+  assert.equal(res2.fields.salary, '$140,000 - $160,000 a year');
+
+  // Day rate pattern in topcard
+  const dayRate = page(`
+    <main>
+      <h1>Contract Agile Coach</h1>
+      <span class="company-name">Agile Fictional</span>
+      <div class="top-card-layout">
+        <span>£500 - £600 per day</span>
+      </div>
+      <article>${description}</article>
+    </main>
+  `);
+  const res3 = parse(dayRate);
+  assert.equal(res3.fields.salary, '£500 - £600 per day');
+
+  // Structured estimatedSalary fallback
+  const estimatedJob = posting({ estimatedSalary: { currency: 'EUR', value: { minValue: 60000, maxValue: 75000, unitText: 'YEAR' } } });
+  const res4 = parse(html(estimatedJob));
+  assert.equal(res4.fields.salary, 'EUR 60,000–75,000 per year');
+});
+
+test('LinkedIn Easy Apply is detected and populates applicationRoute', () => {
+  const easyApplyPage = page(`
+    <main>
+      <h1>Staff Architect</h1>
+      <span class="company-name">Easy Apply Corp</span>
+      <button class="jobs-apply-button--easy-apply">Easy Apply</button>
+      <article>${description}</article>
+    </main>
+  `);
+  const result = parse(easyApplyPage);
+  assert.equal(result.fields.applicationRoute, 'LinkedIn Easy Apply');
+
+  // Also when attribute is present
+  const easyApplyAttr = page(`
+    <main>
+      <h1>Staff Architect</h1>
+      <span class="company-name">Easy Apply Corp</span>
+      <button data-is-easy-apply="true">Apply now</button>
+      <article>${description}</article>
+    </main>
+  `);
+  const resultAttr = parse(easyApplyAttr);
+  assert.equal(resultAttr.fields.applicationRoute, 'LinkedIn Easy Apply');
+});
+
+test('datePosted and applicantCount are extracted cleanly from structured and fallback signals', () => {
+  // Structured datePosted
+  const structuredJob = posting({ datePosted: '2026-10-15T09:00:00Z' });
+  const sRes = parse(html(structuredJob));
+  assert.equal(sRes.fields.datePosted, '2026-10-15');
+
+  // Fallback posted time and applicant count
+  const fallbackPage = page(`
+    <main>
+      <h1>Security Architect</h1>
+      <span class="company-name">Cyber Fictional</span>
+      <span class="posted-time-ago__text">3 days ago</span>
+      <figcaption class="num-applicants__caption">Over 100 applicants</figcaption>
+      <article>${description}</article>
+    </main>
+  `);
+  const fRes = parse(fallbackPage);
+  assert.equal(fRes.fields.datePosted, '3 days ago');
+  assert.equal(fRes.fields.applicantCount, 'Over 100 applicants');
+
+  // Topcard bullet with "Be among the first 25 applicants"
+  const bulletPage = page(`
+    <main>
+      <h1>Frontend Lead</h1>
+      <span class="company-name">UI Fictional</span>
+      <time datetime="2026-11-01">Nov 1, 2026</time>
+      <span class="job-details-jobs-unified-top-card__job-insight">Be among the first 25 applicants</span>
+      <article>${description}</article>
+    </main>
+  `);
+  const bRes = parse(bulletPage);
+  assert.equal(bRes.fields.datePosted, '2026-11-01');
+  assert.equal(bRes.fields.applicantCount, 'Be among the first 25 applicants');
+});
+
+test('Greenhouse embed matching connects embedded gh_jid parameter to embed token URL', () => {
+  const ghUrl = 'https://teachforall.org/jobs?gh_jid=7727042003';
+  const embedJob = {
+    '@context': 'https://schema.org',
+    '@type': 'JobPosting',
+    title: 'Director of Operations',
+    description,
+    hiringOrganization: { '@type': 'Organization', name: 'Teach For All' },
+    url: 'https://boards.greenhouse.io/embed/job_app?token=7727042003',
+  };
+  const otherJob = {
+    '@context': 'https://schema.org',
+    '@type': 'JobPosting',
+    title: 'Other Role',
+    description,
+    hiringOrganization: { '@type': 'Organization', name: 'Teach For All' },
+    url: 'https://boards.greenhouse.io/embed/job_app?token=1111111111',
+  };
+  const result = parseJobPage(html([otherJob, embedJob]), { url: ghUrl });
+  assert.equal(result.fields.role, 'Director of Operations');
+  assert.equal(result.fields.company, 'Teach For All');
+});
+
+test('custom CMS fallback selectors support WordPress/Nexor templates with .entry-content and .career-detail', () => {
+  const cmsPage = page(`
+    <div class="career-single">
+      <h1>Principal Systems Consultant</h1>
+      <div class="company__name">Nexor Systems</div>
+      <div class="career-detail">
+        <p>Nexor is a trusted cyber security partner providing critical solutions.</p>
+        <h2>Responsibilities</h2>
+        <ul><li>Architect high assurance security boundaries.</li><li>Guide engineering teams.</li></ul>
+        <p>Applicants should bring extensive systems architecture and defense sector experience.</p>
+      </div>
+    </div>
+  `);
+  const result = parse(cmsPage);
+  assert.equal(result.method, 'page-content');
+  assert.equal(result.fields.role, 'Principal Systems Consultant');
+  assert.equal(result.fields.company, 'Nexor Systems');
+  assert.match(result.fields.description, /high assurance security boundaries/);
+});
+
+test('structured JobPosting with missing fields is complemented by visible fallback details', () => {
+  const minimalJob = posting({
+    title: 'Senior Partner Architect',
+    description,
+    // Note: no salary, workMode, datePosted, or applicationRoute in structured data
+  });
+  const pageWithBadges = html(minimalJob, `
+    <div class="jobs-unified-top-card__workplace-type">Remote</div>
+    <div class="job-details-jobs-unified-top-card__job-insight">£80,000 - £95,000 a year</div>
+    <button class="jobs-apply-button--easy-apply">Easy Apply</button>
+    <figcaption class="num-applicants__caption">42 applicants</figcaption>
+    <time datetime="2026-10-20">2026-10-20</time>
+  `);
+  const result = parse(pageWithBadges);
+  assert.equal(result.method, 'structured-data');
+  assert.equal(result.fields.role, 'Senior Partner Architect');
+  assert.equal(result.fields.workMode, 'Remote');
+  assert.equal(result.fields.salary, '£80,000 - £95,000 a year');
+  assert.equal(result.fields.applicationRoute, 'LinkedIn Easy Apply');
+  assert.equal(result.fields.applicantCount, '42 applicants');
+  assert.equal(result.fields.datePosted, '2026-10-20');
+});

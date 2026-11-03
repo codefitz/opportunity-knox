@@ -25,28 +25,39 @@ export const JOB_FIELDS = [
   "company",
   "role",
   "jobReference",
+  "applicationRoute",
   "location",
   "workMode",
   "salary",
   "employmentType",
   "contact",
   "deadline",
+  "datePosted",
+  "applicantCount",
   "description",
 ] as const;
 const labels: Record<string, string> = {
   company: "Company",
   role: "Role",
   jobReference: "Job reference",
+  applicationRoute: "Application route",
   location: "Location",
   workMode: "Working arrangement",
   salary: "Salary / rate",
   employmentType: "Employment type",
   contact: "Contact",
   deadline: "Closing date",
+  datePosted: "Date posted",
+  applicantCount: "Applicants",
   description: "Job description",
 };
 export function lookupNote(result: JobLookupResult) {
-  return `Job details retrieved from ${result.sourceUrl} at ${result.retrievedAt}; ${result.method}. Imported details require review against the original listing.${result.resolvedUrl !== result.sourceUrl ? ` Final page: ${result.resolvedUrl}.` : ""}`;
+  let note = `Job details retrieved from ${result.sourceUrl} at ${result.retrievedAt}; ${result.method}. Imported details require review against the original listing.${result.resolvedUrl !== result.sourceUrl ? ` Final page: ${result.resolvedUrl}.` : ""}`;
+  const extras: string[] = [];
+  if (result.fields.datePosted) extras.push(`Posted: ${result.fields.datePosted}`);
+  if (result.fields.applicantCount) extras.push(`Applicants: ${result.fields.applicantCount}`);
+  if (extras.length) note += ` (${extras.join(", ")})`;
+  return note;
 }
 export default function JobLookup({
   url,

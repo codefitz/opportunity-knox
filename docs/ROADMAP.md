@@ -1,6 +1,33 @@
 # Implementation roadmap
 
-## Document Studio Phase 5: Finish and verify — 3 November 2026
+## Smarter Job Intake & Parser Polish (Theme 1) — 3 November 2026
+
+Delivered comprehensive job intake and parser extraction enhancements addressing user feedback across job boards, custom career CMS pages, and application ergonomics:
+- **Phase 1: URL Cleaning & Auto-Fetch Engine:**
+  - Implemented `cleanJobUrl` (`server/url-cleaner.mjs` and `src/lib/urls.ts`) to strip marketing tracking (`utm_*`), click/ad IDs (`gclid`, `fbclid`, `msclkid`, `dclid`), LinkedIn tracking (`trk`, `trackingId`, `refId`, `midToken`, `lici`), Indeed tokens (`tk`, `from`, `rjptk`, `xpse`, `xfps`, `xkcb`), Greenhouse referrer (`gh_src`), Lever/Workable query params, and tracking fragment hashes.
+  - Strictly preserves essential job routing parameters (`jk`, `vjk`, `gh_jid`, `id`, `jobId`, `reqId`, `token`).
+  - Integrated into `JobLookup` with automatic URL cleaning on paste and instant auto-fetching on paste when a valid HTTP/HTTPS link is supplied.
+  - Integrated into backend fetchers and parsers (`fetchJobPage`, `parseJobPage`, and `safeURL`).
+- **Phase 2: Add Opportunity Ergonomics & Direct Job Links:**
+  - Reorganized the Add Opportunity modal layout: positioned primary "Add opportunity" button directly in the top action row alongside "Fetch", eliminating the need to scroll down to save imported listings.
+  - Added a prominent AI Intake shortcut callout linking directly to the quote-backed Smarter AI Intake drawer.
+  - Added dedicated "Open job link" action buttons across all touchpoints: inline within `JobLookup`, in `OpportunityDetail` modal header (`.detail-context`), Kanban cards (`.card-top-actions`), and the Opportunities table view.
+- **Phase 3: Rich Parser Extraction Upgrades:**
+  - **Work Mode:** Added multi-signal detection identifying `Remote`, `Hybrid`, and `On-site` across structured data (`jobLocationType`, `workplaceType`, `workMode`), topcard insight chips, job criteria subheaders, and job description summaries.
+  - **Salary & Compensation:** Added regex pattern extraction and DOM selectors for LinkedIn topcard insights, Indeed attribute snippets, and currency period ranges (`£XXk-£YYk per annum`, `$XX,XXX - $YY,YYY a year`, `£XXX per day`), falling back to structured `estimatedSalary`.
+  - **LinkedIn Easy Apply:** Detects Easy Apply badges and buttons, recording `applicationRoute: "LinkedIn Easy Apply"`.
+  - **Date Posted & Applicants:** Extracts `datePosted` (ISO dates or relative age) and applicant counts (e.g. `Over 100 applicants`, `24 applicants`, `Be among the first 25 applicants`) from topcard captions and structured data, populating opportunity fields and lookup provenance notes.
+  - **Structured Data Gap Filling:** When JSON-LD `JobPosting` data exists but omits salary, work mode, Easy Apply route, date posted, or applicants, visible page fallback elements seamlessly complement the missing fields without degrading structured parsing.
+- **Phase 4: Headless Browser & Board-Specific Parser Fixes:**
+  - Added `--virtual-time-budget=5000` to headless Chromium args in `renderJobPageWithBrowser` so client-side JavaScript, SPAs, and embeds have time to execute before capturing rendered DOM.
+  - Supported Greenhouse embedded listings matching `gh_jid` parameters against embed token URLs.
+  - Expanded CMS fallback selectors for corporate and agency careers templates (`.career-detail`, `.job-detail`, `.single-job-listing`, `.entry-content`, `[data-test="employer-name"]`, `.company__name`).
+  - Upgraded HTTP fetch headers with standard modern browser `User-Agent` and `Accept-Language` headers to prevent bot-detection blocking on public listings.
+- **Verification:**
+  - Unit & parser tests: 308/308 tests passing (`node --test tests/*.test.mjs`), including 24 parser tests and headless browser flags.
+  - Launcher test suite: 45/45 tests passing (`npm run test:launcher`).
+  - Production build: `npm run build` passed cleanly (`tsc --noEmit && vite build`).
+
 
 Completed Phase 5 of the Document Studio plan ([DOCUMENT_STUDIO_PLAN.md](DOCUMENT_STUDIO_PLAN.md)), delivering accessibility, responsive handling, empty/error state polish, persistence, safeguards, and verification:
 - **Keyboard navigation:**

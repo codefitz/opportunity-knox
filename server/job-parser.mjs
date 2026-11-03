@@ -12,10 +12,29 @@ const DESCRIPTION_SELECTORS = [
   '[data-automation-id="jobPostingDescription"]', '[data-automation="jobDescription"]',
   '#jobDescriptionText', '#job-description', '#job-detail .content', '.job-description', '.jobs-description', '.show-more-less-html__markup',
   '.jobs-description-content', '.description__text', '[class*="job-description"]', '[class*="jobDescription"]',
+  '.career-detail', '.job-detail', '.single-job-listing', '.entry-content',
   'article', 'main', '[role="main"]',
 ];
 const genericTitle = /^(?:jobs?|careers?(?:\s+at\b.*)?|job\s+search|search\s+(?:jobs|results)|open\s+(?:positions|roles)|job\s+opportunities|vacancies|find\s+(?:a\s+)?job)(?:\s*[|–—-].*)?$/i;
 const jobSignals = /\b(?:responsibilit(?:y|ies)|requirements?|qualifications?|experience|skills?|salary|benefits|employment|apply|applicants?|candidates?)\b|\b(?:about\s+(?:the\s+)?(?:role|job)|you\s+will|we\s+are\s+looking|what\s+you|join\s+(?:our|the))\b/gi;
+const SALARY_PATTERN = /(?:(?:[£$€]|(?:GBP|USD|EUR)\s*)\s*\d[\d,]*(?:\.\d+)?(?:\s*k\b)?|\b\d{2,3}k\s*(?:per\s+(?:annum|year)|a\s+year)\b)(?:\s*(?:-|–|—|to)\s*(?:[£$€]|(?:GBP|USD|EUR)\s*)?\s*\d[\d,]*(?:\.\d+)?(?:\s*k\b)?)?(?:\s*(?:a|per|\/)\s*(?:year|annum|yr|month|mo|week|wk|day|hour|hr))?/i;
+const APPLICANT_PATTERN = /\b((?:over\s+|more\s+than\s+|be\s+among\s+the\s+first\s+)?(?:\d+[\d,]*\+?\s+)?applicants?)\b/i;
+
+export function detectWorkMode(text) {
+  if (!text || typeof text !== 'string') return '';
+  const clean = text.trim();
+  if (/\b(?:fully\s+remote|remote\s+first|100%\s+remote|remote|work\s+from\s+home|telecommute|wfh)\b/i.test(clean) && !/\b(?:not\s+remote|no\s+remote|non-remote)\b/i.test(clean)) {
+    if (/\bhybrid\b/i.test(clean)) return 'Hybrid';
+    return 'Remote';
+  }
+  if (/\b(?:hybrid|flexible\s+(?:remote|office)|partially\s+remote)\b/i.test(clean)) {
+    return 'Hybrid';
+  }
+  if (/\b(?:on-?site|in-?office|office\s+based|site\s+based)\b/i.test(clean)) {
+    return 'On-site';
+  }
+  return '';
+}
 
 export class JobPageParseError extends Error {
   constructor(message, status = 422, code = 'JOB_PAGE_UNREADABLE') {
@@ -107,6 +126,15 @@ function actualDate(value, warnings) {
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) { warnings.push('The published application deadline was invalid; enter it manually.'); return ''; }
   return day;
 }
+function parseDateIso(value) {
+  const input = typeof value === 'string' ? value.trim() : '';
+  const match = input.match(DATE);
+  if (!match) return '';
+  const day = match[1];
+  const parsed = new Date(day);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) return '';
+  return day;
+}
 function graphData($, warnings) {
   const all = []; const index = new Map(); let count = 0;
   function visit(value) {
@@ -194,8 +222,14 @@ function identifierText(value, deref) {
 }
 function structuredFields(job, deref, warnings) {
   const company = organisationName(job.hiringOrganization, deref);
-  const remote = values(job.jobLocationType).some(item => /^(?:telecommute|remote)$/i.test(plain(item)));
-  const hybrid = values(job.jobLocationType).some(item => /^hybrid$/i.test(plain(item)));
+  const locationTypes = [...values(job.jobLocationType), ...values(job.workplaceType), ...values(job.workMode)].map(plain);
+  const remote = locationTypes.some(item => /^(?:telecommute|remote)$/i.test(item));
+  const hybrid = locationTypes.some(item => /^hybrid$/i.test(item));
+  const onsite = locationTypes.some(item => /^(?:on-?site|in-?office|office)$/i.test(item));
+  let workMode = remote ? 'Remote' : hybrid ? 'Hybrid' : onsite ? 'On-site' : '';
+  if (!workMode && typeof job.title === 'string') {
+    workMode = detectWorkMode(job.title);
+  }
   let location = locationName(job.jobLocation, deref);
   if (remote) location = unique([location, locationName(job.applicantLocationRequirements, deref)]).join('; ');
   let description = decodedText(job.description);
@@ -204,13 +238,16 @@ function structuredFields(job, deref, warnings) {
     if (section && !description.includes(section)) description += `${description ? '\n\n' : ''}${label}\n${section}`;
   }
   const employer = deref(values(job.hiringOrganization)[0]);
+  const datePosted = parseDateIso(job.datePosted) || (typeof job.datePosted === 'string' ? plain(job.datePosted) : '');
   return {
     company, role: plain(job.title || job.name), jobReference: identifierText(job.identifier, deref),
-    location, workMode: remote ? 'Remote' : hybrid ? 'Hybrid' : '',
-    salary: salaryText(job.baseSalary, job.salaryCurrency, deref),
+    location, workMode,
+    salary: salaryText(job.baseSalary || job.estimatedSalary, job.salaryCurrency, deref),
     employmentType: unique(values(job.employmentType).map(item => plain(item).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase()))).join('; '),
     contact: contactText(job.applicationContact || job.contact || employer?.contactPoint, deref),
-    deadline: actualDate(job.validThrough, warnings), description,
+    deadline: actualDate(job.validThrough, warnings),
+    datePosted,
+    description,
   };
 }
 function candidateLinks(job, deref) {
@@ -230,7 +267,18 @@ function selectJob(jobs, deref, sourceUrl, warnings) {
   }
   const candidates = [...distinct.values()]; if (!candidates.length) return null;
   const pageUrl = matchUrl(sourceUrl, sourceUrl);
-  const matches = candidates.filter(job => candidateLinks(job, deref).some(link => matchUrl(link, sourceUrl) === pageUrl));
+  const matches = candidates.filter(job => candidateLinks(job, deref).some(link => {
+    const m = matchUrl(link, sourceUrl);
+    if (m === pageUrl) return true;
+    try {
+      const p1 = new URL(link, sourceUrl);
+      const p2 = new URL(sourceUrl);
+      const jid1 = p1.searchParams.get('gh_jid') || p1.searchParams.get('token');
+      const jid2 = p2.searchParams.get('gh_jid');
+      if (jid1 && jid2 && jid1 === jid2) return true;
+    } catch {}
+    return false;
+  }));
   if (candidates.length > 1) {
     if (matches.length !== 1) unreadable('This page contains several different jobs. Open a specific job listing or paste its description instead.', 'JOB_PAGE_AMBIGUOUS');
     warnings.push('Several jobs were present; the listing whose URL matches this page was selected. Confirm the role and employer.');
@@ -260,7 +308,21 @@ function blockedPage($, originalTitle) {
 }
 function fallbackFields($, warnings) {
   const fields = { role: primaryHeading($) };
-  const companySelectors = ['[itemprop="hiringOrganization"] [itemprop="name"]','[itemprop="hiringOrganization"]','[data-testid="company-name"]','[data-testid="job-company"]','[data-testid="employer-name"]','.company-name','.topcard__org-name-link'];
+  const companySelectors = [
+    '[itemprop="hiringOrganization"] [itemprop="name"]',
+    '[itemprop="hiringOrganization"]',
+    '[data-testid="company-name"]',
+    '[data-testid="job-company"]',
+    '[data-testid="employer-name"]',
+    '[data-test="employer-name"]',
+    '.company-name',
+    '.employer-name',
+    '.company__name',
+    '.job-company-name',
+    '[class*="company-name"]',
+    '[class*="employerName"]',
+    '.topcard__org-name-link',
+  ];
   for (const selector of companySelectors) {
     const element = $(selector).first();
     const company = plain(element.attr('content') || element.text());
@@ -268,14 +330,118 @@ function fallbackFields($, warnings) {
   }
   for (const [key, selectors] of Object.entries({
     location: ['[itemprop="jobLocation"]','[data-testid="job-location"]','.job-location','span.topcard__flavor--bullet'],
-    salary: ['[itemprop="baseSalary"]','[data-testid="job-salary"]','.job-salary'],
+    salary: ['[itemprop="baseSalary"]','[data-testid="job-salary"]','.job-salary','[data-test-id="salary-compensation"]','.compensation__salary','.salary-snippet-container','[data-testid="attribute_snippets_test_id"]','[data-testid="jobsearch-JobInfoHeader-salary"]'],
     employmentType: ['[itemprop="employmentType"]','[data-testid="employment-type"]'],
-    workMode: ['[data-testid="workplace-type"]','[data-testid="work-mode"]'],
+    workMode: ['[data-testid="workplace-type"]','[data-testid="work-mode"]','.jobs-unified-top-card__workplace-type','[data-automation="job-workplace-type"]','.workplace-type'],
     jobReference: ['[itemprop="identifier"]','[data-testid="job-reference"]'],
   })) for (const selector of selectors) {
     const element = $(selector).first(); const text = plain(element.attr('content') || element.text());
     if (text) { fields[key] = text; break; }
   }
+
+  // Refine workMode
+  if (fields.workMode) {
+    const mode = detectWorkMode(fields.workMode);
+    if (mode) fields.workMode = mode;
+  }
+  if (!fields.workMode) {
+    for (const selector of [
+      '.job-details-jobs-unified-top-card__job-insight',
+      'span.topcard__flavor--bullet',
+      '.topcard__flavor',
+      '[class*="workplace"]',
+      '[class*="workMode"]',
+    ]) {
+      $(selector).each((_, el) => {
+        if (fields.workMode) return;
+        const mode = detectWorkMode(plain($(el).text()));
+        if (mode) fields.workMode = mode;
+      });
+      if (fields.workMode) break;
+    }
+  }
+  if (!fields.workMode) {
+    $('.description__job-criteria-item').each((_, element) => {
+      const label = plain($(element).find('.description__job-criteria-subheader').text());
+      const val = plain($(element).find('.description__job-criteria-text').text());
+      if (/workplace|work\s*mode|arrangement/i.test(label)) {
+        fields.workMode = detectWorkMode(val) || val;
+      }
+    });
+  }
+
+  // Refine salary if missing
+  if (!fields.salary) {
+    for (const selector of [
+      '.job-details-jobs-unified-top-card__job-insight',
+      'span.topcard__flavor--bullet',
+      '.topcard__flavor',
+      '.job-details-jobs-unified-top-card__primary-description-container',
+      '.top-card-layout',
+    ]) {
+      $(selector).each((_, el) => {
+        if (fields.salary) return;
+        const text = plain($(el).text());
+        const match = text.match(SALARY_PATTERN);
+        if (match) fields.salary = match[0].trim();
+      });
+      if (fields.salary) break;
+    }
+  }
+
+  // LinkedIn Easy Apply
+  const easyApply = $('.jobs-apply-button--easy-apply, [data-is-easy-apply="true"]').length > 0 ||
+    $('button, a').toArray().some(el => {
+      const t = plain($(el).text());
+      return /^easy\s*apply$/i.test(t) || /\beasy\s*apply\b/i.test(t);
+    });
+  if (easyApply) {
+    fields.applicationRoute = 'LinkedIn Easy Apply';
+  }
+
+  // Date posted
+  for (const selector of [
+    '[itemprop="datePosted"]',
+    'meta[property="og:article:published_time"]',
+    'meta[name="datePosted"]',
+    'time[datetime]',
+    '[data-testid="job-posting-date"]',
+    '.posted-time-ago__text',
+    '[data-testid="myJobsStateDate"]',
+  ]) {
+    const el = $(selector).first();
+    if (el.length) {
+      const raw = el.attr('datetime') || el.attr('content') || plain(el.text());
+      const iso = parseDateIso(raw);
+      if (iso) {
+        fields.datePosted = iso;
+        break;
+      } else if (raw && /\b(?:\d+\s+(?:day|week|month|hour|minute)s?\s+ago|today|yesterday)\b/i.test(raw)) {
+        const m = raw.match(/\b(?:\d+\s+(?:day|week|month|hour|minute)s?\s+ago|today|yesterday)\b/i);
+        if (m) { fields.datePosted = m[0]; break; }
+      }
+    }
+  }
+
+  // Applicant count
+  for (const selector of [
+    '.num-applicants__caption',
+    'figure.topcard__flavor--bullet',
+    '.job-details-jobs-unified-top-card__job-insight',
+    '.jobs-unified-top-card__bullet',
+    'span.topcard__flavor--bullet',
+  ]) {
+    $(selector).each((_, el) => {
+      if (fields.applicantCount) return;
+      const text = plain($(el).text());
+      const match = text.match(APPLICANT_PATTERN);
+      if (match) {
+        fields.applicantCount = match[1].trim();
+      }
+    });
+    if (fields.applicantCount) break;
+  }
+
   // Amazon Jobs publishes visible sections rather than JobPosting JSON-LD.
   const jobMeta = plain($('#job-detail .details-line .meta').first().text())
     .match(/^Job ID:\s*([^|]+)\s*\|\s*(.+)$/i);
@@ -306,6 +472,16 @@ function fallbackFields($, warnings) {
       warnings.push('Only the page summary was available; the full job description may be missing.');
     }
   }
+  if (!fields.workMode && fields.description) {
+    const early = fields.description.slice(0, 800);
+    const mode = detectWorkMode(early);
+    if (mode) fields.workMode = mode;
+  }
+  if (!fields.salary && fields.description) {
+    const early = fields.description.slice(0, 1000);
+    const match = early.match(SALARY_PATTERN);
+    if (match) fields.salary = match[0].trim();
+  }
   return fields;
 }
 
@@ -327,11 +503,26 @@ export function parseJobPage(html, { url } = {}) {
   let fields; let method;
   if (job) {
     fields = structuredFields(job, deref, warnings); method = 'structured-data';
-    if (!fields.role || fields.description.length < 100) {
-      const fallback = fallbackFields($, warnings);
-      if (!fields.role) fields.role = fallback.role;
-      if (fields.description.length < 100 && fallback.description?.length > fields.description.length) fields.description = fallback.description;
-      if (!fields.company && fallback.company) fields.company = fallback.company;
+    const fallbackWarnings = [];
+    const fallback = fallbackFields($, fallbackWarnings);
+    if (!fields.role && fallback.role) fields.role = fallback.role;
+    if ((!fields.description || fields.description.length < 100) && fallback.description?.length > (fields.description?.length || 0)) {
+      fields.description = fallback.description;
+    }
+    if (!fields.company && fallback.company) fields.company = fallback.company;
+    if (!fields.salary && fallback.salary) fields.salary = fallback.salary;
+    if (!fields.workMode && fallback.workMode) fields.workMode = fallback.workMode;
+    if (!fields.applicationRoute && fallback.applicationRoute) fields.applicationRoute = fallback.applicationRoute;
+    if (!fields.datePosted && fallback.datePosted) fields.datePosted = fallback.datePosted;
+    if (!fields.applicantCount && fallback.applicantCount) fields.applicantCount = fallback.applicantCount;
+    if (!fields.location && fallback.location) fields.location = fallback.location;
+    if (!fields.employmentType && fallback.employmentType) fields.employmentType = fallback.employmentType;
+    if (!fields.jobReference && fallback.jobReference) fields.jobReference = fallback.jobReference;
+    if (!fields.deadline && fallback.deadline) {
+      fields.deadline = fallback.deadline;
+      for (const w of fallbackWarnings) {
+        if (/deadline/i.test(w)) warnings.push(w);
+      }
     }
   } else {
     fields = fallbackFields($, warnings); method = 'page-content';
