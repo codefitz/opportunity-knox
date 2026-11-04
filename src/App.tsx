@@ -1,3 +1,4 @@
+import { uploadId } from "./lib/upload-queue";
 import DocumentThumbnail from "./components/DocumentThumbnail";
 import WorkspaceAction from "./components/WorkspaceAction";
 import BuildVersion from "./components/BuildVersion";
@@ -2801,6 +2802,7 @@ function OpportunityDetail({
             busy={busy}
             mutate={mutate}
             onError={onError}
+            onAssessed={onUpdate}
           />
         )}{" "}
         {tab === "documents" && (
@@ -3895,7 +3897,7 @@ function Activities({
                     disabled={saving}
                     onChange={(e) => {
                       const selected = Array.from(e.target.files || []).map(
-                        (file) => ({ file, requestId: crypto.randomUUID() }),
+                        (file) => ({ file, requestId: uploadId() }),
                       );
                       setFiles((current) => [...current, ...selected]);
                       e.target.value = "";

@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import DecisionReview from "./DecisionReview";
 import { useState, type FormEvent } from "react";
 import { editedTimestamp, formatDate, localInput } from "../api";
@@ -11,6 +12,7 @@ type Props = {
   timezone: string;
   busy: boolean;
   onError?: (e: unknown) => void;
+  onAssessed?: (saved: Opportunity) => void;
   mutate: (path: string, body: unknown, method?: string) => Promise<boolean>;
 };
 const reviewLabels = { proceed: "Proceed", ignore: "Ignore", defer: "Defer" };
@@ -53,6 +55,7 @@ export function OpportunityReviewForm({
   busy,
   mutate,
   onError = () => {},
+  onAssessed,
 }: Props) {
   const [form, setForm] = useState({
     strengths: o.review?.strengths || "",
@@ -85,9 +88,10 @@ export function OpportunityReviewForm({
   }
   return (
     <section className="workflow-section" aria-label="Your review decision">
-      <DecisionReview opportunity={o} onError={onError} disabled={busy} onBusy={setAssessing} onAssessed={draft => {
+      <DecisionReview opportunity={o} onError={onError} disabled={busy} onBusy={setAssessing} onAssessed={(draft, savedOpportunity) => {
         setForm(current => ({...current, strengths: draft.strengths, gaps: draft.gaps, effectiveAt: localInput(draft.effectiveAt)}));
-        setSaved(false);
+        setSaved(true);
+        onAssessed?.(savedOpportunity);
       }}/>
       <div className="section-intro">
         <h3>Your review decision</h3>
@@ -263,7 +267,7 @@ export function OpportunityOffers({
   }
   function start(offer?: OpportunityOffer) {
     setEditing(offer?.id || "");
-    setRequestId(crypto.randomUUID());
+    setRequestId(uploadId());
     setForm(
       offer
         ? {

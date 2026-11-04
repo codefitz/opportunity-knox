@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, json } from "../api";
@@ -63,7 +64,7 @@ export default function Feedback({
       const result = await api<{ draft: Issue }>(
         "/feedback/" + entry.id + "/issue-draft",
         {
-          ...json({ confirm: true, requestId: crypto.randomUUID() }),
+          ...json({ confirm: true, requestId: uploadId() }),
           signal: controller.signal,
         },
       );
@@ -87,7 +88,7 @@ export default function Feedback({
     setIssue(null);
     const key = JSON.stringify([text.trim(), page]);
     if (submission.current?.key !== key)
-      submission.current = { key, id: crypto.randomUUID() };
+      submission.current = { key, id: uploadId() };
     try {
       const result = await api<{ item: Entry }>(
         "/feedback",

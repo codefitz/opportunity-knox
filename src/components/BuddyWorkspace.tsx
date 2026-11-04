@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import BuddyRequestDetails, {
   requestStage,
   type BuddyRequestInfo,
@@ -144,7 +145,7 @@ export default function BuddyWorkspace({
         ? pending
         : {
             message: input || "Please review the attached material.",
-            requestId: crypto.randomUUID(),
+            requestId: uploadId(),
           };
     setPending(draft);
     try {
@@ -201,7 +202,7 @@ export default function BuddyWorkspace({
               type="button"
               className="button primary small"
               disabled={busy}
-              onClick={() => chooseConversation(crypto.randomUUID())}
+              onClick={() => chooseConversation(uploadId())}
             >
               New conversation
             </button>
@@ -552,7 +553,7 @@ export default function BuddyWorkspace({
               >
                 <strong>{m.role === "user" ? "You" : "Career Buddy"}</strong>
                 <p style={{ whiteSpace: "pre-wrap" }}>{m.content}</p>
-                {m.role==='user'&&['failed','cancelled','interrupted'].includes(m.status||'')&&<><p className="buddy-muted">This message was not completed. Review its attachments, target and career-library choices before retrying.</p><button type="button" className="button secondary small" disabled={busy} onClick={()=>{setInput(m.content);setPending({message:m.content,requestId:m.requestId||crypto.randomUUID()});setAttached((m.attachments||[]).map(a=>a.id).filter(id=>state.attachments.some(a=>a.id===id)));setTarget('');setTemplateId('');setUseLibrary(false);}}>Review message for retry</button></>}
+                {m.role==='user'&&['failed','cancelled','interrupted'].includes(m.status||'')&&<><p className="buddy-muted">This message was not completed. Review its attachments, target and career-library choices before retrying.</p><button type="button" className="button secondary small" disabled={busy} onClick={()=>{setInput(m.content);setPending({message:m.content,requestId:m.requestId||uploadId()});setAttached((m.attachments||[]).map(a=>a.id).filter(id=>state.attachments.some(a=>a.id===id)));setTarget('');setTemplateId('');setUseLibrary(false);}}>Review message for retry</button></>}
                 {!!m.attachments?.length && (
                   <p>
                     Attachments: {m.attachments.map((a) => a.name).join(", ")}

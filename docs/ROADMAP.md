@@ -1,5 +1,11 @@
 # Implementation roadmap
 
+## Automated fit review saving — 4 November 2026
+
+- The automated Fit Assessment button saves strengths, gaps and the review date, and moves active opportunities to Fit review in the same database transaction as the assessment.
+- Existing review history and stage dates are preserved; closed opportunities keep their outcome. The browser refreshes from the saved record.
+- API persistence, stale-revision rejection, failed-response preservation, repeat-review history and closed-opportunity tests cover the behavior. Remote browser confirmation remains pending.
+
 ## Alignment, Seniority & Exclusion Filters (Theme 4) — 4 November 2026
 
 Delivered comprehensive candidate targeting, dealbreaker exclusion keyword filtering, automatic seniority classification, and alignment scoring:

@@ -442,12 +442,23 @@ export function createDecisionReview(ctx) {
         // Keep criteria snapshots separate from per-criterion results.
         assessment.results = validateAssessment(report, profile, ids).criteria;
         task.check();
-        db.prepare("INSERT INTO decision_assessments VALUES (?,?)").run(
-          assessment.id,
-          JSON.stringify(assessment),
-        );
+        let savedOpportunity;
+        db.exec("BEGIN");
+        try {
+          if (body.generalFit === true) {
+            savedOpportunity = ctx.saveFitReview(opportunity.id, {
+              strengths: assessment.results.find(r => r.id === "strengths").reason,
+              gaps: assessment.results.find(r => r.id === "gaps").reason,
+              effectiveAt: assessment.createdAt,
+            });
+            assessment.opportunityRevision = savedOpportunity.revision;
+          }
+          db.prepare("INSERT INTO decision_assessments VALUES (?,?)").run(assessment.id, JSON.stringify(assessment));
+          db.exec("COMMIT");
+        } catch (error) { db.exec("ROLLBACK"); throw error; }
         task.finish("completed");
         json(res, {
+          opportunity: savedOpportunity,
           reviewDraft: body.generalFit === true ? {
             strengths: assessment.results.find(r => r.id === "strengths").reason,
             gaps: assessment.results.find(r => r.id === "gaps").reason,

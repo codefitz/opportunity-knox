@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import { useEffect, useMemo, useState } from "react";
 import { api, json } from "../api";
 import type { Opportunity } from "../types";
@@ -295,7 +296,7 @@ export default function TailorApplication({
             ? "Selecting source CV and tailoring new draft with AI…"
             : "Drafting cover letter with AI…",
         );
-        const id = crypto.randomUUID();
+        const id = uploadId();
         setRequestId(id);
         const result = await api<{ messages: Draft[] }>(
           base + "/chat",

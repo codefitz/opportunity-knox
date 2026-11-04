@@ -96,6 +96,23 @@ export function createOpportunityWorkflow({
     return [...value];
   }
   return {
+    saveFitReview(id, draft) {
+      const o = getRecord(id);
+      const { history = [], ...previous } = o.review || {};
+      o.review = {
+        decision: "", reason: "", ...previous, ...draft,
+        recordedAt: now(),
+        history: [...history, ...(o.review ? [{ ...previous, changedAt: now() }] : [])],
+      };
+      const oldStage = o.stage;
+      if (!o.outcome) o.stage = "review";
+      const e = event(o, "Automated fit assessment", `Strengths: ${draft.strengths}\nGaps: ${draft.gaps}`, draft.effectiveAt, "review");
+      if (o.stage !== oldStage) {
+        o.stageEnteredAt = e.effectiveAt;
+        o.currentStageEventId = e.id;
+      }
+      return save(o);
+    },
     async handle(path, method, req, res, { json, readBody }) {
       const m = path.match(
         /^\/api\/opportunities\/([^/]+)\/(review|offers)(?:\/([^/]+))?$/,

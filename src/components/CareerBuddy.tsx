@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import AIRequestProgress from "./AIRequestProgress";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -146,7 +147,7 @@ function groupMessagesIntoChats(messages: BuddyMessage[]): ChatExchange[] {
     if (m.role === "user") {
       if (current) exchanges.push(current);
       current = {
-        id: m.id || crypto.randomUUID(),
+        id: m.id || uploadId(),
         userMessage: m,
         messages: [m],
         title: (m.content ? String(m.content).slice(0, 85).trim() : "") || "Question",
@@ -155,7 +156,7 @@ function groupMessagesIntoChats(messages: BuddyMessage[]): ChatExchange[] {
     } else {
       if (!current) {
         current = {
-          id: m.id || crypto.randomUUID(),
+          id: m.id || uploadId(),
           messages: [m],
           title: "Career Buddy reply",
           createdAt: m.createdAt || new Date().toISOString(),
@@ -358,7 +359,7 @@ export default function CareerBuddy({
       includeOtherOpportunities: others,
     });
     if (retry.current?.payload !== payload)
-      retry.current = { payload, id: crypto.randomUUID() };
+      retry.current = { payload, id: uploadId() };
     setActiveRequest(retry.current!.id);
     try {
       const result = await api<{ messages: BuddyMessage[] }>(

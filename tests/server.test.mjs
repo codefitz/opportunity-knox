@@ -3068,7 +3068,7 @@ test('manual fit assessments fall back to the chat model with automatic fit disa
  assert.equal((await f.request(route)).data.assessments[0].stale,true);
 });
 
-test('one-click fit review selects evidence without saved criteria and populates editable review fields',async t=>{
+test('one-click fit review saves evidence, review and Fit review stage atomically and persists across restart',async t=>{
  let op,context,calls=0,invalid=false;
  const f=await fixture(t,{buddyFetch:async(_,opts)=>{
   context=JSON.parse(JSON.parse(opts.body).messages.at(-1).content);
@@ -3085,15 +3085,39 @@ test('one-click fit review selects evidence without saved criteria and populates
  assert.equal(result.data.reviewDraft.strengths,'Relevant fictional engineering experience.');
  assert.equal(result.data.reviewDraft.gaps,'Leadership experience needs clarification.');
  assert.ok(Number.isFinite(Date.parse(result.data.reviewDraft.effectiveAt)));
- assert.equal((await f.request('/api/opportunities/'+op.id)).data.revision,op.revision);
+ const initial=op;
+ op=(await f.request('/api/opportunities/'+op.id)).data;
+ assert.equal(op.revision,initial.revision+1);
+ assert.equal(op.stage,'review');assert.equal(op.outcome,'');
+ assert.equal(op.review.strengths,result.data.reviewDraft.strengths);
+ assert.equal(op.currentStageEventId,op.events.at(-1).id);
+ assert.equal(op.stageEnteredAt,result.data.reviewDraft.effectiveAt);
+ assert.equal(op.events.at(-1).title,'Automated fit assessment');
+ assert.equal(result.data.opportunity.revision,op.revision);
+ assert.equal(result.data.assessment.stale,false);
+ assert.equal((await f.request(route,{method:'POST',body:{revision:initial.revision,generalFit:true,documentIds:[]}})).status,409);
  invalid=true;
  assert.equal((await f.request(route,{method:'POST',body:{revision:op.revision,generalFit:true,documentIds:[]}})).status,502);
  assert.equal((await f.request(route)).data.assessments.length,1);
- const saved=await f.request('/api/opportunities/'+op.id+'/review',{method:'PATCH',body:{revision:op.revision,...result.data.reviewDraft}});
- assert.equal(saved.status,200);assert.equal(saved.data.review.strengths,result.data.reviewDraft.strengths);
+ assert.deepEqual((await f.request('/api/opportunities/'+op.id)).data,op);
  await f.restart();await f.login();
  assert.equal((await f.request('/api/opportunities/'+op.id)).data.review.gaps,result.data.reviewDraft.gaps);
- assert.equal((await f.request(route)).data.assessments[0].stale,true);
+ assert.equal((await f.request(route)).data.assessments[0].stale,false);
+ assert.equal((await f.request('/api/opportunities/'+op.id)).data.stage,'review');
+ invalid=false;
+ const repeat=await f.request(route,{method:'POST',body:{revision:op.revision,generalFit:true,documentIds:[]}});
+ assert.equal(repeat.status,200);
+ assert.equal(repeat.data.opportunity.review.history.length,1);
+ assert.equal(repeat.data.opportunity.review.history[0].strengths,op.review.strengths);
+ assert.equal(repeat.data.opportunity.currentStageEventId,op.currentStageEventId);
+ assert.equal(repeat.data.opportunity.stageEnteredAt,op.stageEnteredAt);
+ const closed=await f.request('/api/opportunities/'+op.id,{method:'PATCH',body:{revision:repeat.data.opportunity.revision,stage:'outcome',outcome:'rejected'}});
+ assert.equal(closed.status,200);
+ const closedReview=await f.request(route,{method:'POST',body:{revision:closed.data.revision,generalFit:true,documentIds:[]}});
+ assert.equal(closedReview.status,200);
+ assert.equal(closedReview.data.opportunity.stage,'outcome');
+ assert.equal(closedReview.data.opportunity.outcome,'rejected');
+ assert.equal(closedReview.data.opportunity.currentStageEventId,closed.data.currentStageEventId);
 });
 
 test('standalone Buddy coaches, builds reviewed STAR evidence, imports recruiter tasks and confirms scoped updates',async t=>{

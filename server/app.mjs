@@ -988,6 +988,7 @@ export function createApp(options = {}) {
   const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
   const buddy = createCareerBuddy({
+    saveFitReview: workflow.saveFitReview,
     db,
     getConfig,
     putConfig,

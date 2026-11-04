@@ -1,3 +1,4 @@
+import { uploadId } from "../lib/upload-queue";
 import AIRequestProgress from "./AIRequestProgress";
 import { useEffect, useState } from "react";
 import { api, json } from "../api";
@@ -107,7 +108,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                   items: [
                     ...profile.items,
                     {
-                      id: crypto.randomUUID(),
+                      id: uploadId(),
                       description: "",
                       priority: "preferred",
                     },
@@ -131,7 +132,7 @@ export type FitDraft = { strengths: string; gaps: string; effectiveAt: string };
 export default function DecisionReview({ opportunity, onError, onAssessed, onBusy, disabled = false }: {
   opportunity: Opportunity;
   onError: (e: unknown) => void;
-  onAssessed: (draft: FitDraft) => void;
+  onAssessed: (draft: FitDraft, saved: Opportunity) => void;
   disabled?: boolean;
   onBusy: (busy: boolean) => void;
 }) {
@@ -144,14 +145,14 @@ export default function DecisionReview({ opportunity, onError, onAssessed, onBus
     onBusy(true);
     setNotice("");
     setError("");
-    const id = crypto.randomUUID();
+    const id = uploadId();
     setRequestId(id);
     try {
-      const result = await api<{reviewDraft: FitDraft}>("/buddy/decisions/" + opportunity.id, json({
+      const result = await api<{reviewDraft: FitDraft; opportunity: Opportunity}>("/buddy/decisions/" + opportunity.id, json({
         revision: opportunity.revision, requestId: id, generalFit: true, documentIds: [],
       }));
-      onAssessed(result.reviewDraft);
-      setNotice("Assessment filled in below. Review or edit it, then save your review.");
+      onAssessed(result.reviewDraft, result.opportunity);
+      setNotice("Assessment saved. Active opportunities move to Fit review.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "The fit assessment failed. Please retry.");
       onError(e);
@@ -164,7 +165,7 @@ export default function DecisionReview({ opportunity, onError, onAssessed, onBus
     <button type="button" className="button primary" disabled={busy || disabled} onClick={() => void assess()}>
       {busy ? "Assessing…" : "Run Automated Fit Assessment"}
     </button>
-    <p>AI selects relevant career evidence and fills strengths, gaps and the review date. You can edit the result before saving.</p>
+    <p>AI selects relevant career evidence, saves strengths, gaps and the review date, and moves active opportunities to Fit review. You can edit the saved result.</p>
     <AIRequestProgress id={requestId} scope={"decision:" + opportunity.id} onError={onError}/>
     {error && <p role="alert">{error} Your review fields have been kept. You can retry the assessment.</p>}
     {notice && <p role="status">{notice}</p>}

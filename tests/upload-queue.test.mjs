@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {uploadQueue,queueStore} from '../src/lib/upload-queue.ts';
+import {uploadQueue,queueStore,uploadId} from '../src/lib/upload-queue.ts';
 const options={automaticDefaults:true,kind:'',status:'',notes:'Fictional evidence',category:'',batchUploads:true};
 const item=(path='fictional.txt')=>({path,file:new File(['Fictional saved bytes'],path,{type:'text/plain'})});
 test('queued file bytes, paths and preferences survive reopening the database and deduplicate paths',async()=>{
@@ -23,4 +23,15 @@ test('recovered queues try unattempted files before earlier failures',async()=>{
 test('separate batches selected in the same millisecond retain their selection order',async()=>{
  const clock=Date.now;Date.now=()=>1761753600000;
  try{const scope='fictional-same-millisecond';await uploadQueue.add(scope,[item('one.txt'),item('two.txt')]);await uploadQueue.add(scope,[item('three.txt'),item('four.txt')]);assert.deepEqual((await uploadQueue.load(scope)).files.map(v=>v.path),['one.txt','two.txt','three.txt','four.txt']);}finally{Date.now=clock;}
+});
+
+test('HTTP browser ID fallback works when randomUUID is unavailable',()=>{
+ const original=Object.getOwnPropertyDescriptor(globalThis,'crypto');
+ const getRandomValues=globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+ try {
+  Object.defineProperty(globalThis,'crypto',{configurable:true,value:{getRandomValues}});
+  const ids=new Set(Array.from({length:100},()=>uploadId()));
+  assert.equal(ids.size,100);
+  for(const id of ids)assert.match(id,/^[a-zA-Z0-9-]{1,100}$/);
+ } finally {Object.defineProperty(globalThis,'crypto',original);}
 });
