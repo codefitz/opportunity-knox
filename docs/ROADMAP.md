@@ -1,5 +1,33 @@
 # Implementation roadmap
 
+## Opportunity Organization & Views (Theme 2) — 4 November 2026
+
+Delivered comprehensive opportunity organization, custom tabular views, duplicate detection with consolidation merge, and a target companies & roles wishlist:
+- **Phase 1: Custom Columns & Sorting in Opportunities Table:**
+  - Implemented `AVAILABLE_COLUMNS`, default visible columns, column persistence in `localStorage` (`knox_opportunity_columns`), and an interactive Columns picker dropdown in the Opportunities toolbar.
+  - Added sortable `<th>` table headers with `ChevronUp`/`ChevronDown` indicators supporting column selection and directional sorting (asc/desc) across role, company, stage progression, priority, deadlines, and dates.
+  - Supported customizable table columns for opportunity, company, stage, next action, deadline, priority, work mode, salary, location, date posted, applicant count, and application route.
+- **Phase 2: Group by Company View:**
+  - Added "Group by company" toggle button in the Opportunities toolbar with `localStorage` persistence (`knox_opportunity_group_by_company`).
+  - Implemented collapsible company section rows with toggle state, company names, and opportunity counts.
+- **Phase 3: Duplicate Detection & Intelligent Merge:**
+  - Implemented robust multi-factor duplicate detection (`findDuplicateMap`, `findExistingDuplicate`, `areDuplicates`) across canonical URLs (normalizing tracking tokens) and normalized company + role titles.
+  - Added visible duplicate badges on Kanban cards and Opportunities table rows.
+  - Added duplicate alert banner in `OpportunityDetail` with one-click "Merge with duplicate" consolidation.
+  - Implemented `POST /api/opportunities/:id/merge`: transfers stage events, history, activities, tasks, and documents; deduplicates tags; fills missing text fields; records audit event; and deletes duplicate record.
+  - Added duplicate warning banner in `NewOpportunity` modal if an opportunity with the same role and company already exists, with an "Open existing" shortcut.
+  - Added `DELETE /api/opportunities/:id` endpoint with safe document and task re-linking.
+- **Phase 4: Target Companies & Roles Wishlist:**
+  - Created `TargetCompany` data model and SQLite configuration storage (`server/target-companies.mjs`).
+  - Added REST endpoints: `GET`, `POST`, `PATCH`, `DELETE` at `/api/target-companies`.
+  - Added Opportunities subnav tabs to switch between "Active opportunities" and "Target wishlist" with live count badges.
+  - Created `TargetWishlist.tsx` component with search, tier filters (Dream, Target, Safety), status tracking (Researching, Watching, Outreach initiated, Interviewing), target roles, careers links, notes, add/edit modal, and one-click "Create opportunity" conversion pre-filling company, role, and URL into the new opportunity form.
+- **Phase 5: Verification & Safety:**
+  - Unit tests: `tests/opportunity-columns.test.mjs`, `tests/duplicates.test.mjs`, `tests/target-companies.test.mjs`.
+  - API integration tests: `tests/opportunity-merge-api.test.mjs` verifying target company CRUD, duplicate merge, and opportunity deletion.
+  - Full suite: 323/323 Node tests passed, 45/45 launcher tests passed.
+  - Production build: `npm run check` (`tsc --noEmit && vite build && npm test && npm run test:launcher`) passed cleanly with 0 errors.
+
 ## Smarter Job Intake & Parser Polish (Theme 1) — 3 November 2026
 
 Delivered comprehensive job intake and parser extraction enhancements addressing user feedback across job boards, custom career CMS pages, and application ergonomics:

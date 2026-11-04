@@ -26,6 +26,7 @@ import {
   useMemo,
   useEffect,
   useRef,
+  Fragment,
   type ReactNode,
   type FormEvent,
   type DragEvent,
@@ -35,13 +36,17 @@ import {
   ArrowRight,
   ArrowUpRight,
   BriefcaseBusiness,
+  Building2,
   CalendarDays,
   Check,
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Clock3,
+  Columns3,
+  Copy,
   ExternalLink,
   FileText,
   Folder,
@@ -106,6 +111,21 @@ import JobLookup, {
   lookupNote,
   type JobLookupResult,
 } from "./components/JobLookup";
+
+import {
+  AVAILABLE_COLUMNS,
+  DEFAULT_VISIBLE_COLUMNS,
+  loadSavedColumns,
+  saveColumns,
+  loadSavedSort,
+  saveSort,
+  sortOpportunities,
+  type ColumnId,
+  type SortConfig,
+} from "./lib/opportunity-columns.ts";
+import { findDuplicateMap, findExistingDuplicate } from "./lib/duplicates.ts";
+import { type TargetCompany } from "./lib/target-companies.ts";
+import TargetWishlist from "./components/TargetWishlist";
 
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
@@ -306,8 +326,22 @@ export default function App() {
     [loading, setLoading] = useState(true),
     [newOpen, setNewOpen] = useState(false),
     [newUrl, setNewUrl] = useState(""),
+    [newCompany, setNewCompany] = useState(""),
+    [newRole, setNewRole] = useState(""),
     [newFile, setNewFile] = useState<File | null>(null),
     [newText, setNewText] = useState("");
+  const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(loadSavedColumns);
+  const [tableSort, setTableSort] = useState<SortConfig>(loadSavedSort);
+  const [groupByCompany, setGroupByCompany] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("knox_opportunity_group_by_company") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [collapsedCompanies, setCollapsedCompanies] = useState<Record<string, boolean>>({});
+  const [opportunitySubTab, setOpportunitySubTab] = useState<"active" | "wishlist">("active");
+  const [targetCompanies, setTargetCompanies] = useState<TargetCompany[]>([]);
   const [profile, setProfile] = useState<Profile>({
     name: "Your workspace",
     avatarUrl: "",
@@ -396,6 +430,9 @@ export default function App() {
       );
       setTasks(data.tasks || []);
       setReferenceCount(data.referenceCount || 0);
+      api<TargetCompany[]>("/target-companies")
+        .then(setTargetCompanies)
+        .catch(() => {});
     } catch (e) {
       report(e);
     } finally {
@@ -656,21 +693,216 @@ export default function App() {
       setNewOpen(true);
     }
   }
-  function add() {
-    setNewUrl("");
+  function add(prefill?: { company?: string; role?: string; url?: string }) {
+    setNewCompany(prefill?.company || "");
+    setNewRole(prefill?.role || "");
+    setNewUrl(prefill?.url || "");
     setNewFile(null);
     setNewText("");
     setNewOpen(true);
+  }
+  function handleHeaderSort(column: ColumnId) {
+    setTableSort((current) => {
+      let next: SortConfig;
+      if (current.column === column) {
+        next = {
+          column,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
+      } else {
+        next = { column, direction: "asc" };
+      }
+      saveSort(next);
+      return next;
+    });
+  }
+  async function addTargetCompany(body: Partial<TargetCompany>) {
+    const created = await api<TargetCompany>("/target-companies", json(body));
+    setTargetCompanies((current) => [...current, created]);
+    setNotice(`Added target company ${created.name}.`);
+  }
+  async function updateTargetCompany(id: string, body: Partial<TargetCompany>) {
+    const updated = await api<TargetCompany>(`/target-companies/${id}`, json(body, "PATCH"));
+    setTargetCompanies((current) => current.map((c) => (c.id === id ? updated : c)));
+    setNotice(`Updated target company ${updated.name}.`);
+  }
+  async function deleteTargetCompany(id: string) {
+    await api(`/target-companies/${id}`, { method: "DELETE" });
+    setTargetCompanies((current) => current.filter((c) => c.id !== id));
+    setNotice("Target company removed.");
+  }
+  async function mergeOpportunity(targetId: string, duplicateId: string) {
+    try {
+      const updated = await api<Opportunity>(`/opportunities/${targetId}/merge`, json({ duplicateId }));
+      await load(true);
+      setSelected(updated);
+      setNotice("Opportunities successfully merged.");
+    } catch (err) {
+      report(err);
+    }
+  }
+  async function deleteOpportunity(id: string) {
+    try {
+      await api(`/opportunities/${id}`, { method: "DELETE" });
+      setSelected(null);
+      await load(true);
+      setNotice("Opportunity deleted.");
+    } catch (err) {
+      report(err);
+    }
   }
   const filterTimezone = settings?.timezone || "Europe/London";
   const filterNow = new Date();
   const overdueIds = overdueOpportunityIds(opportunities,tasks,calendarDay(filterNow,filterTimezone));
   const filtered = filterOpportunities(opportunities,opportunityFilters,overdueIds,filterTimezone,filterNow);
+  const duplicateMap = useMemo(() => findDuplicateMap(opportunities), [opportunities]);
+  const sortedOpportunities = useMemo(() => {
+    return sortOpportunities(filtered, tableSort);
+  }, [filtered, tableSort]);
+  const companyGroups = useMemo(() => {
+    if (!groupByCompany) return null;
+    const groups = new Map<string, Opportunity[]>();
+    for (const o of sortedOpportunities) {
+      const key = (o.company || "").trim() || "Unspecified employer";
+      const list = groups.get(key) || [];
+      list.push(o);
+      groups.set(key, list);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [sortedOpportunities, groupByCompany]);
   const active = opportunities.filter((o) => !o.outcome),
     interviews = active.filter((o) =>
       ["interviews", "final-interview"].includes(o.stage),
     ),
     overdue = active.filter(o => overdueIds.has(o.id));
+  const renderOpportunityRow = (o: Opportunity) => (
+    <tr key={o.id}>
+      {visibleColumns.map((colId) => {
+        switch (colId) {
+          case "opportunity":
+            return (
+              <td key={colId}>
+                <button
+                  className="table-link"
+                  onClick={() => void openOpportunity(o.id)}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {o.role}
+                    {duplicateMap.has(o.id) && (
+                      <span
+                        className="duplicate-warning-badge"
+                        title="Potential duplicate detected"
+                      >
+                        <Copy size={11} />
+                        Duplicate
+                      </span>
+                    )}
+                  </span>
+                  <small>{o.company}</small>
+                </button>
+              </td>
+            );
+          case "company":
+            return <td key={colId}>{o.company || "—"}</td>;
+          case "stage":
+            return (
+              <td key={colId}>
+                {stageLabel(o.stage)}
+                {o.outcome && (
+                  <Badge kind={o.outcome === "hired" ? "green" : "muted"}>
+                    {o.outcome}
+                  </Badge>
+                )}
+              </td>
+            );
+          case "nextAction":
+            return (
+              <td key={colId}>
+                {o.nextAction || "—"}
+                {o.nextActionDate && (
+                  <small>
+                    {formatDate(o.nextActionDate, settings?.timezone)}
+                  </small>
+                )}
+              </td>
+            );
+          case "deadline":
+            return (
+              <td key={colId}>
+                {o.deadline
+                  ? formatDate(o.deadline, settings?.timezone)
+                  : "—"}
+              </td>
+            );
+          case "priority":
+            return (
+              <td key={colId}>
+                <Badge kind={o.priority === "high" ? "amber" : "muted"}>
+                  {o.priority}
+                </Badge>
+              </td>
+            );
+          case "workMode":
+            return <td key={colId}>{o.workMode || "—"}</td>;
+          case "salary":
+            return <td key={colId}>{o.salary || "—"}</td>;
+          case "location":
+            return <td key={colId}>{o.location || "—"}</td>;
+          case "datePosted":
+            return (
+              <td key={colId}>
+                {o.datePosted
+                  ? formatDate(o.datePosted, settings?.timezone)
+                  : "—"}
+              </td>
+            );
+          case "applicantCount":
+            return (
+              <td key={colId}>
+                {o.applicantCount != null && o.applicantCount !== ""
+                  ? String(o.applicantCount)
+                  : "—"}
+              </td>
+            );
+          case "applicationRoute":
+            return <td key={colId}>{o.applicationRoute || "—"}</td>;
+          default:
+            return <td key={colId}>—</td>;
+        }
+      })}
+      <td>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {o.url && (
+            <a
+              href={o.url}
+              target="_blank"
+              rel="noreferrer"
+              className="icon-button"
+              aria-label={`Open job listing for ${o.role}`}
+              title="Open original job listing in a new tab"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink size={16} />
+            </a>
+          )}
+          <button
+            className="icon-button"
+            aria-label={`Open ${o.role}`}
+            onClick={() => void openOpportunity(o.id)}
+            title="Open opportunity details"
+          >
+            <ArrowUpRight size={17} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
   if (bootError)
     return (
       <div className="auth-screen">
@@ -957,291 +1189,507 @@ export default function App() {
             }}
             onDrop={externalDrop}
           >
-            {page === "opportunities" && <>
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  A LITTLE STRUCTURE. A CLEARER PATH.
+            {page === "opportunities" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <div className="eyebrow">
+                      A LITTLE STRUCTURE. A CLEARER PATH.
+                    </div>
+                    <h1>
+                      Your opportunities
+                      <span className="heading-dot">.</span>
+                    </h1>
+                    <p>
+                      Every possibility, application, and next action in one place.
+                    </p>
+                  </div>
+                  <div className="opportunity-page-actions">
+                    <WorkspaceAction
+                      action="clear-opportunities"
+                      label="Clear all opportunities"
+                      disabled={!opportunities.length}
+                      onComplete={(result) => {
+                        setSelected(null);
+                        setOpportunityFilters({
+                          ...defaultOpportunityFilters,
+                          tags: [],
+                        });
+                        void load(true);
+                        setNotice(
+                          `Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`,
+                        );
+                      }}
+                    />
+                    <button className="button primary" onClick={() => add()}>
+                      <Plus size={18} />
+                      Add opportunity
+                    </button>
+                  </div>
                 </div>
-                <h1>
-                  Your opportunities
-                  <span className="heading-dot">.</span>
-                </h1>
-                <p>
-                  Every possibility, application, and next action in one place.
-                </p>
-              </div>
-              <div className="opportunity-page-actions">
-                <WorkspaceAction action="clear-opportunities" label="Clear all opportunities" disabled={!opportunities.length} onComplete={result=>{setSelected(null);setOpportunityFilters({...defaultOpportunityFilters,tags:[]});void load(true);setNotice(`Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`);}} />
-              <button className="button primary" onClick={add}>
-                <Plus size={18} />
-                Add opportunity
-              </button>
-              </div>
-            </div>
-            <div className="metrics">
-              <Metric
-                icon={<BriefcaseBusiness size={17} />}
-                label="Active opportunities"
-                value={active.length}
-                tone="green"
+                <nav
+                  className="opportunities-subnav"
+                  aria-label="Opportunity sections"
+                >
+                  <button
+                    type="button"
+                    className={`subnav-tab ${opportunitySubTab === "active" ? "active" : ""}`}
+                    onClick={() => setOpportunitySubTab("active")}
+                  >
+                    <BriefcaseBusiness size={15} />
+                    Active opportunities
+                    <span className="subnav-pill">{active.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`subnav-tab ${opportunitySubTab === "wishlist" ? "active" : ""}`}
+                    onClick={() => setOpportunitySubTab("wishlist")}
+                  >
+                    <Building2 size={15} />
+                    Target wishlist
+                    <span className="subnav-pill">{targetCompanies.length}</span>
+                  </button>
+                </nav>
+              </>
+            )}
+            {page === "opportunities" && opportunitySubTab === "wishlist" ? (
+              <TargetWishlist
+                companies={targetCompanies}
+                onAdd={addTargetCompany}
+                onUpdate={updateTargetCompany}
+                onDelete={deleteTargetCompany}
+                onCreateOpportunity={(prefill) => {
+                  add(prefill);
+                }}
               />
-              <Metric
-                icon={<MessageSquare size={17} />}
-                label="In conversation"
-                value={interviews.length}
-                tone="purple"
-              />
-              <Metric
-                icon={<Clock3 size={17} />}
-                label="Overdue actions"
-                value={overdue.length}
-                tone="amber"
-              />
-              <Metric
-                icon={<CheckCheck size={17} />}
-                label="Applications submitted"
-                value={
-                  opportunities.filter(
-                    (o) =>
-                      o.stage === "submitted" ||
-                      o.events?.some((e) => e.stage === "submitted"),
-                  ).length
-                }
-                tone="blue"
-              />
-            </div>
-            </>}
-            <OpportunityFiltersToolbar value={opportunityFilters} onChange={setOpportunityFilters} opportunities={opportunities} resultCount={filtered.length} board={page==="board"} timezone={filterTimezone}
-              onBack={() => navigate("opportunities")}
-              actions={page === "board" ? <>
-                <button className="button primary small" onClick={add}><Plus size={16}/>Add opportunity</button>
-                <details className="board-actions-menu">
-                  <summary aria-label="Board actions"><MoreHorizontal size={18}/></summary>
-                  <WorkspaceAction action="clear-opportunities" label="Clear all opportunities" disabled={!opportunities.length} onComplete={result=>{setSelected(null);setOpportunityFilters({...defaultOpportunityFilters,tags:[]});void load(true);setNotice(`Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`);}} />
-                </details>
-              </> : undefined}
-            />
-            {loading ? (
-              <div className="loading-board">
-                <Busy text="Loading your opportunities…" />
-              </div>
-            ) : view === "board" ? (
-              <div className="kanban" role="region" tabIndex={0} aria-label="Opportunity stages">
-                {STAGES.map((stage, index) => {
-                  const cards = filtered.filter((o) => o.stage === stage.id);
-                  return (
-                    <section
-                      key={stage.id}
-                      className={`kanban-column stage-${stage.id} ${dropStage === stage.id ? "drop-target" : ""}`}
-                      onDragOver={(e) => {
-                        if (dragging) {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDropStage(stage.id);
-                        }
-                      }}
-                      onDragLeave={(e) => {
-                        if (!e.currentTarget.contains(e.relatedTarget as Node))
-                          setDropStage("");
-                      }}
-                      onDrop={(e) => {
-                        if (dragging) {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const op = opportunities.find(
-                            (o) => o.id === dragging,
+            ) : (
+              <>
+                {page === "opportunities" && (
+                  <div className="metrics">
+                    <Metric
+                      icon={<BriefcaseBusiness size={17} />}
+                      label="Active opportunities"
+                      value={active.length}
+                      tone="green"
+                    />
+                    <Metric
+                      icon={<MessageSquare size={17} />}
+                      label="In conversation"
+                      value={interviews.length}
+                      tone="purple"
+                    />
+                    <Metric
+                      icon={<Clock3 size={17} />}
+                      label="Overdue actions"
+                      value={overdue.length}
+                      tone="amber"
+                    />
+                    <Metric
+                      icon={<CheckCheck size={17} />}
+                      label="Applications submitted"
+                      value={
+                        opportunities.filter(
+                          (o) =>
+                            o.stage === "submitted" ||
+                            o.events?.some((e) => e.stage === "submitted"),
+                        ).length
+                      }
+                      tone="blue"
+                    />
+                  </div>
+                )}
+                <OpportunityFiltersToolbar
+                  value={opportunityFilters}
+                  onChange={setOpportunityFilters}
+                  opportunities={opportunities}
+                  resultCount={filtered.length}
+                  board={page === "board"}
+                  timezone={filterTimezone}
+                  onBack={() => navigate("opportunities")}
+                  actions={
+                    page === "board" ? (
+                      <>
+                        <button
+                          className="button primary small"
+                          onClick={() => add()}
+                        >
+                          <Plus size={16} />
+                          Add opportunity
+                        </button>
+                        <details className="board-actions-menu">
+                          <summary aria-label="Board actions">
+                            <MoreHorizontal size={18} />
+                          </summary>
+                          <WorkspaceAction
+                            action="clear-opportunities"
+                            label="Clear all opportunities"
+                            disabled={!opportunities.length}
+                            onComplete={(result) => {
+                              setSelected(null);
+                              setOpportunityFilters({
+                                ...defaultOpportunityFilters,
+                                tags: [],
+                              });
+                              void load(true);
+                              setNotice(
+                                `Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`,
+                              );
+                            }}
+                          />
+                        </details>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={`filter-button ${groupByCompany ? "active" : ""}`}
+                          onClick={() => {
+                            setGroupByCompany((prev) => {
+                              const next = !prev;
+                              try {
+                                localStorage.setItem(
+                                  "knox_opportunity_group_by_company",
+                                  String(next),
+                                );
+                              } catch {}
+                              return next;
+                            });
+                          }}
+                          title="Group rows by company name"
+                        >
+                          <Building2 size={15} />
+                          Group by company
+                        </button>
+                        <details className="column-picker-dropdown">
+                          <summary
+                            className="filter-button"
+                            aria-label="Customize visible columns"
+                          >
+                            <Columns3 size={15} />
+                            Columns
+                          </summary>
+                          <div className="column-picker-menu">
+                            <div className="column-picker-header">
+                              <strong>Visible columns</strong>
+                              <button
+                                type="button"
+                                className="column-picker-reset"
+                                onClick={() => {
+                                  setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+                                  saveColumns(DEFAULT_VISIBLE_COLUMNS);
+                                }}
+                              >
+                                Reset
+                              </button>
+                            </div>
+                            <div className="column-picker-list">
+                              {AVAILABLE_COLUMNS.map((col) => {
+                                const checked = visibleColumns.includes(col.id);
+                                const isRequired = col.id === "opportunity";
+                                return (
+                                  <label
+                                    key={col.id}
+                                    className="column-picker-item"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={isRequired}
+                                      onChange={(e) => {
+                                        let next: ColumnId[];
+                                        if (e.target.checked) {
+                                          next = [...visibleColumns, col.id];
+                                        } else {
+                                          next = visibleColumns.filter(
+                                            (id) => id !== col.id,
+                                          );
+                                        }
+                                        setVisibleColumns(next);
+                                        saveColumns(next);
+                                      }}
+                                    />
+                                    <span>{col.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </details>
+                        <button
+                          className="button primary small"
+                          onClick={() => add()}
+                        >
+                          <Plus size={16} />
+                          Add opportunity
+                        </button>
+                        <details className="board-actions-menu">
+                          <summary aria-label="Table actions">
+                            <MoreHorizontal size={18} />
+                          </summary>
+                          <WorkspaceAction
+                            action="clear-opportunities"
+                            label="Clear all opportunities"
+                            disabled={!opportunities.length}
+                            onComplete={(result) => {
+                              setSelected(null);
+                              setOpportunityFilters({
+                                ...defaultOpportunityFilters,
+                                tags: [],
+                              });
+                              void load(true);
+                              setNotice(
+                                `Cleared ${result.removedOpportunities} opportunities. Backup: ${result.backup.location}`,
+                              );
+                            }}
+                          />
+                        </details>
+                      </>
+                    )
+                  }
+                />
+                {loading ? (
+                  <div className="loading-board">
+                    <Busy text="Loading your opportunities…" />
+                  </div>
+                ) : view === "board" ? (
+                  <div
+                    className="kanban"
+                    role="region"
+                    tabIndex={0}
+                    aria-label="Opportunity stages"
+                  >
+                    {STAGES.map((stage, index) => {
+                      const cards = filtered.filter((o) => o.stage === stage.id);
+                      return (
+                        <section
+                          key={stage.id}
+                          className={`kanban-column stage-${stage.id} ${dropStage === stage.id ? "drop-target" : ""}`}
+                          onDragOver={(e) => {
+                            if (dragging) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDropStage(stage.id);
+                            }
+                          }}
+                          onDragLeave={(e) => {
+                            if (
+                              !e.currentTarget.contains(e.relatedTarget as Node)
+                            )
+                              setDropStage("");
+                          }}
+                          onDrop={(e) => {
+                            if (dragging) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const op = opportunities.find(
+                                (o) => o.id === dragging,
+                              );
+                              if (op) void move(op, stage.id);
+                              setDropStage("");
+                              setDragging("");
+                            }
+                          }}
+                        >
+                          <div className="column-heading">
+                            <span className="stage-dot" />
+                            <h2>{stage.label}</h2>
+                            <span className="column-count">{cards.length}</span>
+                            <button
+                              className="icon-button"
+                              aria-label={`Add opportunity (${stage.label})`}
+                              onClick={() => add()}
+                            >
+                              <Plus size={15} />
+                            </button>
+                          </div>
+                          <div className="column-rail" />
+                          <div className="column-cards">
+                            {cards.map((op) => (
+                              <OpportunityCard
+                                key={op.id}
+                                opportunity={op}
+                                hasDuplicate={duplicateMap.has(op.id)}
+                                timezone={settings?.timezone}
+                                onOpen={() => void openOpportunity(op.id)}
+                                onDrag={setDragging}
+                                onDragEnd={() => {
+                                  setDragging("");
+                                  setDropStage("");
+                                }}
+                              />
+                            ))}
+                            {!cards.length && (
+                              <div className="column-empty">
+                                <span>
+                                  {index === 0
+                                    ? "Every next chapter starts here."
+                                    : "Room for what’s next."}
+                                </span>
+                                {index === 0 && (
+                                  <button onClick={() => add()}>
+                                    <Plus size={14} />
+                                    Add your first opportunity
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="list-wrap">
+                    <table className="opportunity-table">
+                      <thead>
+                        <tr>
+                          {visibleColumns.map((colId) => {
+                            const colMeta = AVAILABLE_COLUMNS.find(
+                              (c) => c.id === colId,
+                            );
+                            const isSorted = tableSort.column === colId;
+                            return (
+                              <th
+                                key={colId}
+                                className="sortable-th"
+                                onClick={() => handleHeaderSort(colId)}
+                                aria-sort={
+                                  isSorted
+                                    ? tableSort.direction === "asc"
+                                      ? "ascending"
+                                      : "descending"
+                                    : "none"
+                                }
+                              >
+                                <span className="th-content">
+                                  {colMeta?.label || colId}
+                                  {isSorted && (
+                                    <span className="sort-icon">
+                                      {tableSort.direction === "asc" ? (
+                                        <ChevronUp size={13} />
+                                      ) : (
+                                        <ChevronDown size={13} />
+                                      )}
+                                    </span>
+                                  )}
+                                </span>
+                              </th>
+                            );
+                          })}
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupByCompany && companyGroups ? (
+                          companyGroups.map(([companyName, items]) => {
+                            const isCollapsed =
+                              !!collapsedCompanies[companyName];
+                            const totalCols = visibleColumns.length + 1;
+                            return (
+                              <Fragment key={companyName}>
+                                <tr className="company-group-row">
+                                  <td colSpan={totalCols}>
+                                    <button
+                                      type="button"
+                                      className="company-group-toggle"
+                                      onClick={() => {
+                                        setCollapsedCompanies((curr) => ({
+                                          ...curr,
+                                          [companyName]: !curr[companyName],
+                                        }));
+                                      }}
+                                    >
+                                      {isCollapsed ? (
+                                        <ChevronRight size={16} />
+                                      ) : (
+                                        <ChevronDown size={16} />
+                                      )}
+                                      <span className="company-group-name">
+                                        {companyName}
+                                      </span>
+                                      <span className="company-group-count">
+                                        {items.length}{" "}
+                                        {items.length === 1
+                                          ? "opportunity"
+                                          : "opportunities"}
+                                      </span>
+                                    </button>
+                                  </td>
+                                </tr>
+                                {!isCollapsed &&
+                                  items.map((o) => renderOpportunityRow(o))}
+                              </Fragment>
+                            );
+                          })
+                        ) : (
+                          sortedOpportunities.map((o) =>
+                            renderOpportunityRow(o),
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                    {!opportunities.length && (
+                      <div className="empty-state">
+                        <Search size={26} />
+                        <h3>A fresh start, all yours.</h3>
+                        <p>Add a role to start building your next chapter.</p>
+                      </div>
+                    )}
+                    {opportunities.length > 0 && !filtered.length && (
+                      <div className="empty-state">
+                        <Search size={26} />
+                        <h3>No matching opportunities</h3>
+                        <p>Try another search or filter.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {page !== "board" && (
+                  <div className="board-footer">
+                    <span>
+                      <Folder size={14} />
+                      Drop a job link or document anywhere to get started
+                    </span>
+                    <span>
+                      {filtered.length} opportunit
+                      {filtered.length === 1 ? "y" : "ies"}
+                      <span className="footer-separator">·</span>Changes save
+                      automatically after confirmation
+                    </span>
+                  </div>
+                )}
+                {!opportunities.length && !loading && page !== "board" && (
+                  <div className="getting-started">
+                    <div className="start-icon">
+                      <Sparkles size={20} />
+                    </div>
+                    <div>
+                      <h3>Make space for your next move.</h3>
+                      <p>
+                        Add a job link, a description, or a PDF. Your history
+                        and documents stay together as you go.
+                      </p>
+                    </div>
+                    <button
+                      className="button secondary"
+                      onClick={async () => {
+                        try {
+                          await api("/demo", json({}));
+                          await load();
+                          setNotice(
+                            "Fictional sample opportunities added. These are clearly labelled demo records.",
                           );
-                          if (op) void move(op, stage.id);
-                          setDropStage("");
-                          setDragging("");
+                        } catch (e) {
+                          report(e);
                         }
                       }}
                     >
-                      <div className="column-heading">
-                        <span className="stage-dot" />
-                        <h2>{stage.label}</h2>
-                        <span className="column-count">{cards.length}</span>
-                        <button
-                          className="icon-button"
-                          aria-label={`Add opportunity (${stage.label})`}
-                          onClick={add}
-                        >
-                          <Plus size={15} />
-                        </button>
-                      </div>
-                      <div className="column-rail" />
-                      <div className="column-cards">
-                        {cards.map((op) => (
-                          <OpportunityCard
-                            key={op.id}
-                            opportunity={op}
-                            timezone={settings?.timezone}
-                            onOpen={() => void openOpportunity(op.id)}
-                            onDrag={setDragging}
-                            onDragEnd={() => {
-                              setDragging("");
-                              setDropStage("");
-                            }}
-                          />
-                        ))}
-                        {!cards.length && (
-                          <div className="column-empty">
-                            <span>
-                              {index === 0
-                                ? "Every next chapter starts here."
-                                : "Room for what’s next."}
-                            </span>
-                            {index === 0 && (
-                              <button onClick={add}>
-                                <Plus size={14} />
-                                Add your first opportunity
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="list-wrap">
-                <table className="opportunity-table">
-                  <thead>
-                    <tr>
-                      <th>Opportunity</th>
-                      <th>Stage</th>
-                      <th>Next action</th>
-                      <th>Deadline</th>
-                      <th>Priority</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((o) => (
-                      <tr key={o.id}>
-                        <td>
-                          <button
-                            className="table-link"
-                            onClick={() => void openOpportunity(o.id)}
-                          >
-                            {o.role}
-                            <small>{o.company}</small>
-                          </button>
-                        </td>
-                        <td>
-                          {stageLabel(o.stage)}
-                          {o.outcome && (
-                            <Badge
-                              kind={o.outcome === "hired" ? "green" : "muted"}
-                            >
-                              {o.outcome}
-                            </Badge>
-                          )}
-                        </td>
-                        <td>
-                          {o.nextAction || "—"}
-                          {o.nextActionDate && (
-                            <small>{formatDate(o.nextActionDate)}</small>
-                          )}
-                        </td>
-                        <td>{o.deadline ? formatDate(o.deadline) : "—"}</td>
-                        <td>
-                          <Badge
-                            kind={o.priority === "high" ? "amber" : "muted"}
-                          >
-                            {o.priority}
-                          </Badge>
-                        </td>
-                        <td>
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            {o.url && (
-                              <a
-                                href={o.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="icon-button"
-                                aria-label={`Open job listing for ${o.role}`}
-                                title="Open original job listing in a new tab"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <ExternalLink size={16} />
-                              </a>
-                            )}
-                            <button
-                              className="icon-button"
-                              aria-label={`Open ${o.role}`}
-                              onClick={() => void openOpportunity(o.id)}
-                              title="Open opportunity details"
-                            >
-                              <ArrowUpRight size={17} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!opportunities.length && (
-                  <div className="empty-state">
-                    <Search size={26} />
-                    <h3>
-                      {opportunities.length
-                        ? "No matching opportunities"
-                        : "A fresh start, all yours."}
-                    </h3>
-                    <p>
-                      {opportunities.length
-                        ? "Try another search or filter."
-                        : "Add a role to start building your next chapter."}
-                    </p>
+                      Try fictional samples
+                      <ArrowRight size={15} />
+                    </button>
                   </div>
                 )}
-              </div>
-            )}
-            {page !== "board" && <div className="board-footer">
-              <span>
-                <Folder size={14} />
-                Drop a job link or document anywhere to get started
-              </span>
-              <span>
-                {filtered.length} opportunit
-                {filtered.length === 1 ? "y" : "ies"}
-                <span className="footer-separator">·</span>Changes save
-                automatically after confirmation
-              </span>
-            </div>}
-            {!opportunities.length && !loading && page !== "board" && (
-              <div className="getting-started">
-                <div className="start-icon">
-                  <Sparkles size={20} />
-                </div>
-                <div>
-                  <h3>Make space for your next move.</h3>
-                  <p>
-                    Add a job link, a description, or a PDF. Your history and
-                    documents stay together as you go.
-                  </p>
-                </div>
-                <button
-                  className="button secondary"
-                  onClick={async () => {
-                    try {
-                      await api("/demo", json({}));
-                      await load();
-                      setNotice(
-                        "Fictional sample opportunities added. These are clearly labelled demo records.",
-                      );
-                    } catch (e) {
-                      report(e);
-                    }
-                  }}
-                >
-                  Try fictional samples
-                  <ArrowRight size={15} />
-                </button>
-              </div>
+              </>
             )}
           </main>
         )}
@@ -1292,8 +1740,12 @@ export default function App() {
       {newOpen && (
         <NewOpportunity
           initialUrl={newUrl}
+          initialCompany={newCompany}
+          initialRole={newRole}
           initialFile={newFile}
           initialText={newText}
+          opportunities={opportunities}
+          onOpenOpportunity={(id) => void openOpportunity(id)}
           onAuthError={report}
           onClose={() => setNewOpen(false)}
           onCreated={(op, warning) => {
@@ -1309,6 +1761,8 @@ export default function App() {
         <OpportunityDetail
           key={selected.id}
           opportunity={selected}
+          duplicates={duplicateMap.get(selected.id) || []}
+          onMerge={(dupId) => mergeOpportunity(selected.id, dupId)}
           initialTab={initialOpportunityTab}
           timezone={settings?.timezone || "Europe/London"}
           onClose={() => setSelected(null)}
@@ -1358,12 +1812,14 @@ function Metric({
 }
 function OpportunityCard({
   opportunity: o,
+  hasDuplicate = false,
   timezone = "Europe/London",
   onOpen,
   onDrag,
   onDragEnd,
 }: {
   opportunity: Opportunity;
+  hasDuplicate?: boolean;
   timezone?: string;
   onOpen: () => void;
   onDrag: (id: string) => void;
@@ -1397,6 +1853,15 @@ function OpportunityCard({
           <span className="card-ref">{o.jobReference || "Opportunity"}</span>
         )}
         <div className="card-top-actions">
+          {hasDuplicate && (
+            <span
+              className="duplicate-warning-badge"
+              title="Potential duplicate opportunity detected"
+            >
+              <Copy size={11} />
+              Duplicate
+            </span>
+          )}
           {o.url && (
             <a
               href={o.url}
@@ -1608,6 +2073,10 @@ function NewOpportunity({
   initialUrl,
   initialFile,
   initialText,
+  initialCompany = "",
+  initialRole = "",
+  opportunities = [],
+  onOpenOpportunity,
   onClose,
   onCreated,
   onAuthError,
@@ -1615,13 +2084,17 @@ function NewOpportunity({
   initialUrl: string;
   initialFile: File | null;
   initialText: string;
+  initialCompany?: string;
+  initialRole?: string;
+  opportunities?: Opportunity[];
+  onOpenOpportunity?: (id: string) => void;
   onClose: () => void;
   onCreated: (o: Opportunity, warning?: string) => void;
   onAuthError: (error: unknown) => void;
 }) {
   const [form, setForm] = useState<Record<string, string>>({
-    company: "",
-    role: "",
+    company: initialCompany,
+    role: initialRole,
     url: initialUrl,
     description: initialText,
     jobReference: "",
@@ -1642,6 +2115,9 @@ function NewOpportunity({
     [retrieved, setRetrieved] = useState<JobLookupResult | null>(null);
   const [intake,setIntake]=useState<IntakeResult|null>(null),[intakeBusy,setIntakeBusy]=useState(false);
   const dirty = useRef(new Set<string>(initialText ? ["description"] : []));
+  const existingDuplicate = useMemo(() => {
+    return findExistingDuplicate(form, opportunities);
+  }, [form.company, form.role, form.url, form.jobReference, opportunities]);
   const change =
     (key: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -1760,6 +2236,27 @@ function NewOpportunity({
             Use Smarter AI Intake below
           </button>
         </div>
+        {existingDuplicate && (
+          <div className="duplicate-alert-banner" role="alert" style={{ marginBottom: 16 }}>
+            <Copy size={16} />
+            <div className="duplicate-alert-content">
+              <strong>Potential duplicate found:</strong>
+              <p>You already have &ldquo;{existingDuplicate.role}&rdquo; at {existingDuplicate.company}.</p>
+            </div>
+            {onOpenOpportunity && (
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => {
+                  onClose();
+                  onOpenOpportunity(existingDuplicate.id);
+                }}
+              >
+                Open existing
+              </button>
+            )}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="Company">
             <input
@@ -1916,6 +2413,8 @@ function NewOpportunity({
 function OpportunityDetail({
   initialTab="overview",
   opportunity: o,
+  duplicates,
+  onMerge,
   timezone,
   onClose,
   onUpdate,
@@ -1927,6 +2426,8 @@ function OpportunityDetail({
 }: {
   initialTab?:string;
   opportunity: Opportunity;
+  duplicates?: Opportunity[];
+  onMerge?: (duplicateId: string) => Promise<void>;
   timezone: string;
   onClose: () => void;
   onUpdate: (o: Opportunity) => void;
@@ -1983,6 +2484,35 @@ function OpportunityDetail({
           </a>
         )}
       </div>
+      {duplicates && duplicates.length > 0 && (
+        <div className="duplicate-alert-banner" role="alert" style={{ margin: "12px 18px 0" }}>
+          <Copy size={16} />
+          <div className="duplicate-alert-content">
+            <strong>Potential duplicate{duplicates.length > 1 ? "s" : ""} detected:</strong>
+            <p>
+              {duplicates.map((d) => `${d.role} at ${d.company}`).join(", ")}
+            </p>
+          </div>
+          {onMerge && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {duplicates.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  className="button secondary small"
+                  onClick={() => {
+                    if (window.confirm(`Merge "${d.role} (${d.company})" into this opportunity? History, notes, documents, and tasks will be consolidated, and the duplicate will be deleted.`)) {
+                      void onMerge(d.id);
+                    }
+                  }}
+                >
+                  Merge with duplicate
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="detail-tabs" role="tablist">
         {[
           ["overview", "Overview"],

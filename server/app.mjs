@@ -29,6 +29,7 @@ import {createGoogleDocuments} from "./google-documents.mjs";
 import {createDirectorySources} from "./directory-sources.mjs";
 import { createMcpIntegration } from "./mcp-integration.mjs";
 import { cleanJobUrl } from "./url-cleaner.mjs";
+import { createTargetCompanies } from "./target-companies.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -976,6 +977,7 @@ export function createApp(options = {}) {
   const recordImports=createRecordImports({db,getConfig,putConfig,listRecords,getRecord,putRecord,getDocuments,listTasks,createBackup});
   const summaries=createOpportunitySummaries({getConfig,putConfig,getRecord,getDocuments,listTasks,listRecords,requests:buddy.requests,buddyFetch:options.buddyFetch});
   const aiWorkflow=createAIWorkflow({getConfig,putConfig});
+  const targetCompanies=createTargetCompanies({getConfig,putConfig});
   const jobIntake=createJobIntake({dataDir,db,getConfig,requests:buddy.requests,saveDocument,getDocument,getDocuments,getRecord,putRecord,fullRecord,addEvent,documentPath,createOpportunity,pageFetcher:options.intakePageFetcher,extractor:options.intakeExtractor,pdfExtractor:options.intakePDF,browserRunner:options.browserRunner,buddyFetch:options.buddyFetch,onCreated:id=>queueMicrotask(()=>buddy.automate(id))});
   obsidian = createObsidianIntegration({
     dataDir,
@@ -1415,12 +1417,100 @@ export function createApp(options = {}) {
           res.end(ics);
           return;
         }
+        const mergeMatch = path.match(/^\/api\/opportunities\/([^/]+)\/merge$/);
+        if (mergeMatch && method === "POST") {
+          const body = await readBody(req);
+          const targetId = mergeMatch[1];
+          const duplicateId = body.duplicateId;
+          if (!duplicateId || typeof duplicateId !== "string") {
+            fail(400, "duplicateId is required to merge.");
+          }
+          if (targetId === duplicateId) {
+            fail(400, "Cannot merge an opportunity with itself.");
+          }
+          const target = getRecord(targetId);
+          const duplicate = getRecord(duplicateId);
+
+          // Re-link documents
+          db.prepare("UPDATE documents SET data = json_set(data, '$.opportunityId', ?) WHERE json_extract(data, '$.opportunityId') = ?").run(target.id, duplicate.id);
+          // Re-link tasks
+          db.prepare("UPDATE tasks SET data = json_set(data, '$.opportunityId', ?) WHERE json_extract(data, '$.opportunityId') = ?").run(target.id, duplicate.id);
+          // Re-link decision assessments
+          try {
+            db.prepare("UPDATE decision_assessments SET opportunity_id = ? WHERE opportunity_id = ?").run(target.id, duplicate.id);
+          } catch {}
+
+          // Merge activities
+          target.activities ||= [];
+          for (const act of duplicate.activities || []) {
+            if (!target.activities.some((a) => a.id === act.id)) {
+              target.activities.push(act);
+            }
+          }
+
+          // Merge stage events
+          target.events ||= [];
+          for (const ev of duplicate.events || []) {
+            if (!target.events.some((e) => e.id === ev.id)) {
+              target.events.push(ev);
+            }
+          }
+
+          // Merge tags
+          target.tags = [...new Set([...(target.tags || []), ...(duplicate.tags || [])])];
+
+          // Fill missing text fields
+          for (const key of textFields) {
+            if (!target[key] && duplicate[key]) {
+              target[key] = duplicate[key];
+            }
+          }
+
+          // Audit event
+          addEvent(target, {
+            note: `Merged duplicate opportunity "${duplicate.role}" at ${duplicate.company} (${duplicate.id}).`,
+            stage: target.stage,
+          });
+
+          // Delete duplicate record
+          db.prepare("DELETE FROM records WHERE id = ?").run(duplicate.id);
+          try {
+            db.prepare("DELETE FROM opportunity_automation WHERE opportunity_id = ?").run(duplicate.id);
+          } catch {}
+
+          target.revision = (target.revision || 1) + 1;
+          target.updatedAt = now();
+          putRecord(target);
+          return json(res, fullRecord(target));
+        }
+        if (path === "/api/target-companies") {
+          if (method === "GET") return json(res, targetCompanies.list());
+          if (method === "POST") return json(res, targetCompanies.create(await readBody(req)), 201);
+          fail(405, "Method not allowed.");
+        }
+        const targetMatch = path.match(/^\/api\/target-companies\/([^/]+)$/);
+        if (targetMatch) {
+          if (method === "PATCH") return json(res, targetCompanies.update(targetMatch[1], await readBody(req)));
+          if (method === "DELETE") return json(res, targetCompanies.remove(targetMatch[1]));
+          fail(405, "Method not allowed.");
+        }
         const match = path.match(
           /^\/api\/opportunities\/([^/]+)(?:\/(events|activities)(?:\/([^/]+))?)?$/,
         );
         if (match) {
           if (!match[2] && method === "GET")
             return json(res, fullRecord(getRecord(match[1])));
+          if (!match[2] && method === "DELETE") {
+            const record = getRecord(match[1]);
+            db.prepare("UPDATE documents SET data = json_set(data, '$.opportunityId', null) WHERE json_extract(data, '$.opportunityId') = ?").run(record.id);
+            db.prepare("DELETE FROM tasks WHERE json_extract(data, '$.opportunityId') = ?").run(record.id);
+            try {
+              db.prepare("DELETE FROM decision_assessments WHERE opportunity_id = ?").run(record.id);
+              db.prepare("DELETE FROM opportunity_automation WHERE opportunity_id = ?").run(record.id);
+            } catch {}
+            db.prepare("DELETE FROM records WHERE id = ?").run(record.id);
+            return json(res, { deleted: true, id: record.id });
+          }
           const body = await readBody(req);
           const record = getRecord(match[1]);
           if (!match[2] && method === "PATCH") {
