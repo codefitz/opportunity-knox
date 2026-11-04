@@ -6392,5 +6392,128 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   font-style: italic;
 }
 
+/* Structured Fit Criteria Builder */
+.structured-criteria-card {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 22px;
+}
+
+.structured-criteria-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.structured-criteria-header h3 {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+  margin: 0 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.structured-criteria-header p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.structured-criteria-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.structured-criteria-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 768px) {
+  .structured-criteria-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.structured-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structured-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.structured-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.structured-toggle-chip {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.structured-toggle-chip:hover {
+  border-color: var(--ink-secondary);
+  color: var(--ink);
+}
+
+.structured-toggle-chip.selected {
+  background: var(--accent-soft);
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  font-weight: 600;
+}
+
+.structured-toggle-chip.work-mode-chip.selected {
+  background: var(--blue-soft);
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+}
+
+.structured-salary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.structured-salary-row input {
+  flex: 1;
+  min-width: 100px;
+}
+
+.structured-salary-row select {
+  width: auto;
+}
+
+
 
 

@@ -211,6 +211,7 @@ export type Settings = {
   autoGenerateTasks?: boolean;
   defaultFollowUpDays?: number;
   dailyTarget?: number;
+  currency?: string;
 };
 export type Session = {
   authenticated: boolean;
@@ -259,3 +260,25 @@ export const OUTCOMES = [
 export function stageLabel(id: string) {
   return STAGES.find((s) => s.id === id)?.label ?? id;
 }
+
+export type StructuredCriteria = {
+  targetTitles: string[];
+  minSalary?: number | null;
+  salaryCurrency?: string;
+  salaryPeriod?: "year" | "month" | "day" | "hour";
+  targetSeniorities?: SeniorityLevel[];
+  targetSkills?: string[];
+  workModes?: ("remote" | "hybrid" | "onsite")[];
+};
+
+export type Criterion = {
+  id: string;
+  description: string;
+  priority: "required" | "preferred";
+};
+
+export type Criteria = {
+  revision: number;
+  items: Criterion[];
+  structured?: StructuredCriteria;
+};

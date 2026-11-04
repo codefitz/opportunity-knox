@@ -1,5 +1,21 @@
 # Implementation roadmap
 
+## Structured Fit Assessment Criteria — 4 November 2026
+
+- Introduced structured candidate fit criteria (`targetTitles`, `minSalary`, `salaryCurrency`, `salaryPeriod`, `targetSeniorities`, `targetSkills`, `workModes`) to define explicit parameters for opportunity evaluation alongside freeform criterion rules.
+- **Backend & Persistence:**
+  - Extended `server/decision-review.mjs` (`validateCriteria`) to normalize and validate structured criteria alongside `items[]`.
+  - Added default fallback initialization in `GET /api/buddy/fit-criteria`.
+  - Enhanced automated fit assessment context (`structuredCriteria`) and injected prompt guidance into `body.generalFit` review calls so LLMs explicitly evaluate candidate alignment with role titles, seniority expectations, salary thresholds, and core skills.
+- **Frontend & Workflow Integration:**
+  - Added interactive Structured Criteria builder to `FitCriteria` in `src/components/DecisionReview.tsx`.
+  - Added 1-click "Sync from Alignment" action pulling target titles, skills, and currency from user Alignment settings.
+  - Added 1-click "Generate Criteria" button translating structured parameters into evaluable Required / Preferred criterion cards.
+  - Added responsive chip controls for seniority levels (`entry` through `executive`) and work arrangements (`remote`, `hybrid`, `onsite`), plus tag input for job titles and skills.
+- **Verification:**
+  - Unit and integration tests added in `tests/decision-review.test.mjs` verifying validation, persistence, and HTTP endpoints.
+  - Full project check (`npm run check`) passing.
+
 ## Fit assessment & alignment contrast fix — 4 November 2026
 
 - Replaced hardcoded HEX and transparent RGB colors across alignment match pills (`.card-alignment-pill`), seniority badges, target profile alignment overview cards, matched skill tags, exclusion badges, and streak badges with theme-aware design tokens (`var(--green)`, `var(--blue)`, `var(--amber)`, `var(--danger)`, `var(--accent-soft)`, `var(--panel-soft)`, `var(--line)`).
