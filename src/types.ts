@@ -99,6 +99,16 @@ export type OpportunityOffer = {
   updatedAt: string;
   history?: (Omit<OpportunityOffer, "history"> & { changedAt: string })[];
 };
+export type SeniorityLevel =
+  | "entry"
+  | "mid"
+  | "senior"
+  | "lead"
+  | "director"
+  | "executive";
+
+export type AlignmentTier = "strong" | "moderate" | "reach" | "mismatch";
+
 export type Opportunity = {
   applicationRoute?: string;
   review?: OpportunityReview;
@@ -116,6 +126,11 @@ export type Opportunity = {
   deadline: string;
   datePosted?: string;
   applicantCount?: string;
+  seniority?: SeniorityLevel;
+  matchedExclusions?: string[];
+  alignmentScore?: number;
+  alignmentTier?: AlignmentTier;
+  matchedSkills?: string[];
   description: string;
   priority: "normal" | "high" | "low";
   nextAction: string;
@@ -188,6 +203,10 @@ export type Settings = {
   storagePath: string;
   pendingHostPath: string;
   aiEnabled: boolean;
+  exclusionKeywords?: string[];
+  targetTitles?: string[];
+  targetSkills?: string[];
+  autoArchiveExcluded?: boolean;
 };
 export type Session = {
   authenticated: boolean;

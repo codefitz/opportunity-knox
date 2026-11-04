@@ -7,6 +7,8 @@ import {
   opportunityFilterError,
   type OpportunityFilters,
 } from "../lib/opportunity-filters";
+import { SENIORITY_LABELS } from "../lib/seniority";
+import { ALIGNMENT_TIER_LABELS } from "../lib/alignment";
 const deadlineLabels = {
   any: "Any deadline",
   overdue: "Deadline passed",
@@ -48,7 +50,10 @@ export default function OpportunityFiltersToolbar({
     value.stage ||
     value.tags.length ||
     value.deadline !== "any" ||
-    value.overdueOnly
+    value.overdueOnly ||
+    value.seniority ||
+    value.alignmentTier ||
+    value.hideExcluded
   );
   function chip(label: string, remove: () => void) {
     return (
@@ -221,6 +226,54 @@ export default function OpportunityFiltersToolbar({
                   ))}
                 </select>
               </label>
+              <label className="opportunity-filter-field">
+                <span>Seniority</span>
+                <select
+                  aria-label="Filter by seniority"
+                  value={value.seniority}
+                  onChange={(e) =>
+                    set(
+                      "seniority",
+                      e.target.value as OpportunityFilters["seniority"],
+                    )
+                  }
+                >
+                  <option value="">All seniorities</option>
+                  {Object.entries(SENIORITY_LABELS).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="opportunity-filter-field">
+                <span>Alignment</span>
+                <select
+                  aria-label="Filter by alignment"
+                  value={value.alignmentTier}
+                  onChange={(e) =>
+                    set(
+                      "alignmentTier",
+                      e.target.value as OpportunityFilters["alignmentTier"],
+                    )
+                  }
+                >
+                  <option value="">All alignment levels</option>
+                  {Object.entries(ALIGNMENT_TIER_LABELS).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="check-field opportunity-hide-excluded-toggle">
+                <input
+                  type="checkbox"
+                  checked={value.hideExcluded}
+                  onChange={(e) => set("hideExcluded", e.target.checked)}
+                />
+                Hide excluded
+              </label>
               <label className="check-field opportunity-overdue-toggle">
                 <input
                   type="checkbox"
@@ -330,6 +383,18 @@ export default function OpportunityFiltersToolbar({
                 deadlineTo: "",
               }),
           )}
+        {value.seniority &&
+          chip(
+            `Seniority: ${SENIORITY_LABELS[value.seniority] || value.seniority}`,
+            () => set("seniority", ""),
+          )}
+        {value.alignmentTier &&
+          chip(
+            `Alignment: ${ALIGNMENT_TIER_LABELS[value.alignmentTier] || value.alignmentTier}`,
+            () => set("alignmentTier", ""),
+          )}
+        {value.hideExcluded &&
+          chip("Excluded hidden", () => set("hideExcluded", false))}
         {value.overdueOnly &&
           chip("Overdue actions", () => set("overdueOnly", false))}
       </div>

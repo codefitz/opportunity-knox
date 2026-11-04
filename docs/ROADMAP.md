@@ -1,5 +1,37 @@
 # Implementation roadmap
 
+## Alignment, Seniority & Exclusion Filters (Theme 4) — 4 November 2026
+
+Delivered comprehensive candidate targeting, dealbreaker exclusion keyword filtering, automatic seniority classification, and alignment scoring:
+- **Phase 1: Exclusion Keywords Engine & Settings Management:**
+  - Implemented boundary-safe keyword matching engine (`findExclusionMatches`, `checkOpportunityExclusions` in `server/exclusions.mjs` and `src/lib/exclusions.ts`) using whole-word boundary matching (`\b[term]\b`) with regex character escaping to prevent false positive substring collisions while safely handling technical terms (`.NET`, `C++`).
+  - Extended SQLite settings schema and `PATCH /api/settings` with `exclusionKeywords` array.
+  - Added red/amber exclusion warning badges on Opportunities table rows and Kanban cards.
+  - Added exclusion alert banner in `OpportunityDetail` with one-click "Archive as ignored".
+  - Added "Hide excluded" toggle filter and chip in `OpportunityFilters`.
+- **Phase 2: Job Seniority Classification Engine & Filter:**
+  - Implemented rule-based seniority classifier (`classifySeniority` in `server/seniority.mjs` and `src/lib/seniority.ts`) across 6 tiers: `entry`, `mid`, `senior`, `lead`, `director`, and `executive`.
+  - Automatically classifies new opportunities during intake using role title patterns with fallback to job description context.
+  - Added seniority badge on Kanban cards and table rows.
+  - Added `seniority` to `AVAILABLE_COLUMNS` with custom sorting support in the Opportunities table.
+  - Added Seniority dropdown filter (`All seniorities`, `Director`, `Lead`, `Senior`, `Mid`, `Entry`) in `OpportunityFilters`.
+  - Added editable Seniority override field in Opportunity Overview.
+- **Phase 3: Candidate Target Alignment & Skills Matching:**
+  - Added `targetTitles` and `targetSkills` to Settings and candidate profile configuration.
+  - Implemented composite alignment calculator (`calculateAlignment` in `server/alignment.mjs` and `src/lib/alignment.ts`) combining title similarity and skill keyword coverage into a 0–100% score and 4 tiers (`strong` ≥75%, `moderate` 50–74%, `reach` 25–49%, `mismatch` <25%).
+  - Added alignment score badges on Kanban cards and table rows.
+  - Added `alignment` to `AVAILABLE_COLUMNS` in the Opportunities table.
+  - Added Alignment tier dropdown filter (`All alignment levels`, `Strong match`, `Moderate match`, `Reach / Partial`, `Low alignment`) in `OpportunityFilters`.
+  - Added Target Profile Alignment overview card in `OpportunityDetail` displaying score tier and matched skills tags.
+  - Added dedicated "Alignment & Filters" section in Settings (`AlignmentSettings.tsx`) with preset suggestions (`DV clearance`, `Inside IR35`, `WordPress`), tag chips, and instant add/remove controls.
+- **Phase 4: Batch Action & Fast Archival for Excluded Roles:**
+  - Added `POST /api/opportunities/archive-excluded` endpoint to batch-archive active opportunities matching exclusion keywords to `outcome: "ignored"` with dated stage events and provenance audit notes.
+  - Added bulk action banner above the Opportunities view displaying the number of active excluded opportunities with one-click "Archive all excluded (N)" and "Show/Hide excluded" toggles.
+- **Phase 5: Verification & Safety:**
+  - Unit tests: `tests/exclusions.test.mjs` (3/3 passed), `tests/seniority.test.mjs` (4/4 passed), `tests/alignment.test.mjs` (3/3 passed), `tests/opportunity-filters.test.mjs` (6/6 passed), `tests/opportunity-columns.test.mjs` (7/7 passed).
+  - API integration tests: `tests/theme4-integration.test.mjs` (2/2 passed) testing settings persistence, automatic classification, alignment scoring, and batch archival.
+  - Full check suite: clean build (`tsc --noEmit && vite build`), all Node integration tests, and launcher test suite verified.
+
 ## Opportunity Organization & Views (Theme 2) — 4 November 2026
 
 Delivered comprehensive opportunity organization, custom tabular views, duplicate detection with consolidation merge, and a target companies & roles wishlist:

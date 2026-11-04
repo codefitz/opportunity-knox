@@ -249,3 +249,29 @@ test("overdue opportunities cover next actions, unfinished follow-ups, pending o
   );
   assert.deepEqual(overdueOpportunityIds([], [], today), new Set());
 });
+
+test("opportunity filters support seniority, alignment tier, and hide excluded", () => {
+  const rows = [
+    opp("lead-strong", { seniority: "lead", alignmentTier: "strong", matchedExclusions: [] }),
+    opp("senior-mod", { seniority: "senior", alignmentTier: "moderate", matchedExclusions: [] }),
+    opp("lead-excluded", { seniority: "lead", alignmentTier: "reach", matchedExclusions: ["DV clearance"] }),
+    opp("mid-mismatch", { seniority: "mid", alignmentTier: "mismatch", matchedExclusions: [] }),
+  ];
+
+  // Seniority filter
+  assert.deepEqual(run(rows, { seniority: "lead" }), ["lead-strong", "lead-excluded"]);
+  assert.deepEqual(run(rows, { seniority: "senior" }), ["senior-mod"]);
+  assert.deepEqual(run(rows, { seniority: "entry" }), []);
+
+  // Alignment tier filter
+  assert.deepEqual(run(rows, { alignmentTier: "strong" }), ["lead-strong"]);
+  assert.deepEqual(run(rows, { alignmentTier: "moderate" }), ["senior-mod"]);
+  assert.deepEqual(run(rows, { alignmentTier: "reach" }), ["lead-excluded"]);
+
+  // Hide excluded filter
+  assert.deepEqual(run(rows, { hideExcluded: true }), ["lead-strong", "senior-mod", "mid-mismatch"]);
+
+  // Combined seniority and hideExcluded
+  assert.deepEqual(run(rows, { seniority: "lead", hideExcluded: true }), ["lead-strong"]);
+});
+

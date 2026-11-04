@@ -32,6 +32,7 @@ import {
   type DragEvent,
 } from "react";
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowRight,
   ArrowUpRight,
@@ -125,7 +126,10 @@ import {
 } from "./lib/opportunity-columns.ts";
 import { findDuplicateMap, findExistingDuplicate } from "./lib/duplicates.ts";
 import { type TargetCompany } from "./lib/target-companies.ts";
+import { SENIORITY_LABELS } from "./lib/seniority.ts";
+import { ALIGNMENT_TIER_LABELS } from "./lib/alignment.ts";
 import TargetWishlist from "./components/TargetWishlist";
+import AlignmentSettings from "./components/AlignmentSettings";
 
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
@@ -776,6 +780,7 @@ export default function App() {
     return [...groups.entries()];
   }, [sortedOpportunities, groupByCompany, tableSort]);
   const active = opportunities.filter((o) => !o.outcome),
+    activeExcluded = active.filter((o) => o.matchedExclusions && o.matchedExclusions.length > 0),
     interviews = active.filter((o) =>
       ["interviews", "final-interview"].includes(o.stage),
     ),
@@ -799,6 +804,15 @@ export default function App() {
                     }}
                   >
                     {o.role}
+                    {o.matchedExclusions && o.matchedExclusions.length > 0 && (
+                      <span
+                        className="exclusion-warning-badge"
+                        title={`Excluded keyword matched: ${o.matchedExclusions.join(", ")}`}
+                      >
+                        <AlertTriangle size={11} />
+                        Excluded
+                      </span>
+                    )}
                     {duplicateMap.has(o.id) && (
                       <span
                         className="duplicate-warning-badge"
@@ -881,6 +895,57 @@ export default function App() {
             );
           case "applicationRoute":
             return <td key={colId}>{o.applicationRoute || "—"}</td>;
+          case "seniority":
+            return (
+              <td key={colId}>
+                {o.seniority ? (
+                  <Badge
+                    kind={
+                      o.seniority === "executive" || o.seniority === "director"
+                        ? "accent"
+                        : o.seniority === "lead"
+                          ? "blue"
+                          : "muted"
+                    }
+                  >
+                    {SENIORITY_LABELS[o.seniority] || o.seniority}
+                  </Badge>
+                ) : (
+                  "—"
+                )}
+              </td>
+            );
+          case "alignment":
+            return (
+              <td key={colId}>
+                {o.alignmentScore != null ? (
+                  <span
+                    title={
+                      o.matchedSkills?.length
+                        ? `Matched skills: ${o.matchedSkills.join(", ")}`
+                        : undefined
+                    }
+                  >
+                    <Badge
+                      kind={
+                        o.alignmentTier === "strong"
+                          ? "green"
+                          : o.alignmentTier === "moderate"
+                            ? "blue"
+                            : o.alignmentTier === "reach"
+                              ? "amber"
+                              : "muted"
+                      }
+                    >
+                      {o.alignmentScore}%{" "}
+                      {ALIGNMENT_TIER_LABELS[o.alignmentTier || "mismatch"]}
+                    </Badge>
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </td>
+            );
           default:
             return <td key={colId}>—</td>;
         }
@@ -1457,6 +1522,74 @@ export default function App() {
                     )
                   }
                 />
+                {activeExcluded.length > 0 && (
+                  <div
+                    className="exclusion-bulk-banner"
+                    role="status"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "8px 16px",
+                      margin: "0 0 16px 0",
+                      background: "var(--amber-bg, #fffbeb)",
+                      border: "1px solid var(--amber-border, #fde68a)",
+                      borderRadius: 6,
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <AlertTriangle size={15} style={{ color: "var(--amber-text, #b45309)" }} />
+                      <span>
+                        <strong>
+                          {activeExcluded.length} active opportunit{activeExcluded.length === 1 ? "y matches" : "ies match"} your exclusion keywords.
+                        </strong>{" "}
+                        {opportunityFilters.hideExcluded ? "(Currently hidden by filter)" : "(Currently visible)"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={() =>
+                          setOpportunityFilters((prev) => ({
+                            ...prev,
+                            hideExcluded: !prev.hideExcluded,
+                          }))
+                        }
+                      >
+                        {opportunityFilters.hideExcluded ? "Show excluded" : "Hide excluded"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={async () => {
+                          if (
+                            window.confirm(
+                              `Archive all ${activeExcluded.length} excluded opportunities as ignored?`,
+                            )
+                          ) {
+                            try {
+                              const res = await api<{ archivedCount: number }>(
+                                "/opportunities/archive-excluded",
+                                { method: "POST" },
+                              );
+                              setNotice(
+                                `Archived ${res.archivedCount} excluded opportunities.`,
+                              );
+                              void load(true);
+                            } catch (err) {
+                              setError(displayError(err));
+                            }
+                          }
+                        }}
+                      >
+                        Archive all excluded ({activeExcluded.length})
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {loading ? (
                   <div className="loading-board">
                     <Busy text="Loading your opportunities…" />
@@ -1888,6 +2021,15 @@ function OpportunityCard({
           <span className="card-ref">{o.jobReference || "Opportunity"}</span>
         )}
         <div className="card-top-actions">
+          {o.matchedExclusions && o.matchedExclusions.length > 0 && (
+            <span
+              className="exclusion-warning-badge"
+              title={`Excluded keyword matched: ${o.matchedExclusions.join(", ")}`}
+            >
+              <AlertTriangle size={11} />
+              Excluded
+            </span>
+          )}
           {hasDuplicate && (
             <span
               className="duplicate-warning-badge"
@@ -1949,6 +2091,27 @@ function OpportunityCard({
           <span>{o.nextAction}</span>
           {o.nextActionDate && (
             <small>{formatDate(o.nextActionDate, timezone)}</small>
+          )}
+        </div>
+      )}
+      {(o.seniority || o.alignmentScore != null) && (
+        <div className="card-pills-row">
+          {o.seniority && (
+            <span className="card-seniority-pill">
+              {SENIORITY_LABELS[o.seniority] || o.seniority}
+            </span>
+          )}
+          {o.alignmentScore != null && (
+            <span
+              className={`card-alignment-pill alignment-${o.alignmentTier || "mismatch"}`}
+              title={
+                o.matchedSkills?.length
+                  ? `Matched skills: ${o.matchedSkills.join(", ")}`
+                  : undefined
+              }
+            >
+              {o.alignmentScore}% match
+            </span>
           )}
         </div>
       )}
@@ -2548,6 +2711,38 @@ function OpportunityDetail({
           )}
         </div>
       )}
+      {o.matchedExclusions && o.matchedExclusions.length > 0 && o.stage !== "outcome" && (
+        <div className="exclusion-alert-banner" role="alert" style={{ margin: "12px 18px 0" }}>
+          <AlertTriangle size={16} />
+          <div className="exclusion-alert-content">
+            <strong>Exclusion keyword matched:</strong>
+            <p>
+              This role matches your exclusion filters: <em>{o.matchedExclusions.join(", ")}</em>.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={busy}
+              onClick={async () => {
+                await mutate(
+                  `/opportunities/${o.id}`,
+                  {
+                    revision: o.revision,
+                    stage: "outcome",
+                    outcome: "ignored",
+                    note: `Archived automatically as ignored due to exclusion filter: ${o.matchedExclusions?.join(", ")}`,
+                  },
+                  "PATCH",
+                );
+              }}
+            >
+              Archive as ignored
+            </button>
+          </div>
+        </div>
+      )}
       <div className="detail-tabs" role="tablist">
         {[
           ["overview", "Overview"],
@@ -2715,6 +2910,7 @@ function Overview({
           "nextActionDate",
           "stage",
           "outcome",
+          "seniority",
         ].map((k) => [k, String(o[k as keyof Opportunity] || "")]),
       ),
       tags: (o.tags || []).join(", "),
@@ -2741,12 +2937,50 @@ function Overview({
         .map((x) => x.trim())
         .filter(Boolean),
       effectiveAt: iso(form.effectiveAt),
+      seniority: form.seniority || undefined,
     };
     if (form.outcome) body.stage = "outcome";
     if (await save(body)) setSaved(true);
   }
   return (
     <form onSubmit={submit}>
+      {(o.alignmentScore != null || (o.matchedSkills && o.matchedSkills.length > 0)) && (
+        <div className="alignment-overview-card" style={{ marginBottom: 16 }}>
+          <div className="alignment-overview-header">
+            <div>
+              <strong>Target Profile Alignment</strong>
+              <p>Calculated against your target role titles and skills in Settings.</p>
+            </div>
+            {o.alignmentScore != null && (
+              <Badge
+                kind={
+                  o.alignmentTier === "strong"
+                    ? "green"
+                    : o.alignmentTier === "moderate"
+                      ? "blue"
+                      : o.alignmentTier === "reach"
+                        ? "amber"
+                        : "muted"
+                }
+              >
+                {o.alignmentScore}% — {ALIGNMENT_TIER_LABELS[o.alignmentTier || "mismatch"]}
+              </Badge>
+            )}
+          </div>
+          {o.matchedSkills && o.matchedSkills.length > 0 && (
+            <div className="matched-skills-section">
+              <span className="matched-skills-title">Matched target skills in job specification:</span>
+              <div className="tags" style={{ marginTop: 4 }}>
+                {o.matchedSkills.map((sk) => (
+                  <span key={sk} className="matched-skill-tag">
+                    ✓ {sk}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div className="section-intro">
         <h3>Keep the details in one place.</h3>
         <p>
@@ -2831,6 +3065,16 @@ function Overview({
             <option value="normal">Normal</option>
             <option value="high">High</option>
             <option value="low">Low</option>
+          </select>
+        </Field>
+        <Field label="Seniority level" hint="Auto-classified from listing; override if needed.">
+          <select value={form.seniority} onChange={set("seniority")}>
+            <option value="">Auto-classified ({o.seniority ? (SENIORITY_LABELS[o.seniority] || o.seniority) : "None"})</option>
+            {Object.entries(SENIORITY_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Closing date">
@@ -6357,6 +6601,15 @@ function SettingsPage({
         saving={appearanceSaving}
         failed={appearanceFailed}
         dirty={appearanceDirty}
+      />
+
+        </> },
+        { id: "alignment", label: "Alignment & Filters", content: <>
+      <AlignmentSettings
+        settings={settings}
+        onSaved={onSaved}
+        onError={onError}
+        onNotice={onNotice}
       />
 
         </> },

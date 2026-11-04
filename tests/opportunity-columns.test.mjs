@@ -95,3 +95,14 @@ test('sortOpportunities sorts by deadline date', () => {
   const sortedAsc = sortOpportunities([oppA, oppB], { column: 'deadline', direction: 'asc' });
   assert.equal(sortedAsc[0].id, '2'); // 2026-11-15 before 2026-12-01
 });
+
+test('sortOpportunities sorts by seniority and alignment', () => {
+  const opLead = { ...oppA, id: 'lead', seniority: 'lead', alignmentScore: 90 };
+  const opJunior = { ...oppB, id: 'junior', seniority: 'entry', alignmentScore: 30 };
+
+  const sortedSeniority = sortOpportunities([opJunior, opLead], { column: 'seniority', direction: 'desc' });
+  assert.equal(sortedSeniority[0].id, 'lead');
+
+  const sortedAlignment = sortOpportunities([opJunior, opLead], { column: 'alignment', direction: 'desc' });
+  assert.equal(sortedAlignment[0].id, 'lead');
+});

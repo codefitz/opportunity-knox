@@ -1,4 +1,4 @@
-import type { Opportunity, Task, StageId } from "../types";
+import type { Opportunity, Task, StageId, SeniorityLevel, AlignmentTier } from "../types.ts";
 import {
   buildActionQueue,
   calendarDay,
@@ -11,6 +11,9 @@ export type OpportunityFilters = {
   stage: StageId | "";
   tags: string[];
   tagMatch: "all" | "any";
+  seniority: SeniorityLevel | "";
+  alignmentTier: AlignmentTier | "";
+  hideExcluded: boolean;
   deadline:
     | "any"
     | "overdue"
@@ -30,6 +33,9 @@ export const defaultOpportunityFilters: OpportunityFilters = {
   stage: "",
   tags: [],
   tagMatch: "all",
+  seniority: "",
+  alignmentTier: "",
+  hideExcluded: false,
   deadline: "any",
   deadlineFrom: "",
   deadlineTo: "",
@@ -119,6 +125,9 @@ export function filterOpportunities(
     )
       return false;
     if (filters.overdueOnly && !overdue.has(o.id)) return false;
+    if (filters.seniority && o.seniority !== filters.seniority) return false;
+    if (filters.alignmentTier && o.alignmentTier !== filters.alignmentTier) return false;
+    if (filters.hideExcluded && (o.matchedExclusions?.length ?? 0) > 0) return false;
     const deadline = validDay(o.deadline) ? o.deadline : "";
     switch (filters.deadline) {
       case "any":

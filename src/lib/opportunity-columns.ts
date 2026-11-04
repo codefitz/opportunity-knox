@@ -1,4 +1,5 @@
 import { STAGES, type Opportunity } from "../types.ts";
+import { SENIORITY_ORDER } from "./seniority.ts";
 
 export type ColumnId =
   | "opportunity"
@@ -11,6 +12,8 @@ export type ColumnId =
   | "datePosted"
   | "applicantCount"
   | "priority"
+  | "seniority"
+  | "alignment"
   | "nextAction"
   | "applicationRoute";
 
@@ -29,6 +32,8 @@ export const AVAILABLE_COLUMNS: ColumnDef[] = [
   { id: "salary", label: "Salary / Rate", defaultVisible: true },
   { id: "deadline", label: "Closing date", defaultVisible: true },
   { id: "priority", label: "Priority", defaultVisible: true },
+  { id: "seniority", label: "Seniority", defaultVisible: false },
+  { id: "alignment", label: "Alignment", defaultVisible: false },
   { id: "nextAction", label: "Next action", defaultVisible: true },
   { id: "location", label: "Location", defaultVisible: false },
   { id: "datePosted", label: "Date posted", defaultVisible: false },
@@ -149,6 +154,16 @@ export function sortOpportunities(
         const pA = PRIORITY_ORDER[a.priority] || 2;
         const pB = PRIORITY_ORDER[b.priority] || 2;
         return (pA - pB) * factor;
+      }
+      case "seniority": {
+        const sA = a.seniority ? SENIORITY_ORDER[a.seniority] || 0 : 0;
+        const sB = b.seniority ? SENIORITY_ORDER[b.seniority] || 0 : 0;
+        return (sA - sB) * factor;
+      }
+      case "alignment": {
+        const alA = a.alignmentScore ?? -1;
+        const alB = b.alignmentScore ?? -1;
+        return (alA - alB) * factor;
       }
       case "nextAction": {
         const nA = a.nextActionDate || a.nextAction || "";

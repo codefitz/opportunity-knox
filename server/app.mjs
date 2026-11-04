@@ -30,6 +30,9 @@ import {createDirectorySources} from "./directory-sources.mjs";
 import { createMcpIntegration } from "./mcp-integration.mjs";
 import { cleanJobUrl } from "./url-cleaner.mjs";
 import { createTargetCompanies } from "./target-companies.mjs";
+import { checkOpportunityExclusions } from "./exclusions.mjs";
+import { classifySeniority } from "./seniority.mjs";
+import { calculateAlignment } from "./alignment.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -543,12 +546,32 @@ export function createApp(options = {}) {
       /* Missing or read-only prior storage root; metadata is already removed. */
     }
   };
-  const fullRecord = (record) => ({
-    ...record,
-    documents: getDocuments()
-      .filter((d) => d.opportunityId === record.id)
-      .map(publicDocument),
-  });
+  const fullRecord = (record) => {
+    const s = settings();
+    const seniority =
+      record.seniority ||
+      classifySeniority(record.role, record.description);
+    const matchedExclusions = checkOpportunityExclusions(
+      record,
+      s.exclusionKeywords || [],
+    );
+    const alignment = calculateAlignment(
+      record,
+      s.targetTitles || [],
+      s.targetSkills || [],
+    );
+    return {
+      ...record,
+      seniority,
+      matchedExclusions,
+      alignmentScore: alignment.score,
+      alignmentTier: alignment.tier,
+      matchedSkills: alignment.matchedSkills,
+      documents: getDocuments()
+        .filter((d) => d.opportunityId === record.id)
+        .map(publicDocument),
+    };
+  };
   const listRecords = () =>
     db
       .prepare("SELECT data FROM records ORDER BY rowid DESC")
@@ -564,6 +587,10 @@ export function createApp(options = {}) {
     backupSubdir: "backups",
     pendingHostPath: "",
     aiEnabled: false,
+    exclusionKeywords: [],
+    targetTitles: [],
+    targetSkills: [],
+    autoArchiveExcluded: false,
   };
   const settings = () => {
     let pendingHostPath = "";
@@ -690,6 +717,15 @@ export function createApp(options = {}) {
       if (!Array.isArray(body.tags) || body.tags.length > 30)
         fail(400, "Tags must be a list of up to 30 items.");
       record.tags = body.tags.map((x) => cleanText(x, "Tag", 100));
+    }
+    if (body.seniority) {
+      record.seniority = choice(
+        body.seniority,
+        ["entry", "mid", "senior", "lead", "director", "executive"],
+        "seniority",
+      );
+    } else {
+      record.seniority = classifySeniority(record.role, record.description);
     }
     const event = addEvent(record, body);
     record.stageEnteredAt = event.effectiveAt;
@@ -1379,6 +1415,36 @@ export function createApp(options = {}) {
         if (path === "/api/opportunities" && method === "POST") {
           try{return json(res,jobIntake.create(await readBody(req)),201);}catch(e){if(Number.isInteger(e.status)&&e.status>=400&&e.status<600)fail(e.status,e.message);throw e;}
         }
+        if (path === "/api/opportunities/archive-excluded" && method === "POST") {
+          const s = settings();
+          const keywords = s.exclusionKeywords || [];
+          if (!keywords.length) {
+            return json(res, { archivedCount: 0, archivedIds: [] });
+          }
+          const records = listRecords().filter(
+            (r) => r.stage !== "outcome" || !r.outcome,
+          );
+          const archivedIds = [];
+          for (const record of records) {
+            const matches = checkOpportunityExclusions(record, keywords);
+            if (matches.length > 0) {
+              record.stage = "outcome";
+              record.outcome = "ignored";
+              const note = `Archived automatically due to exclusion keyword${matches.length > 1 ? "s" : ""}: ${matches.join(", ")}`;
+              const event = addEvent(record, { note });
+              record.stageEnteredAt = event.effectiveAt;
+              record.currentStageEventId = event.id;
+              record.revision++;
+              record.updatedAt = now();
+              putRecord(record);
+              archivedIds.push(record.id);
+            }
+          }
+          return json(res, {
+            archivedCount: archivedIds.length,
+            archivedIds,
+          });
+        }
         if (path === "/api/calendar/interviews.ics" && method === "GET") {
           const opportunities = listRecords().map(fullRecord);
           const ics = generateAllInterviewsCalendarIcs(opportunities);
@@ -1539,6 +1605,15 @@ export function createApp(options = {}) {
               if (!Array.isArray(body.tags) || body.tags.length > 30)
                 fail(400, "Tags must be a list of up to 30 items.");
               record.tags = body.tags.map((t) => cleanText(t, "Tag", 100));
+            }
+            if (body.seniority !== undefined) {
+              record.seniority = body.seniority
+                ? choice(
+                    body.seniority,
+                    ["entry", "mid", "senior", "lead", "director", "executive"],
+                    "seniority",
+                  )
+                : classifySeniority(record.role, record.description);
             }
             if (body.stage !== undefined)
               record.stage = choice(body.stage, stageIds, "stage");
@@ -2239,6 +2314,18 @@ export function createApp(options = {}) {
               folder(filesDir, sub);
               updated[key] = sub.replace(/\/+$/, "");
             }
+          for (const key of ["exclusionKeywords", "targetTitles", "targetSkills"]) {
+            if (body[key] !== undefined) {
+              if (!Array.isArray(body[key]))
+                fail(400, `${key} must be an array of strings.`);
+              updated[key] = body[key]
+                .filter((item) => typeof item === "string" && item.trim())
+                .map((item) => cleanText(item, key, 100));
+            }
+          }
+          if (body.autoArchiveExcluded !== undefined) {
+            updated.autoArchiveExcluded = Boolean(body.autoArchiveExcluded);
+          }
           if (body.aiEnabled)
             fail(400, "Use the Career Buddy settings to configure AI.");
           let pending;
