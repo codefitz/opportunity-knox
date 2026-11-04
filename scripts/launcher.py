@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -344,16 +345,14 @@ def stop_watcher(state_dir: Path) -> None:
 
 
 def start_watcher(state_dir: Path) -> None:
-    stop_watcher(state_dir)
     try:
-        proc = subprocess.Popen(
+        subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), "watch", "--state-dir", str(state_dir)],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        (state_dir / ".watcher.pid").write_text(f"{proc.pid}\n", encoding="utf-8")
     except OSError:
         pass
 
@@ -367,6 +366,17 @@ def maintenance_start(state_dir, config):
 
 
 def watch_loop(state_dir: Path, *, once: bool = False) -> int:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    # Keep the lock file: unlinking it would let another process lock a new inode.
+    with (state_dir / ".watcher.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 0
+        return _watch_loop(state_dir, once=once)
+
+
+def _watch_loop(state_dir: Path, *, once: bool = False) -> int:
     import reliability
     reliability.recover(state_dir,
         lambda: run(compose_command(state_dir) + ["stop", "board"], capture=True),

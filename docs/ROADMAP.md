@@ -1,5 +1,12 @@
 # Implementation roadmap
 
+## Fit assessment & alignment contrast fix — 4 November 2026
+
+- Replaced hardcoded HEX and transparent RGB colors across alignment match pills (`.card-alignment-pill`), seniority badges, target profile alignment overview cards, matched skill tags, exclusion badges, and streak badges with theme-aware design tokens (`var(--green)`, `var(--blue)`, `var(--amber)`, `var(--danger)`, `var(--accent-soft)`, `var(--panel-soft)`, `var(--line)`).
+- Fixed low-contrast text and bright white card fallbacks on dark themes (`midnight`, `graphite`, `plum`, `moonlight`), ensuring all text, tags, and status notices adhere to WCAG AA contrast standards across both light and dark themes.
+- Verified build and test suite passing (`npm run check`).
+
+
 ## Automated Actions & Application Targets (Theme 3) — 4 November 2026
 
 Delivered milestone stage auto-advancement, intelligent automated next actions, linked To-Do task generation with two-way completion sync, and daily application targets with streak tracking:

@@ -768,6 +768,32 @@ small {
 .badge.muted {
   color: var(--ink-secondary);
   background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+.badge.green {
+  color: var(--green);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+}
+.badge.blue {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+}
+.badge.amber {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+}
+.badge.purple {
+  color: var(--purple);
+  background: var(--purple-soft);
+  border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
+}
+.badge.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 }
 .card-top .badge {
   font-size: 8px;
@@ -1479,7 +1505,7 @@ textarea {
 .timeline-briefing-body {
   padding: 1rem 1.25rem;
   border-top: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--surface);
 }
 .timeline-briefing-body .job-intake {
   margin: 0;
@@ -4838,7 +4864,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  background: var(--panel);
+  background: var(--surface);
 }
 
 .pre-generate-guidance {
@@ -5003,7 +5029,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 .studio-doc-info { flex: 1; min-width: 0; }
 .studio-doc-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .doc-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.studio-default-badge { font-size: 10px; font-weight: 700; color: #b45309; background: #fef3c7; padding: 1px 5px; border-radius: 4px; flex-shrink: 0; }
+.studio-default-badge { font-size: 10px; font-weight: 700; color: var(--amber); background: var(--amber-soft); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); padding: 1px 5px; border-radius: 4px; flex-shrink: 0; }
 .studio-doc-sub { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--muted); }
 .studio-doc-size { opacity: 0.85; }
 .studio-row-actions { position: relative; }
@@ -5261,9 +5287,9 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   border-radius: 12px 12px 12px 2px;
 }
 .studio-chat-msg.error .studio-chat-bubble {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
 }
 .studio-chat-bubble {
   padding: 9px 12px;
@@ -5542,10 +5568,10 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   display: flex;
   gap: 12px;
   padding: 12px 14px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: 8px;
-  color: #991b1b;
+  color: var(--danger);
   margin-bottom: 16px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -5612,7 +5638,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   align-items: center;
 }
 .mcp-key-field {
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
@@ -5628,7 +5654,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   margin: 0;
 }
 .mcp-code-block {
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.75rem 1rem;
@@ -5674,7 +5700,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 .mcp-example-prompt {
   margin: 0.35rem 0;
   padding: 0.4rem 0.75rem;
-  background: var(--panel);
+  background: var(--surface);
   border-left: 3px solid var(--green);
   border-radius: 0 4px 4px 0;
   font-style: italic;
@@ -5765,7 +5791,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 .opportunities-subnav-btn:hover,
 .subnav-tab:hover {
   background: var(--panel-hover);
-  color: var(--ink-primary);
+  color: var(--ink);
 }
 .opportunities-subnav-btn.active,
 .subnav-tab.active {
@@ -5797,7 +5823,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 }
 .opportunity-table th.sortable-th:hover {
   background: var(--panel-hover, rgba(0, 0, 0, 0.04));
-  color: var(--ink-primary);
+  color: var(--ink);
 }
 .th-content {
   display: inline-flex;
@@ -5841,7 +5867,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 .company-group-name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--ink-primary);
+  color: var(--ink);
 }
 .group-count-badge {
   font-size: 10px;
@@ -5894,7 +5920,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   width: 230px;
   max-height: 380px;
   overflow-y: auto;
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
@@ -5916,7 +5942,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: var(--ink-primary);
+  color: var(--ink);
   cursor: pointer;
   user-select: none;
 }
@@ -6016,7 +6042,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   gap: 14px;
 }
 .target-company-card {
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 16px;
@@ -6053,7 +6079,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 .target-company-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--ink-primary);
+  color: var(--ink);
   margin: 0;
   line-height: 1.3;
 }
@@ -6087,7 +6113,7 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 }
 .target-roles-text {
   font-weight: 500;
-  color: var(--ink-primary);
+  color: var(--ink);
 }
 .target-notes-text {
   font-size: 11px;
@@ -6123,9 +6149,9 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   font-weight: 600;
   padding: 2px 5px;
   border-radius: 4px;
-  background: rgba(220, 38, 38, 0.12);
-  color: #c5221f;
-  border: 1px solid rgba(220, 38, 38, 0.3);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   margin-left: 6px;
 }
 
@@ -6134,12 +6160,12 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  background: rgba(220, 38, 38, 0.08);
-  border: 1px solid rgba(220, 38, 38, 0.28);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: 8px;
   padding: 12px 14px;
   margin-bottom: 16px;
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .exclusion-alert-content {
@@ -6151,13 +6177,13 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 
 .exclusion-alert-content strong {
   font-size: 12px;
-  color: #991b1b;
+  color: var(--danger);
 }
 
 .exclusion-alert-content p {
   margin: 0;
   font-size: 12px;
-  color: #7f1d1d;
+  color: var(--ink-secondary);
 }
 
 .card-pills-row {
@@ -6175,9 +6201,9 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   font-weight: 500;
   padding: 1px 6px;
   border-radius: 10px;
-  background: var(--surface-secondary, rgba(0, 0, 0, 0.06));
-  color: var(--ink-secondary, #4b5563);
-  border: 1px solid var(--line, rgba(0, 0, 0, 0.1));
+  background: var(--panel-soft);
+  color: var(--ink-secondary);
+  border: 1px solid var(--line);
 }
 
 .card-alignment-pill {
@@ -6189,32 +6215,32 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 }
 
 .card-alignment-pill.alignment-strong {
-  background: rgba(16, 185, 129, 0.12);
-  color: #047857;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--accent-soft);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
 }
 
 .card-alignment-pill.alignment-moderate {
-  background: rgba(59, 130, 246, 0.12);
-  color: #1d4ed8;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: var(--blue-soft);
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
 }
 
 .card-alignment-pill.alignment-reach {
-  background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .card-alignment-pill.alignment-mismatch {
-  background: var(--surface-secondary, rgba(0, 0, 0, 0.05));
-  color: var(--ink-tertiary, #9ca3af);
-  border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  background: var(--panel-soft);
+  color: var(--muted);
+  border: 1px solid var(--line);
 }
 
 .alignment-overview-card {
-  background: var(--surface-card, #f9fafb);
-  border: 1px solid var(--line, #e5e7eb);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px 14px;
 }
@@ -6228,19 +6254,19 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 
 .alignment-overview-header strong {
   font-size: 13px;
-  color: var(--ink-primary);
+  color: var(--ink);
 }
 
 .alignment-overview-header p {
   margin: 2px 0 0;
   font-size: 11px;
-  color: var(--ink-secondary);
+  color: var(--muted);
 }
 
 .matched-skills-section {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid var(--line, #e5e7eb);
+  border-top: 1px solid var(--line);
 }
 
 .matched-skills-title {
@@ -6255,9 +6281,9 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   font-weight: 500;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(16, 185, 129, 0.1);
-  color: #047857;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: var(--accent-soft);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
   margin-right: 4px;
 }
 
@@ -6305,9 +6331,9 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 }
 
 .preset-chip:hover {
-  background: var(--surface-hover);
-  border-color: var(--ink-tertiary);
-  color: var(--ink-primary);
+  background: var(--panel-hover);
+  border-color: var(--line);
+  color: var(--ink);
 }
 
 .active-tag-chips {
@@ -6343,26 +6369,26 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
 }
 
 .tag-chip.exclusion-chip {
-  background: rgba(220, 38, 38, 0.1);
-  color: #c5221f;
-  border: 1px solid rgba(220, 38, 38, 0.25);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .tag-chip.title-chip {
-  background: rgba(59, 130, 246, 0.1);
-  color: #1d4ed8;
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: var(--blue-soft);
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
 }
 
 .tag-chip.skill-chip {
-  background: rgba(16, 185, 129, 0.1);
-  color: #047857;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: var(--accent-soft);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
 }
 
 .empty-hint {
   font-size: 12px;
-  color: var(--ink-tertiary);
+  color: var(--muted);
   font-style: italic;
 }
 

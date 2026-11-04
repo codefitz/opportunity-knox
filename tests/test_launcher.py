@@ -15,6 +15,16 @@ spec.loader.exec_module(launcher)
 
 
 class LauncherTests(unittest.TestCase):
+    def test_only_one_watcher_can_own_a_workspace(self):
+        with (self.state / ".watcher.lock").open("a") as lock:
+            launcher.fcntl.flock(lock, launcher.fcntl.LOCK_EX | launcher.fcntl.LOCK_NB)
+            with patch.object(launcher, "_watch_loop") as run_loop:
+                self.assertEqual(launcher.watch_loop(self.state), 0)
+                run_loop.assert_not_called()
+        with patch.object(launcher, "_watch_loop", return_value=0) as run_loop:
+            self.assertEqual(launcher.watch_loop(self.state), 0)
+            run_loop.assert_called_once_with(self.state, once=False)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

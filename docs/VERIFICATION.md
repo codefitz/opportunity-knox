@@ -475,3 +475,7 @@ A disposable browser workspace with 48 fictional opportunities verified full-wid
 ## Collapsible workspace sidebar — 1 November 2026
 
 `npm run check` passed: production build, 264 Node tests and 42 Python launcher/helper tests. Disposable browser checks with the existing 48 fictional opportunities verified Kanban navigation visible by default, hide/show by click and keyboard, reclaimed width, and the shared control on the regular opportunity list. Hidden navigation receives inert/aria-hidden attributes. At 390px the bottom navigation slides away, its reserved space is reclaimed and the restore control remains visible; at 1280px the sidebar and board share the viewport without document overflow. Browser console checks reported no warnings/errors. The production service and personal data were unchanged; deployment remains separate.
+# Launcher helper exclusivity — 4 November 2026
+
+Investigating intermittent fit failures found six host watchers sharing the same workspace and Codex request directory. The watcher now holds an exclusive OS file lock before recovery or worker startup; duplicate starts exit without replacing the owner's PID. A regression check covers duplicate exclusion and lock release. The live duplicate watchers were replaced while AI activity was idle; a duplicate start exited and two fictional requests succeeded through the single live helper. Existing opportunity assessments were not rerun. Full `npm run check` passed with local test-server permissions; browser fit retries remain unverified.
+

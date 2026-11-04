@@ -1183,15 +1183,15 @@
   font-weight: 700;
   padding: 6px 12px;
   border-radius: 20px;
-  background: var(--surface-secondary, rgba(0, 0, 0, 0.05));
-  color: var(--ink-secondary, #4b5563);
+  background: var(--panel-soft);
+  color: var(--ink-secondary);
   border: 1px solid var(--line);
 }
 
 .daily-target-streak-pill.has-streak {
-  background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .daily-target-info {

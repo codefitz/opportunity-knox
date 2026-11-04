@@ -1547,14 +1547,15 @@ export default function App() {
                       gap: 12,
                       padding: "8px 16px",
                       margin: "0 0 16px 0",
-                      background: "var(--amber-bg, #fffbeb)",
-                      border: "1px solid var(--amber-border, #fde68a)",
+                      background: "var(--amber-soft)",
+                      border: "1px solid color-mix(in srgb, var(--amber) 35%, transparent)",
                       borderRadius: 6,
                       fontSize: 13,
+                      color: "var(--ink)",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <AlertTriangle size={15} style={{ color: "var(--amber-text, #b45309)" }} />
+                      <AlertTriangle size={15} style={{ color: "var(--amber)" }} />
                       <span>
                         <strong>
                           {activeExcluded.length} active opportunit{activeExcluded.length === 1 ? "y matches" : "ies match"} your exclusion keywords.
