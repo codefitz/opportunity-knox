@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { SlidersHorizontal, ShieldAlert, Target, Award, Plus, X } from "lucide-react";
+import { SlidersHorizontal, ShieldAlert, Target, Award, Zap, Plus, X } from "lucide-react";
 import { api, json } from "../api";
 import type { Settings } from "../types";
 
@@ -33,6 +33,18 @@ export default function AlignmentSettings({
   const [targetSkills, setTargetSkills] = useState<string[]>(
     settings.targetSkills || [],
   );
+  const [autoAdvanceStages, setAutoAdvanceStages] = useState<boolean>(
+    settings.autoAdvanceStages !== false,
+  );
+  const [autoGenerateTasks, setAutoGenerateTasks] = useState<boolean>(
+    settings.autoGenerateTasks !== false,
+  );
+  const [defaultFollowUpDays, setDefaultFollowUpDays] = useState<number>(
+    settings.defaultFollowUpDays || 7,
+  );
+  const [dailyTarget, setDailyTarget] = useState<number>(
+    settings.dailyTarget || 3,
+  );
   const [inputExclusion, setInputExclusion] = useState("");
   const [inputTitle, setInputTitle] = useState("");
   const [inputSkill, setInputSkill] = useState("");
@@ -43,8 +55,20 @@ export default function AlignmentSettings({
     setExclusionKeywords(settings.exclusionKeywords || []);
     setTargetTitles(settings.targetTitles || []);
     setTargetSkills(settings.targetSkills || []);
+    setAutoAdvanceStages(settings.autoAdvanceStages !== false);
+    setAutoGenerateTasks(settings.autoGenerateTasks !== false);
+    setDefaultFollowUpDays(settings.defaultFollowUpDays || 7);
+    setDailyTarget(settings.dailyTarget || 3);
     setDirty(false);
-  }, [settings.exclusionKeywords, settings.targetTitles, settings.targetSkills]);
+  }, [
+    settings.exclusionKeywords,
+    settings.targetTitles,
+    settings.targetSkills,
+    settings.autoAdvanceStages,
+    settings.autoGenerateTasks,
+    settings.defaultFollowUpDays,
+    settings.dailyTarget,
+  ]);
 
   const addExclusion = (val: string) => {
     const term = val.trim();
@@ -108,13 +132,17 @@ export default function AlignmentSettings({
             exclusionKeywords,
             targetTitles,
             targetSkills,
+            autoAdvanceStages,
+            autoGenerateTasks,
+            defaultFollowUpDays,
+            dailyTarget,
           },
           "PATCH",
         ),
       );
       onSaved(updated);
       setDirty(false);
-      onNotice("Alignment and exclusion settings saved.");
+      onNotice("Targeting, filters, and workflow automation settings saved.");
     } catch (err) {
       onError(err);
     } finally {
@@ -326,6 +354,88 @@ export default function AlignmentSettings({
         </div>
       </div>
 
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Zap size={18} className="text-amber" />
+            <div>
+              <h3>Workflow Automation & Targets</h3>
+              <p>
+                Streamline stage transitions, next action scheduling, and daily application momentum.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={autoAdvanceStages}
+              onChange={(e) => {
+                setAutoAdvanceStages(e.target.checked);
+                setDirty(true);
+              }}
+            />
+            <span>
+              <strong>Auto-advance stages on milestone completion</strong>
+              <small style={{ display: "block", color: "var(--ink-secondary)" }}>
+                Automatically moves opportunities forward (e.g. to CV & cover letter when tailoring a document in Studio; to Interviews when scheduling an interview). Never moves cards backward.
+              </small>
+            </span>
+          </label>
+
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={autoGenerateTasks}
+              onChange={(e) => {
+                setAutoGenerateTasks(e.target.checked);
+                setDirty(true);
+              }}
+            />
+            <span>
+              <strong>Auto-generate next actions & To-Do tasks</strong>
+              <small style={{ display: "block", color: "var(--ink-secondary)" }}>
+                Populates intelligent next actions and creates linked tasks on stage transitions (e.g. 7-day follow-up after submission; interview preparation).
+              </small>
+            </span>
+          </label>
+
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", paddingTop: 4 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Default follow-up (days)</span>
+              <input
+                type="number"
+                min={1}
+                max={90}
+                style={{ width: 140 }}
+                value={defaultFollowUpDays}
+                onChange={(e) => {
+                  setDefaultFollowUpDays(Math.max(1, Number(e.target.value) || 1));
+                  setDirty(true);
+                }}
+              />
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Daily application target</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                style={{ width: 140 }}
+                value={dailyTarget}
+                onChange={(e) => {
+                  setDailyTarget(Math.max(1, Number(e.target.value) || 1));
+                  setDirty(true);
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
         <button
           type="button"
@@ -333,7 +443,7 @@ export default function AlignmentSettings({
           disabled={!dirty || saving}
           onClick={() => save()}
         >
-          {saving ? "Saving..." : "Save alignment settings"}
+          {saving ? "Saving..." : "Save settings"}
         </button>
       </div>
     </section>

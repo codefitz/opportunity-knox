@@ -33,6 +33,11 @@ import { createTargetCompanies } from "./target-companies.mjs";
 import { checkOpportunityExclusions } from "./exclusions.mjs";
 import { classifySeniority } from "./seniority.mjs";
 import { calculateAlignment } from "./alignment.mjs";
+import {
+  canAutoAdvance,
+  computeNextActionForStage,
+  calendarDay,
+} from "./workflow-automation.mjs";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -591,6 +596,10 @@ export function createApp(options = {}) {
     targetTitles: [],
     targetSkills: [],
     autoArchiveExcluded: false,
+    autoAdvanceStages: true,
+    autoGenerateTasks: false,
+    defaultFollowUpDays: 7,
+    dailyTarget: 3,
   };
   const settings = () => {
     let pendingHostPath = "";
@@ -726,6 +735,31 @@ export function createApp(options = {}) {
       );
     } else {
       record.seniority = classifySeniority(record.role, record.description);
+    }
+    const s = settings();
+    if (!record.nextAction && record.stage !== "outcome") {
+      const plan = computeNextActionForStage(record.stage, {
+        today: calendarDay(new Date(), s.timezone),
+        followUpDays: s.defaultFollowUpDays,
+        role: record.role,
+        company: record.company,
+      });
+      record.nextAction = plan.nextAction;
+      record.nextActionDate = plan.nextActionDate;
+      if (s.autoGenerateTasks && plan.taskTitle) {
+        putTask({
+          id: randomUUID(),
+          title: plan.taskTitle,
+          notes: "",
+          dueDate: plan.nextActionDate,
+          completed: false,
+          opportunityId: record.id,
+          revision: 1,
+          createdAt: now(),
+          updatedAt: now(),
+          completedAt: "",
+        });
+      }
     }
     const event = addEvent(record, body);
     record.stageEnteredAt = event.effectiveAt;
@@ -980,10 +1014,63 @@ export function createApp(options = {}) {
   }
   const reliability=createReliability({dataDir,settings,createRestore:(name)=>{const id="restore-"+randomUUID();restoreIsolatedBackup(safePath(filesDir,settings().backupSubdir),name,join(folder(dataDir,"restores",{create:true}),id));return id;}});
   const backupSchedule=createBackupSchedule({getConfig,putConfig,createBackup,clock:options.backupClock,timers:options.backupTimers!==false,canRun:()=>!reliability.applying()});
+  const autoAdvanceOpportunity = (recordOrId, targetStage, reason) => {
+    const s = settings();
+    if (!s.autoAdvanceStages) return null;
+    let record;
+    if (typeof recordOrId === "object" && recordOrId !== null) {
+      record = recordOrId;
+    } else {
+      try {
+        record = getRecord(recordOrId);
+      } catch {
+        return null;
+      }
+    }
+    if (!canAutoAdvance(record.stage, targetStage)) return null;
+
+    const oldStage = record.stage;
+    record.stage = targetStage;
+    const note = `Auto-advanced: ${reason}`;
+    const ev = addEvent(record, { note });
+    record.stageEnteredAt = ev.effectiveAt;
+    record.currentStageEventId = ev.id;
+
+    // Update next action and create linked task
+    const plan = computeNextActionForStage(targetStage, {
+      today: calendarDay(new Date(), s.timezone),
+      followUpDays: s.defaultFollowUpDays,
+      role: record.role,
+      company: record.company,
+    });
+    record.nextAction = plan.nextAction;
+    record.nextActionDate = plan.nextActionDate;
+    if (s.autoGenerateTasks && plan.taskTitle) {
+      putTask({
+        id: randomUUID(),
+        title: plan.taskTitle,
+        notes: "",
+        dueDate: plan.nextActionDate,
+        completed: false,
+        opportunityId: record.id,
+        revision: 1,
+        createdAt: now(),
+        updatedAt: now(),
+        completedAt: "",
+      });
+    }
+
+    if (typeof recordOrId === "string") {
+      record.revision++;
+      record.updatedAt = now();
+      putRecord(record);
+    }
+    return record;
+  };
   const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
   const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
-  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,pdfPages:options.documentPages,googleDocuments,obsidian:()=>obsidian,getConfig,putConfig,getRecord,listRecords,buddyFetch:options.buddyFetch});
+  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,pdfPages:options.documentPages,googleDocuments,obsidian:()=>obsidian,getConfig,putConfig,getRecord,listRecords,buddyFetch:options.buddyFetch,autoAdvanceOpportunity});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
   const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
@@ -1385,7 +1472,26 @@ export function createApp(options = {}) {
           if (body.completed !== undefined) {
             if (typeof body.completed !== "boolean")
               fail(400, "Task completion must be true or false.");
-            if (body.completed && !task.completed) task.completedAt = now();
+            if (body.completed && !task.completed) {
+              task.completedAt = now();
+              if (task.opportunityId) {
+                try {
+                  const opp = getRecord(task.opportunityId);
+                  if (opp && opp.stage !== "outcome") {
+                    if (
+                      opp.nextAction &&
+                      task.title.toLowerCase().includes(opp.nextAction.toLowerCase())
+                    ) {
+                      opp.nextAction = "";
+                      opp.nextActionDate = "";
+                      opp.revision++;
+                      opp.updatedAt = now();
+                      putRecord(opp);
+                    }
+                  }
+                } catch {}
+              }
+            }
             if (!body.completed) task.completedAt = "";
             task.completed = body.completed;
           }
@@ -1632,6 +1738,34 @@ export function createApp(options = {}) {
               const event = addEvent(record, body);
               record.stageEnteredAt = event.effectiveAt;
               record.currentStageEventId = event.id;
+              if (body.nextAction === undefined && record.stage !== "outcome") {
+                const s = settings();
+                const plan = computeNextActionForStage(record.stage, {
+                  today: calendarDay(new Date(), s.timezone),
+                  followUpDays: s.defaultFollowUpDays,
+                  role: record.role,
+                  company: record.company,
+                });
+                record.nextAction = plan.nextAction;
+                record.nextActionDate = plan.nextActionDate;
+                if (s.autoGenerateTasks && plan.taskTitle) {
+                  putTask({
+                    id: randomUUID(),
+                    title: plan.taskTitle,
+                    notes: "",
+                    dueDate: plan.nextActionDate,
+                    completed: false,
+                    opportunityId: record.id,
+                    revision: 1,
+                    createdAt: now(),
+                    updatedAt: now(),
+                    completedAt: "",
+                  });
+                }
+              } else if (record.stage === "outcome") {
+                record.nextAction = "";
+                record.nextActionDate = "";
+              }
             }
             return json(res, changed(record));
           }
@@ -1761,6 +1895,11 @@ export function createApp(options = {}) {
               activity.isFinal = body.isFinal;
             }
             if (method === "POST") record.activities.push(activity);
+            if (activity.kind === "interview" && activity.status !== "cancelled") {
+              const targetStage = activity.isFinal ? "final-interview" : "interviews";
+              const reason = activity.isFinal ? "Final interview scheduled" : "Interview scheduled";
+              autoAdvanceOpportunity(record, targetStage, reason);
+            }
             return json(res, changed(record));
           }
           fail(405, "Method not allowed.");
@@ -2326,6 +2465,26 @@ export function createApp(options = {}) {
           }
           if (body.autoArchiveExcluded !== undefined) {
             updated.autoArchiveExcluded = Boolean(body.autoArchiveExcluded);
+          }
+          if (body.autoAdvanceStages !== undefined) {
+            updated.autoAdvanceStages = Boolean(body.autoAdvanceStages);
+          }
+          if (body.autoGenerateTasks !== undefined) {
+            updated.autoGenerateTasks = Boolean(body.autoGenerateTasks);
+          }
+          if (body.defaultFollowUpDays !== undefined) {
+            const days = Number(body.defaultFollowUpDays);
+            if (!Number.isInteger(days) || days < 1 || days > 365) {
+              fail(400, "Default follow-up days must be an integer between 1 and 365.");
+            }
+            updated.defaultFollowUpDays = days;
+          }
+          if (body.dailyTarget !== undefined) {
+            const target = Number(body.dailyTarget);
+            if (!Number.isInteger(target) || target < 1 || target > 50) {
+              fail(400, "Daily application target must be an integer between 1 and 50.");
+            }
+            updated.dailyTarget = target;
           }
           if (body.aiEnabled)
             fail(400, "Use the Career Buddy settings to configure AI.");

@@ -1239,6 +1239,19 @@ export default function App() {
               onAddOpportunity={add}
               onRefresh={() => void load(true)}
               refreshing={refreshing}
+              dailyTarget={settings?.dailyTarget || 3}
+              onUpdateDailyTarget={async (newTarget: number) => {
+                try {
+                  const updated = await api<Settings>(
+                    "/settings",
+                    json({ dailyTarget: newTarget }, "PATCH"),
+                  );
+                  setSettings(updated);
+                  setNotice(`Daily application goal set to ${newTarget}.`);
+                } catch (err) {
+                  setError(displayError(err));
+                }
+              }}
             />
           ))}
         {page === "todos" &&

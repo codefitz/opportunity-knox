@@ -27,6 +27,7 @@ import {
   dayDifference,
   plannedInterviews,
 } from "../lib/dashboard";
+import { calculateDailyProgress } from "../lib/workflow-automation.ts";
 import "../dashboard.css";
 
 type Props = {
@@ -40,6 +41,8 @@ type Props = {
   onAddOpportunity: () => void;
   onRefresh: () => void;
   refreshing: boolean;
+  dailyTarget?: number;
+  onUpdateDailyTarget?: (target: number) => Promise<void>;
 };
 type Selection = { title: string; ids: string[]; definition: string } | null;
 const outcomeColors = [
@@ -119,6 +122,16 @@ export default function Dashboard(props: Props) {
     () => plannedInterviews(opportunities),
     [opportunities],
   );
+  const dailyProgress = useMemo(
+    () =>
+      calculateDailyProgress(
+        opportunities,
+        props.dailyTarget || 3,
+        timezone,
+        new Date(),
+      ),
+    [opportunities, props.dailyTarget, timezone, today],
+  );
   const maxActivity = Math.max(
     1,
     ...activity.map((day) => Math.max(day.identified, day.submitted)),
@@ -186,6 +199,75 @@ export default function Dashboard(props: Props) {
         <span>
           {formatDate(today, timezone)} · {timezone.replaceAll("_", " ")}
         </span>
+      </div>
+
+      <div
+        className="knox-daily-target-card"
+        role="region"
+        aria-label="Daily application target"
+      >
+        <div className="daily-target-main">
+          <div className="daily-target-badge-col">
+            <span
+              className={`daily-target-streak-pill ${dailyProgress.streakDays > 0 ? "has-streak" : ""}`}
+            >
+              {dailyProgress.streakDays > 0
+                ? `🔥 ${dailyProgress.streakDays}-day streak`
+                : "⚡ Start a streak today"}
+            </span>
+          </div>
+          <div className="daily-target-info">
+            <div className="daily-target-header">
+              <h2>
+                {dailyProgress.metToday ? (
+                  <>
+                    🎯 Daily target achieved!{" "}
+                    <strong>
+                      ({dailyProgress.todayCount}/{dailyProgress.target})
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Today’s application goal:{" "}
+                    <strong>
+                      {dailyProgress.todayCount} of {dailyProgress.target}
+                    </strong>{" "}
+                    submitted
+                  </>
+                )}
+              </h2>
+              <div className="daily-target-controls">
+                <label className="daily-target-select-label">
+                  <span>Target:</span>
+                  <select
+                    aria-label="Set daily application target"
+                    value={dailyProgress.target}
+                    onChange={(e) =>
+                      props.onUpdateDailyTarget?.(Number(e.target.value))
+                    }
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                      <option key={n} value={n}>
+                        {n} / day
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="daily-target-progress-bar-bg" aria-hidden="true">
+              <div
+                className={`daily-target-progress-bar-fill ${dailyProgress.metToday ? "is-complete" : ""}`}
+                style={{ width: `${dailyProgress.percentage}%` }}
+              />
+            </div>
+            <p className="daily-target-subtext">
+              {dailyProgress.metToday
+                ? "Outstanding work! You’ve reached today’s target. Any extra applications build your momentum."
+                : `${dailyProgress.target - dailyProgress.todayCount} more application${dailyProgress.target - dailyProgress.todayCount === 1 ? "" : "s"} needed today to ${dailyProgress.streakDays > 0 ? "keep your streak alive" : "reach your goal"}.`}
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="knox-metric-grid">

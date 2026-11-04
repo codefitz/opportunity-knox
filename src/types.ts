@@ -207,6 +207,10 @@ export type Settings = {
   targetTitles?: string[];
   targetSkills?: string[];
   autoArchiveExcluded?: boolean;
+  autoAdvanceStages?: boolean;
+  autoGenerateTasks?: boolean;
+  defaultFollowUpDays?: number;
+  dailyTarget?: number;
 };
 export type Session = {
   authenticated: boolean;

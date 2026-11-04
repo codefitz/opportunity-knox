@@ -130,6 +130,7 @@ export function createDocumentStudio({
   getRecord,
   listRecords,
   buddyFetch,
+  autoAdvanceOpportunity,
 }) {
   const previews = new Map(), thumbnails=new Map(), pendingThumbnails=new Map();
   let thumbnailQueue=Promise.resolve();
@@ -447,6 +448,10 @@ export function createDocumentStudio({
           };
         } catch {
           if (previewFolder) rmSync(previewFolder, { recursive: true, force: true });
+        }
+
+        if (savedDoc.opportunityId && autoAdvanceOpportunity) {
+          autoAdvanceOpportunity(savedDoc.opportunityId, "documents", "Tailored application document created");
         }
 
         json(res, {

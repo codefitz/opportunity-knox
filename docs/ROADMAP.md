@@ -1,5 +1,32 @@
 # Implementation roadmap
 
+## Automated Actions & Application Targets (Theme 3) — 4 November 2026
+
+Delivered milestone stage auto-advancement, intelligent automated next actions, linked To-Do task generation with two-way completion sync, and daily application targets with streak tracking:
+- **Phase 1: Workflow Automation Settings & Core Engine:**
+  - Extended SQLite settings schema and `PATCH /api/settings` with `autoAdvanceStages`, `autoGenerateTasks`, `defaultFollowUpDays`, and `dailyTarget`.
+  - Implemented core progression rules (`STAGE_ORDER`, `canAutoAdvance`, `computeNextActionForStage`, `calculateDailyProgress` in `server/workflow-automation.mjs` and `src/lib/workflow-automation.ts`).
+  - Added "Workflow Automation & Targets" configuration card in Settings (`AlignmentSettings.tsx`) with controls for milestone advancement, task generation, follow-up days, and daily application targets.
+- **Phase 2: Milestone Stage Auto-Advancement & Safeguards:**
+  - Auto-advances opportunities forward upon key milestone events:
+    - Automated Fit Assessment: saves review and auto-advances to `review` stage.
+    - Document Studio: tailoring a CV or cover letter auto-advances opportunity to `documents` stage.
+    - Application Packs: pack submission advances opportunity to `submitted` stage with atomic document verification.
+    - Activities: scheduling an interview auto-advances opportunity to `interviews` (or `final-interview` when marked final).
+  - Preserves full audit trail: logs `"Auto-advanced: [Reason]"` events with effective timestamps. Never moves opportunities backward or modifies closed/outcome opportunities.
+- **Phase 3: Automated Next Actions & Linked To-Do Tasks:**
+  - Auto-populates context-appropriate `nextAction` and `nextActionDate` upon opportunity creation and stage transitions (e.g. 7-day follow-up after submission; interview prep upon scheduling).
+  - Automatically creates linked To-Do tasks with due dates in the To-Do list when `autoGenerateTasks` is enabled.
+  - Implemented two-way completion sync: completing a linked task via `PATCH /api/tasks/:id` automatically clears/satisfies the opportunity's corresponding next action.
+- **Phase 4: Daily Application Target & Streak Tracking Widget:**
+  - Added `DailyTargetCard` widget to the Dashboard (`src/components/Dashboard.tsx`) with responsive styling (`src/dashboard.css`).
+  - Displays daily application submission progress bar and percentage, dynamic encouragement subtext, and active streak counter pill (`🔥 N-day streak`).
+  - Features quick inline daily target selector (1–10/day) updating settings via `PATCH /api/settings`.
+- **Phase 5: Verification & End-to-End Safety:**
+  - Unit tests: `tests/workflow-automation.test.mjs` (3/3 passed).
+  - Integration tests: `tests/theme3-integration.test.mjs` (3/3 passed).
+  - Full check suite: clean build (`tsc --noEmit && vite build`), all Node integration tests, and launcher test suite verified.
+
 ## Automated fit review saving — 4 November 2026
 
 - The automated Fit Assessment button saves strengths, gaps and the review date, and moves active opportunities to Fit review in the same database transaction as the assessment.

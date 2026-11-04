@@ -1154,6 +1154,118 @@
     padding: 5px 7px;
   }
 }
+/* Daily Target & Streak Widget */
+.knox-daily-target-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 22px;
+  margin-bottom: 22px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.daily-target-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.daily-target-badge-col {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.daily-target-streak-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: var(--surface-secondary, rgba(0, 0, 0, 0.05));
+  color: var(--ink-secondary, #4b5563);
+  border: 1px solid var(--line);
+}
+
+.daily-target-streak-pill.has-streak {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.daily-target-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.daily-target-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 9px;
+}
+
+.daily-target-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+
+.daily-target-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-target-select-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.daily-target-select-label select {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.daily-target-progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.daily-target-progress-bar-fill {
+  height: 100%;
+  background: var(--blue, #3b82f6);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.daily-target-progress-bar-fill.is-complete {
+  background: var(--green, #10b981);
+}
+
+.daily-target-subtext {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .knox-spin {
     animation: none;
