@@ -768,15 +768,20 @@ export default function App() {
       list.push(o);
       groups.set(key, list);
     }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [sortedOpportunities, groupByCompany]);
+    if (tableSort.column === "company") {
+      return [...groups.entries()].sort(([a], [b]) =>
+        tableSort.direction === "desc" ? b.localeCompare(a) : a.localeCompare(b),
+      );
+    }
+    return [...groups.entries()];
+  }, [sortedOpportunities, groupByCompany, tableSort]);
   const active = opportunities.filter((o) => !o.outcome),
     interviews = active.filter((o) =>
       ["interviews", "final-interview"].includes(o.stage),
     ),
     overdue = active.filter(o => overdueIds.has(o.id));
   const renderOpportunityRow = (o: Opportunity) => (
-    <tr key={o.id}>
+    <tr key={o.id} className={groupByCompany ? "company-grouped-row" : undefined}>
       {visibleColumns.map((colId) => {
         switch (colId) {
           case "opportunity":
@@ -804,7 +809,11 @@ export default function App() {
                       </span>
                     )}
                   </span>
-                  <small>{o.company}</small>
+                  {!groupByCompany ? (
+                    <small>{o.company}</small>
+                  ) : o.jobReference ? (
+                    <small>{o.jobReference}</small>
+                  ) : null}
                 </button>
               </td>
             );
@@ -1342,7 +1351,8 @@ export default function App() {
                       <>
                         <button
                           type="button"
-                          className={`filter-button ${groupByCompany ? "active" : ""}`}
+                          className={`button secondary small${groupByCompany ? " active" : ""}`}
+                          aria-pressed={groupByCompany}
                           onClick={() => {
                             setGroupByCompany((prev) => {
                               const next = !prev;
@@ -1355,17 +1365,17 @@ export default function App() {
                               return next;
                             });
                           }}
-                          title="Group rows by company name"
+                          title={groupByCompany ? "Switch to flat list view" : "Group opportunities by company"}
                         >
-                          <Building2 size={15} />
+                          <Building2 size={14} />
                           Group by company
                         </button>
                         <details className="column-picker-dropdown">
                           <summary
-                            className="filter-button"
+                            className="button secondary small"
                             aria-label="Customize visible columns"
                           >
-                            <Columns3 size={15} />
+                            <Columns3 size={14} />
                             Columns
                           </summary>
                           <div className="column-picker-menu">
@@ -1585,35 +1595,60 @@ export default function App() {
                             const isCollapsed =
                               !!collapsedCompanies[companyName];
                             const totalCols = visibleColumns.length + 1;
+                            const activeCount = items.filter((x) => !x.outcome).length;
                             return (
                               <Fragment key={companyName}>
-                                <tr className="company-group-row">
+                                <tr
+                                  className="company-group-row"
+                                  onClick={() => {
+                                    setCollapsedCompanies((curr) => ({
+                                      ...curr,
+                                      [companyName]: !curr[companyName],
+                                    }));
+                                  }}
+                                >
                                   <td colSpan={totalCols}>
-                                    <button
-                                      type="button"
-                                      className="company-group-toggle"
-                                      onClick={() => {
-                                        setCollapsedCompanies((curr) => ({
-                                          ...curr,
-                                          [companyName]: !curr[companyName],
-                                        }));
-                                      }}
-                                    >
-                                      {isCollapsed ? (
-                                        <ChevronRight size={16} />
-                                      ) : (
-                                        <ChevronDown size={16} />
-                                      )}
-                                      <span className="company-group-name">
-                                        {companyName}
+                                    <div className="company-group-header-cell">
+                                      <span style={{ display: "inline-flex", color: "var(--ink-secondary)" }}>
+                                        {isCollapsed ? (
+                                          <ChevronRight size={15} />
+                                        ) : (
+                                          <ChevronDown size={15} />
+                                        )}
                                       </span>
-                                      <span className="company-group-count">
+                                      <span className={`company-avatar tint-${companyName.length % 4}`}>
+                                        {initials(companyName)}
+                                      </span>
+                                      <strong className="company-group-name">
+                                        {companyName}
+                                      </strong>
+                                      <span className="group-count-badge">
                                         {items.length}{" "}
                                         {items.length === 1
-                                          ? "opportunity"
-                                          : "opportunities"}
+                                          ? "role"
+                                          : "roles"}
                                       </span>
-                                    </button>
+                                      {activeCount > 0 && (
+                                        <span className="group-active-badge">
+                                          {activeCount} active
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="button secondary small"
+                                        style={{ marginLeft: "auto", minHeight: 24, padding: "2px 8px", fontSize: 10 }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          add({
+                                            company: companyName === "Unspecified employer" ? "" : companyName,
+                                          });
+                                        }}
+                                        title={`Add opportunity at ${companyName}`}
+                                      >
+                                        <Plus size={12} />
+                                        Add role
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                                 {!isCollapsed &&

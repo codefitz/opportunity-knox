@@ -9,6 +9,7 @@ import {
   Pencil,
   ArrowUpRight,
   Globe2,
+  X,
 } from "lucide-react";
 import {
   TIER_LABELS,
@@ -276,7 +277,7 @@ export default function TargetWishlist({
                 onClick={() => setModalOpen(false)}
                 aria-label="Close modal"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
 

@@ -365,6 +365,13 @@ small {
 .button.secondary:hover {
   background: var(--panel-hover);
 }
+.button.secondary.active,
+.button.secondary[aria-pressed="true"] {
+  background: var(--panel-soft);
+  border-color: var(--green);
+  color: var(--green);
+  font-weight: 600;
+}
 .button.danger {
   background: var(--danger);
   color: #fff;
@@ -5744,24 +5751,25 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: none;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: 7px;
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--ink-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .opportunities-subnav-btn:hover,
 .subnav-tab:hover {
-  background: var(--panel-soft);
+  background: var(--panel-hover);
   color: var(--ink-primary);
 }
 .opportunities-subnav-btn.active,
 .subnav-tab.active {
-  background: var(--panel);
+  background: var(--panel-soft);
   border-color: var(--green);
   color: var(--green);
   font-weight: 600;
@@ -5770,15 +5778,15 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 1px 7px;
+  padding: 1px 6px;
   border-radius: 9999px;
-  background: var(--panel-soft);
+  background: var(--line);
   color: var(--ink-secondary);
 }
 .subnav-tab.active .subnav-pill {
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(16, 185, 129, 0.15);
   color: var(--green);
 }
 
@@ -5805,48 +5813,72 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   color: var(--ink-secondary);
 }
 
+.company-group-row {
+  cursor: pointer;
+  user-select: none;
+}
 .company-group-row td {
   background: var(--panel-soft);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 8px 14px;
+  padding: 7px 14px;
 }
-.company-group-toggle {
-  display: inline-flex;
+.company-group-row:hover td {
+  background: var(--panel-hover, rgba(0, 0, 0, 0.04));
+}
+.company-group-header-cell {
+  display: flex;
   align-items: center;
   gap: 8px;
-  background: none;
-  border: 0;
-  padding: 0;
+  width: 100%;
+}
+.company-group-row .company-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+  border-radius: 5px;
+}
+.company-group-name {
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-primary);
-  cursor: pointer;
 }
-.company-group-toggle:hover {
-  color: var(--green);
-}
-.company-group-toggle .group-count-badge {
+.group-count-badge {
   font-size: 10px;
   font-weight: 500;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
   background: var(--line);
   color: var(--ink-secondary);
 }
-.company-group-toggle .group-active-badge {
+.group-active-badge {
   font-size: 10px;
   font-weight: 500;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(30, 110, 235, 0.1);
-  color: #1e6eeb;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--green);
+}
+.company-grouped-row td:first-child {
+  padding-left: 28px;
+  position: relative;
+}
+.company-grouped-row td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+  opacity: 0.6;
 }
 
 .column-picker-dropdown {
   position: relative;
   display: inline-block;
 }
+.column-picker-dropdown summary.button,
 .column-picker-dropdown summary {
   list-style: none;
   cursor: pointer;
