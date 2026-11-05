@@ -256,6 +256,7 @@ export type ObsidianStatus = {
   obsidianUrl: string;
   mountPending: boolean;
   pendingHostPath: string;
+  linkedDocuments?: number;
   vaultStats: {
     exists: boolean;
     hasObsidianConfig: boolean;

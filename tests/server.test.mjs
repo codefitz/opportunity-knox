@@ -2372,9 +2372,9 @@ test("Obsidian integration can create a new vault, import existing sources into 
   // 2. Point to an existing external Obsidian vault on disk and sync its notes into the library
   const existingVaultPath = join(f.options.dataDir, "external-obsidian-vault");
   mkdirSync(join(existingVaultPath, ".obsidian"), { recursive: true });
-  mkdirSync(join(existingVaultPath, "Wins"), { recursive: true });
+  mkdirSync(join(existingVaultPath, "OppKnox Inbox", "Wins"), { recursive: true });
   writeFileSync(
-    join(existingVaultPath, "Wins", "Staff-Promotion-Case.md"),
+    join(existingVaultPath, "OppKnox Inbox", "Wins", "Staff-Promotion-Case.md"),
     "---\ntags: [leadership, promotion]\n---\n# Staff Promotion\nMentored 8 engineers and led org-wide RFC process #mentoring.\n",
   );
 
@@ -5719,4 +5719,138 @@ test('vault cleanup previews stale exports, detects edits and archives only mark
  for(const path of fresh.files){assert.equal(existsSync(join(vault,path)),false);assert.equal(existsSync(join(vault,result.data.archive,path)),true);}
  assert.equal(readFileSync(join(vault,'Personal.md'),'utf8'),'Unrelated personal note');
  assert.deepEqual((await f.request('/api/obsidian/cleanup',{method:'POST',body:{}})).data.files,[]);
+});
+
+test('vault sync inventory persists actual transfers and detects separate changes and missing files', async t => {
+ const f=await fixture(t);await f.setup();
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional.txt',kind:'cv',contentBase64:Buffer.from('Original fictional text').toString('base64')}})).data;
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'inventory-vault',vaultName:'Inventory'}});
+ assert.equal((await f.request('/api/obsidian/sync-inventory')).data.entries.length,0);
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ let entry=(await f.request('/api/obsidian/sync-inventory')).data.entries[0];
+ assert.equal(entry.documentId,doc.id);assert.equal(entry.vaultPath,'Career Library/Fictional.md');assert.equal(entry.localChanged,false);assert.equal(entry.vaultChanged,false);assert.notEqual(entry.localHash,entry.vaultHash);
+ const note=join(f.options.filesDir,'inventory-vault',entry.vaultPath);writeFileSync(note,readFileSync(note,'utf8')+'\nEdited');
+ entry=(await f.request('/api/obsidian/sync-inventory')).data.entries[0];assert.equal(entry.vaultChanged,true);assert.equal(entry.localChanged,false);
+ await f.restart();await f.login();entry=(await f.request('/api/obsidian/sync-inventory')).data.entries[0];assert.equal(entry.vaultChanged,true);
+ rmSync(note);entry=(await f.request('/api/obsidian/sync-inventory')).data.entries[0];assert.equal(entry.vaultExists,false);assert.equal(entry.localExists,true);
+});
+
+test('vault exports use distinct stable paths for documents with the same note name',async t=>{
+ const f=await fixture(t);await f.setup();
+ for(const name of ['Fictional.txt','Fictional.md']) await f.request('/api/documents',{method:'POST',body:{name,contentBase64:Buffer.from('Fictional content').toString('base64')}});
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'inventory-conflict'}});
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ const inventory=(await f.request('/api/obsidian/sync-inventory')).data;
+ assert.equal(inventory.entries.length,2);assert.deepEqual(inventory.ambiguousPaths,[]);assert.equal(new Set(inventory.entries.map(e=>e.vaultPath)).size,2);
+ const hub=readFileSync(join(f.options.filesDir,'inventory-conflict','00 - Opportunity Knox Hub.md'),'utf8');for(const entry of inventory.entries) assert.ok(hub.includes(entry.vaultPath.replace(/\.md$/i,'')));
+});
+
+test('vault sync review detects both-sided conflicts and rejects stale previews', async t=>{
+ const f=await fixture(t);await f.setup();
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Review.txt',kind:'cv',contentBase64:Buffer.from('Fictional original').toString('base64')}})).data;
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'review-vault'}});
+ let review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;
+ assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'unlinked-local');
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;
+ assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'unchanged');
+ assert.equal((await f.request('/api/obsidian/sync-preview',{method:'POST',body:{token:review.token}})).status,200);
+ const db=new DatabaseSync(join(f.options.dataDir,'board.sqlite'));const d=JSON.parse(db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);
+ writeFileSync(join(d.storageRoot,d.relativePath),'Changed locally');
+ const note=join(f.options.filesDir,'review-vault','Career Library','Review.md');writeFileSync(note,readFileSync(note,'utf8')+'\nChanged in vault');
+ assert.equal((await f.request('/api/obsidian/sync-preview',{method:'POST',body:{token:review.token}})).status,409);
+ review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;
+ assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'conflict');
+ mkdirSync(join(f.options.filesDir,'review-vault','OppKnox Inbox'),{recursive:true});writeFileSync(join(f.options.filesDir,'review-vault','OppKnox Inbox','Unlinked.md'),'Own note');
+ assert.equal((await f.request('/api/obsidian/sync-preview',{method:'POST',body:{token:review.token}})).status,409);
+ db.close();
+});
+
+test('wipe vault previews managed files, rejects stale plans and preserves other notes',async t=>{
+ const f=await fixture(t);await f.setup();
+ await f.request('/api/documents',{method:'POST',body:{name:'Fictional.pdf',kind:'cv',contentBase64:Buffer.from('Fictional PDF').toString('base64')}});
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'wipe-vault'}});
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ const vault=join(f.options.filesDir,'wipe-vault');writeFileSync(join(vault,'Personal.md'),'Private fictional note');
+ const plan=(await f.request('/api/obsidian/wipe',{method:'POST',body:{}})).data;
+ assert.equal(plan.files.length,3);assert.equal(plan.files.includes('Personal.md'),false);
+ const note=plan.files.find(path=>path.startsWith('Career Library/'));writeFileSync(join(vault,note),readFileSync(join(vault,note),'utf8')+'\nChange');
+ assert.equal((await f.request('/api/obsidian/wipe',{method:'POST',body:{token:plan.token}})).status,409);
+ const current=(await f.request('/api/obsidian/wipe',{method:'POST',body:{}})).data;
+ const result=await f.request('/api/obsidian/wipe',{method:'POST',body:{token:current.token}});
+ assert.equal(result.status,200);assert.equal(result.data.removedCount,3);
+ for(const path of current.files){assert.equal(existsSync(join(vault,path)),false);assert.equal(existsSync(join(vault,result.data.archive,path)),true);}
+ assert.equal(readFileSync(join(vault,'Personal.md'),'utf8'),'Private fictional note');
+ assert.equal((await f.request('/api/obsidian/wipe',{method:'POST',body:{}})).data.files.length,0);
+});
+
+test('Obsidian Inbox reviews explicit new files once and excludes linked attachments and other vault notes',async t=>{
+ const f=await fixture(t);await f.setup();
+ await f.request('/api/documents',{method:'POST',body:{name:'Fictional.pdf',kind:'cv',contentBase64:Buffer.from('Fictional PDF').toString('base64')}});
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'inbox-vault'}});
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ const vault=join(f.options.filesDir,'inbox-vault');
+ const companion=join(vault,'Career Library','Fictional.md');writeFileSync(companion,readFileSync(companion,'utf8')+'\nPersonal supporting note');
+ let changes=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data.changes;
+ assert.ok(changes.some(c=>c.type==='companion-changed'&&c.vaultPath==='Career Library/Fictional.md'));
+ writeFileSync(join(vault,'Personal.md'),'Unrelated fictional note');
+ const inbox=join(vault,'OppKnox Inbox','Achievement.md');writeFileSync(inbox,'A fictional achievement');
+ let review=(await f.request('/api/obsidian/inbox',{method:'POST',body:{}})).data;
+ assert.deepEqual(review.files.map(f=>f.path),['OppKnox Inbox/Achievement.md']);
+ writeFileSync(inbox,'An updated fictional achievement');
+ assert.equal((await f.request('/api/obsidian/inbox',{method:'POST',body:{token:review.token}})).status,409);
+ review=(await f.request('/api/obsidian/inbox',{method:'POST',body:{}})).data;
+ const imported=await f.request('/api/obsidian/inbox',{method:'POST',body:{token:review.token}});
+ assert.equal(imported.status,200);assert.equal(imported.data.importedCount,1);
+ assert.equal((await f.request('/api/obsidian')).data.linkedDocuments,2);
+ assert.equal((await f.request('/api/obsidian/wipe',{method:'POST',body:{}})).data.files.includes('OppKnox Inbox/Achievement.md'),false);
+ assert.deepEqual((await f.request('/api/obsidian/inbox',{method:'POST',body:{}})).data.files,[]);
+ await f.request('/api/obsidian/sync-from-vault',{method:'POST',body:{autoPrepare:false}});
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ assert.match(readFileSync(companion,'utf8'),/Personal supporting note/);
+ writeFileSync(inbox,'Edited later in Obsidian');
+ await f.request('/api/obsidian/sync-from-vault',{method:'POST',body:{autoPrepare:false}});
+ assert.equal((await f.request('/api/documents')).data.documents.filter(d=>!d.opportunityId).length,2);
+ assert.equal((await f.request('/api/obsidian/sync-inventory')).data.entries.find(e=>e.vaultPath==='OppKnox Inbox/Achievement.md').vaultChanged,true);
+ assert.equal(readFileSync(join(vault,'Personal.md'),'utf8'),'Unrelated fictional note');
+});
+
+test('linked vault versions sync one-sided edits with recoverable originals and reject conflicts',async t=>{
+ const f=await fixture(t);await f.setup();
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Tracked.md',kind:'cv',contentBase64:Buffer.from('Original fictional text').toString('base64')}})).data;
+ await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'linked-vault'}});
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ const vault=join(f.options.filesDir,'linked-vault'),note=join(vault,'Career Library','Tracked.md');
+ writeFileSync(note,readFileSync(note,'utf8')+'\nVault edit');
+ let review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;
+ assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'changed-vault');
+ const result=await f.request('/api/obsidian/import-linked-change',{method:'POST',body:{token:review.token,documentId:doc.id}});
+ assert.equal(result.status,200);assert.ok(result.data.backup);
+ assert.equal(readFileSync(join(f.options.filesDir,'backups',result.data.backup,'documents',doc.id),'utf8'),'Original fictional text');
+ assert.match((await f.request(`/api/documents/${doc.id}/content`,{binary:true})).data.toString(),/Vault edit/);
+ const db=new DatabaseSync(join(f.options.dataDir,'board.sqlite'));const stored=JSON.parse(db.prepare('SELECT data FROM documents WHERE id=?').get(doc.id).data);const local=join(stored.storageRoot,stored.relativePath);
+ writeFileSync(local,'Local fictional edit');await f.request('/api/documents/refresh',{method:'POST',body:{}});
+ review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;
+ assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'changed-local');
+ const pushed=await f.request('/api/obsidian/export-linked-change',{method:'POST',body:{token:review.token,documentId:doc.id}});
+ assert.equal(pushed.status,200);assert.equal(readFileSync(note,'utf8'),'Local fictional edit');assert.match(readFileSync(join(vault,pushed.data.archive),'utf8'),/Vault edit/);
+ writeFileSync(note,'Vault independently edited');writeFileSync(local,'Local independently edited');
+ review=(await f.request('/api/obsidian/sync-preview',{method:'POST',body:{}})).data;assert.equal(review.changes.find(c=>c.documentId===doc.id).type,'conflict');
+ assert.equal((await f.request('/api/obsidian/import-linked-change',{method:'POST',body:{token:review.token,documentId:doc.id}})).status,409);
+ const legacy=await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ assert.equal(legacy.data.skippedCount,1);assert.equal(readFileSync(note,'utf8'),'Vault independently edited');assert.equal(readFileSync(local,'utf8'),'Local independently edited');db.close();
+});
+
+
+test('Inbox flags a possible moved linked file instead of importing it twice',async t=>{
+ const f=await fixture(t);await f.setup();await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'moves-vault'}});
+ const vault=join(f.options.filesDir,'moves-vault'),inbox=join(vault,'OppKnox Inbox');
+ writeFileSync(join(inbox,'Original.md'),'Fictional unique text');
+ let plan=(await f.request('/api/obsidian/inbox',{method:'POST',body:{}})).data;
+ await f.request('/api/obsidian/inbox',{method:'POST',body:{token:plan.token}});
+ writeFileSync(join(inbox,'Renamed.md'),readFileSync(join(inbox,'Original.md')));rmSync(join(inbox,'Original.md'));
+ plan=(await f.request('/api/obsidian/inbox',{method:'POST',body:{}})).data;
+ assert.equal(plan.files.length,0);assert.equal(plan.possibleMoves.length,1);assert.equal(plan.possibleMoves[0].path,'OppKnox Inbox/Renamed.md');
+ await f.request('/api/obsidian/sync-from-vault',{method:'POST',body:{autoPrepare:false}});
+ assert.equal((await f.request('/api/documents')).data.documents.length,1);
 });

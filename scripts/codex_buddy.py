@@ -118,7 +118,20 @@ class CodexWorker:
                                 details['eventCount'] += 1; details['lastEventAt'] = time.time()
                                 if kind in ('error', 'turn.failed'):
                                     details['stage'] = 'codex-error'
-                                    message = str(event.get('message', event.get('error', ''))).lower()
+                                    err_payload = event.get('message') or event.get('error') or ''
+                                    clean_msg = ''
+                                    if isinstance(err_payload, dict):
+                                        clean_msg = err_payload.get('message', '')
+                                    elif isinstance(err_payload, str):
+                                        try:
+                                            parsed = json.loads(err_payload)
+                                            if isinstance(parsed, dict):
+                                                clean_msg = parsed.get('error', {}).get('message', '') or parsed.get('message', '')
+                                        except (ValueError, TypeError):
+                                            clean_msg = err_payload
+                                    if clean_msg:
+                                        details['errorMessage'] = str(clean_msg)[:500]
+                                    message = str(clean_msg or err_payload).lower()
                                     details['issue'] = 'rate-limit' if 'rate limit' in message or '429' in message else 'authentication' if '401' in message or 'unauthorized' in message else 'connection' if 'connect' in message or 'stream' in message else 'schema' if 'schema' in message else 'provider-error'
                                 elif kind.startswith('item.'):
                                     details['stage'] = 'codex-reasoning' if event.get('item', {}).get('type') == 'reasoning' else 'receiving-response'
@@ -143,6 +156,15 @@ class CodexWorker:
                         reader.join(timeout=1); self.process.stdout.close()
                         if is_doc:
                             if self.process.returncode or not output.exists():
+                                err_msg = details.get('errorMessage') or ''
+                                if details.get('issue') == 'schema':
+                                    raise RuntimeError(f'Codex rejected the document schema: {err_msg}' if err_msg else 'Codex rejected the document schema.')
+                                if details.get('issue') == 'rate-limit':
+                                    raise RuntimeError('Codex rate limit reached. Please wait a moment and try again.')
+                                if details.get('issue') == 'authentication':
+                                    raise RuntimeError('Codex authentication failed. Check host CLI sign-in.')
+                                if err_msg:
+                                    raise RuntimeError(f'Codex error: {err_msg}')
                                 raise RuntimeError('Codex could not complete document generation. Check host CLI sign-in, account limits and model access.')
                             if output.stat().st_size > 2 * 1024 * 1024: raise ValueError()
                             manifest_raw = output.read_text(encoding='utf8')
@@ -151,6 +173,14 @@ class CodexWorker:
                             if not isinstance(out_docx_rel, str) or not out_docx_rel or '..' in out_docx_rel or out_docx_rel.startswith('/'):
                                 raise ValueError('Invalid outputDocx in manifest')
                             target_docx = (workspace / out_docx_rel).resolve()
+                            if not target_docx.is_file() and out_docx_rel.startswith('workspace/'):
+                                alt = (workspace / out_docx_rel[len('workspace/'):]).resolve()
+                                if alt.is_file() and alt.is_relative_to(workspace.resolve()):
+                                    target_docx = alt
+                            elif not target_docx.is_file():
+                                sub = (workspace / 'workspace' / out_docx_rel).resolve()
+                                if sub.is_file() and sub.is_relative_to(workspace.resolve()):
+                                    target_docx = sub
                             if not target_docx.is_relative_to(workspace.resolve()) or not target_docx.is_file():
                                 raise ValueError('outputDocx missing from workspace')
                             if target_docx.stat().st_size > 20 * 1024 * 1024:
@@ -159,6 +189,15 @@ class CodexWorker:
                                 self.write(response, {'output': manifest_raw, 'timings': {'executionMs': round((time.monotonic() - execution_started) * 1000)}, 'usage': details.get('usage', {})})
                         else:
                             if self.process.returncode or not output.exists():
+                                err_msg = details.get('errorMessage') or ''
+                                if details.get('issue') == 'schema':
+                                    raise RuntimeError(f'Codex rejected the output schema: {err_msg}' if err_msg else 'Codex rejected the output schema.')
+                                if details.get('issue') == 'rate-limit':
+                                    raise RuntimeError('Codex rate limit reached. Please wait a moment and try again.')
+                                if details.get('issue') == 'authentication':
+                                    raise RuntimeError('Codex authentication failed. Check host CLI sign-in.')
+                                if err_msg:
+                                    raise RuntimeError(f'Codex error: {err_msg}')
                                 raise RuntimeError('Codex could not complete this request. Check host CLI sign-in, account limits and model access.')
                             if output.stat().st_size > 2 * 1024 * 1024: raise ValueError()
                             answer = output.read_text(); json.loads(answer)

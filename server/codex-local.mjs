@@ -5,6 +5,7 @@ import {
   mkdirSync,
   rmSync,
   existsSync,
+  symlinkSync,
 } from "node:fs";
 import { join, resolve, extname, sep, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -243,35 +244,45 @@ export async function runCodexDocumentGeneration({
     { mode: 0o600 },
   );
 
+  try {
+    symlinkSync("../inputs", join(workspaceDir, "inputs"), "junction");
+  } catch {}
+
   const manifestSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
       outputDocx: { type: "string" },
-      outputPdf: { type: "string" },
+      outputPdf: { type: ["string", "null"] },
       pageCount: { type: "integer" },
-      notes: { type: "string" },
-      layoutCompromises: { type: "string" },
+      notes: { type: ["string", "null"] },
+      layoutCompromises: { type: ["string", "null"] },
     },
-    required: ["outputDocx", "pageCount"],
+    required: [
+      "outputDocx",
+      "outputPdf",
+      "pageCount",
+      "notes",
+      "layoutCompromises",
+    ],
   };
 
   const prompt = [
     "You are an expert document-authoring agent. Your task is to generate a tailored CV in Word (.docx) format that preserves the visual layout, typography, section structure, and sidebar composition of the provided reference document, populated strictly with the candidate's factual career evidence.",
     "",
-    "INPUT FILES IN inputs/:",
-    `- inputs/reference${refExt} (style reference: "${styleDocument.name}"): The visual style reference. Inspect its tables, columns, sidebars, section placement, margins, fonts, and headings. This is ONLY a visual reference—NEVER use its names, companies, dates, or example text as candidate facts.`,
-    "- inputs/source_cv.txt: The verified candidate career facts. Preserve their real identity, employment chronology, job titles, employers, dates, and qualifications. Never fabricate claims or invent employers.",
-    "- inputs/job_context.json: The target role, company, job requirements, and tailoring instructions.",
+    "INPUT FILES (in inputs/ or ../inputs/):",
+    `- reference${refExt} (style reference: "${styleDocument.name}"): The visual style reference. Inspect its tables, columns, sidebars, section placement, margins, fonts, and headings. This is ONLY a visual reference—NEVER use its names, companies, dates, or example text as candidate facts.`,
+    "- source_cv.txt: The verified candidate career facts. Preserve their real identity, employment chronology, job titles, employers, dates, and qualifications. Never fabricate claims or invent employers.",
+    "- job_context.json: The target role, company, job requirements, and tailoring instructions.",
     "",
     "WORKSPACE & OUTPUT INSTRUCTIONS:",
-    "- Your working directory is workspace/.",
-    "- Write your finished Word document to workspace/output.docx.",
+    "- Your working directory is the workspace root.",
+    "- Write your finished Word document to output.docx in the current directory.",
     refExt === ".docx"
-      ? "- A copy of the reference is available as workspace/draft.docx. You may edit this Word package (e.g. using Python standard library zipfile/xml to replace text in existing paragraph and table runs) to preserve 100% of the reference's tables, columns, and styles."
+      ? "- A copy of the reference is available as draft.docx in the current directory. You may edit this Word package (e.g. using Python standard library zipfile/xml to replace text in existing paragraph and table runs) to preserve 100% of the reference's tables, columns, and styles."
       : "- Reconstruct the visual layout (including columns and sidebars) in an editable Word (.docx) document.",
     "- Ensure candidate facts from source_cv.txt are completely and accurately presented.",
-    "- Return the final manifest JSON matching the output schema with outputDocx set to 'output.docx' and pageCount set to the document page count.",
+    "- Return the final manifest JSON matching the output schema with outputDocx set to 'output.docx', outputPdf set to null (or 'output.pdf' if produced), pageCount set to the document page count, and notes/layoutCompromises explaining any visual choices (or null).",
   ].join("\n");
 
   writeFileSync(
@@ -362,9 +373,20 @@ export async function runCodexDocumentGeneration({
         if (typeof manifest.outputDocx !== "string" || !manifest.outputDocx || manifest.outputDocx.includes("..") || isAbsolute(manifest.outputDocx)) {
           throw failure("Invalid artifact path in manifest.", 502);
         }
-        const docxPath = resolve(workspaceDir, manifest.outputDocx);
+        let docxPath = resolve(workspaceDir, manifest.outputDocx);
         if (!docxPath.startsWith(resolve(workspaceDir) + sep) && docxPath !== resolve(workspaceDir)) {
           throw failure("Artifact path traversal is not allowed.", 502);
+        }
+        if (!existsSync(docxPath) && manifest.outputDocx.startsWith("workspace/")) {
+          const alternate = resolve(workspaceDir, manifest.outputDocx.replace(/^workspace\//, ""));
+          if (existsSync(alternate)) {
+            docxPath = alternate;
+          }
+        } else if (!existsSync(docxPath)) {
+          const subWorkspace = resolve(workspaceDir, "workspace", manifest.outputDocx);
+          if (existsSync(subWorkspace)) {
+            docxPath = subWorkspace;
+          }
         }
         if (!existsSync(docxPath)) {
           throw failure(`Generated Word document "${manifest.outputDocx}" not found.`, 502);

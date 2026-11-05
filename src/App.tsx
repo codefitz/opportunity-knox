@@ -5773,7 +5773,6 @@ function ObsidianVaultPanel({
     ),
     [importExisting, setImportExisting] = useState(false),
     [importOnlyPrepared, setImportOnlyPrepared] = useState(false),
-    [syncOnConnect, setSyncOnConnect] = useState(false),
     [readOnly, setReadOnly] = useState(true),
     [onlyPreparedExport] = useState(false),
     [includeExtractedText] = useState(true),
@@ -5781,6 +5780,31 @@ function ObsidianVaultPanel({
     [vaultSources, setVaultSources] = useState<{id: string; path: string; selected: boolean}[] | null>(null),
     [vaultQuery, setVaultQuery] = useState("");
 
+  const [wipeReview,setWipeReview]=useState<{files:string[];token:string}|null>(null);
+  async function wipeVault(token?:string) {
+    setBusy("wipe");
+    try { if(!token) setWipeReview(await api("/obsidian/wipe",json({})));
+      else { const result=await api<{removedCount:number}>("/obsidian/wipe",json({token})); setWipeReview(null); await onReload(); onNotice(`Moved ${result.removedCount} OppKnox files to vault trash.`); }
+    } catch(e) { onError(e); } finally { setBusy(""); }
+  }
+  const [syncReview, setSyncReview] = useState<{changes:{type:string;name:string;documentId?:string;vaultPath?:string}[];token:string}|null>(null);
+  async function reviewSync() {
+    setBusy("review");
+    try { setSyncReview(await api("/obsidian/sync-preview",json({}))); }
+    catch(e) { onError(e); } finally { setBusy(""); }
+  }
+  async function exportVaultChange(documentId:string) {
+    if (!syncReview) return;
+    setBusy("review");
+    try { await api("/obsidian/export-linked-change",json({documentId,token:syncReview.token}));await onReload();setSyncReview(await api("/obsidian/sync-preview",json({})));onNotice("OppKnox version sent to the vault. The previous vault file is in vault trash."); }
+    catch(e) { onError(e); } finally { setBusy(""); }
+  }
+  async function importVaultChange(documentId:string) {
+    if (!syncReview) return;
+    setBusy("review");
+    try { await api("/obsidian/import-linked-change",json({documentId,token:syncReview.token})); await onReload();setSyncReview(await api("/obsidian/sync-preview",json({})));onNotice("Vault version imported. A workspace backup was saved first."); }
+    catch(e) { onError(e); } finally { setBusy(""); }
+  }
   const [cleanup, setCleanup] = useState<{files:string[];token:string}|null>(null);
   async function cleanupVault(token?:string) {
     setBusy("cleanup");
@@ -5843,7 +5867,7 @@ function ObsidianVaultPanel({
           readOnly: action === "connect" && readOnly,
           importExisting: action === "connect" && readOnly ? false : importExisting,
           importOnlyPrepared,
-          syncFromVault: action === "connect" ? syncOnConnect : false,
+          syncFromVault: false,
         }),
       );
       await onReload();
@@ -5892,7 +5916,7 @@ function ObsidianVaultPanel({
       );
       await onReload();
       onNotice(
-        `Imported ${res.importedNotesCount} source${res.importedNotesCount === 1 ? "" : "s"} (${res.copiedAttachmentsCount} original attachment${res.copiedAttachmentsCount === 1 ? "" : "s"}) into your Obsidian vault.`,
+        `Sent ${res.importedNotesCount} source${res.importedNotesCount === 1 ? "" : "s"} to the vault.${res.skippedCount ? ` ${res.skippedCount} skipped for review.` : ""}`,
       );
     } catch (err) {
       onError(err);
@@ -5901,24 +5925,22 @@ function ObsidianVaultPanel({
     }
   }
 
+  const [inboxReview,setInboxReview] = useState<{files:{path:string;size:number}[];possibleMoves:{path:string;matches:string[]}[];token:string;inboxExists:boolean}|null>(null);
   async function handleSyncFromVault() {
-    setBusy("sync");
-    try {
-      const res = await api<{
-        importedCount: number;
-        updatedCount: number;
-        unchangedCount: number;
-        preparedCount: number;
-      }>("/obsidian/sync-from-vault", json({ autoPrepare: true }));
-      await onReload();
-      onNotice(
-        `Synced from Obsidian vault: ${res.importedCount} new, ${res.updatedCount} updated, ${res.unchangedCount} unchanged (${res.preparedCount} prepared for Career Buddy).`,
-      );
-    } catch (err) {
-      onError(err);
-    } finally {
-      setBusy("");
-    }
+    setBusy("inbox");
+    try { setInboxReview(await api("/obsidian/inbox",json({}))); }
+    catch (err) { onError(err); } finally { setBusy(""); }
+  }
+  async function importInbox() {
+    if (!inboxReview) return;
+    setBusy("inbox");
+    try { const result=await api<{importedCount:number}>("/obsidian/inbox",json({token:inboxReview.token})); setInboxReview(null);await onReload();onNotice(`Imported ${result.importedCount} new Inbox ${result.importedCount===1?"file":"files"}. They remain linked to their vault originals.`); }
+    catch(err) { onError(err); } finally { setBusy(""); }
+  }
+  async function createInbox() {
+    setBusy("inbox");
+    try { await api("/obsidian/inbox/create",json({}));setInboxReview(await api("/obsidian/inbox",json({}))); }
+    catch(err) { onError(err); } finally { setBusy(""); }
   }
 
   async function handleDisconnect() {
@@ -5956,7 +5978,7 @@ function ObsidianVaultPanel({
           {isReady ? (
             <Badge kind="green">
               <Check size={11} />
-              {obsidian?.vaultName}{obsidian?.readOnly ? " · Read-only" : ""} · {obsidian?.vaultStats.markdownCount} note
+              {obsidian?.vaultName}{obsidian?.readOnly ? " · Read-only" : ""} · {obsidian?.linkedDocuments || 0} linked document{obsidian?.linkedDocuments === 1 ? "" : "s"} · {obsidian?.vaultStats.markdownCount} note
               {obsidian?.vaultStats.markdownCount === 1 ? "" : "s"}
               {obsidian?.vaultStats.attachmentCount
                 ? ` · ${obsidian.vaultStats.attachmentCount} attachment${obsidian.vaultStats.attachmentCount === 1 ? "" : "s"}`
@@ -5968,6 +5990,9 @@ function ObsidianVaultPanel({
             <Badge kind="muted">Not connected</Badge>
           )}
         </button>
+        {inboxReview && <Modal title="Obsidian Inbox" subtitle="Review new files before importing" onClose={()=>{if(!busy)setInboxReview(null);}}><p>Place new notes or files in <strong>OppKnox Inbox</strong> in your vault. Existing linked files and other vault folders are left alone. Supported documents can be up to 20 MB.</p>{!inboxReview.inboxExists && <button className="button secondary" disabled={Boolean(busy)||Boolean(obsidian?.readOnly)} onClick={()=>void createInbox()}>Create Inbox folder</button>}<div style={{maxHeight:300,overflow:"auto"}}><ul>{inboxReview.files.map(file=><li key={file.path}>{file.path.replace(/^OppKnox Inbox\//,"")}</li>)}</ul></div>{inboxReview.possibleMoves?.length>0&&<><p>These files may be moved linked documents and need review before importing:</p><ul>{inboxReview.possibleMoves.map(file=><li key={file.path}>{file.path.replace(/^OppKnox Inbox\//,"")}</li>)}</ul></>}{inboxReview.inboxExists&&!inboxReview.files.length&&!inboxReview.possibleMoves?.length&&<p>No new Inbox files.</p>}<div className="form-actions"><button className="button secondary" disabled={Boolean(busy)} onClick={()=>setInboxReview(null)}>Cancel</button><button className="button secondary" disabled={Boolean(busy)} onClick={()=>void handleSyncFromVault()}>Refresh list</button><button className="button primary" disabled={Boolean(busy)||!inboxReview.files.length} onClick={()=>void importInbox()}>{busy?"Importing…":`Import ${inboxReview.files.length} ${inboxReview.files.length===1?"file":"files"}`}</button></div></Modal>}
+        {wipeReview && <Modal title="Wipe Vault" subtitle="Review OppKnox-created vault files" onClose={()=>{if(!busy)setWipeReview(null);}}><p>These files will move to the vault’s .trash/Opportunity Knox folder. Other vault files stay in place.</p><div style={{maxHeight:300,overflow:"auto"}}><ul>{wipeReview.files.map(file=><li key={file}>{file}</li>)}</ul></div>{!wipeReview.files.length&&<p>No identified OppKnox files found.</p>}<div className="form-actions"><button className="button secondary" disabled={Boolean(busy)} onClick={()=>setWipeReview(null)}>Cancel</button><button className="button danger" disabled={Boolean(busy)||!wipeReview.files.length} onClick={()=>void wipeVault(wipeReview.token)}>{busy?"Moving…":"Move to vault trash"}</button></div></Modal>}
+        {syncReview && <Modal title="Review sync" subtitle="Current differences between OppKnox and your vault" onClose={()=>setSyncReview(null)}><p className="muted">Unlinked files need matching. One-sided edits can be synced one at a time with a recoverable copy; conflicts need a separate choice.</p><div style={{maxHeight:360,overflow:"auto"}}>{Object.entries({conflict:"Changed on both sides",ambiguous:"Ambiguous paths",unavailable:"Unavailable", "companion-changed":"Supporting notes changed", "companion-unverified":"Supporting notes need review", "changed-local":"Changed in OppKnox", "changed-vault":"Changed in vault", "missing-local":"Missing from OppKnox", "missing-vault":"Missing from vault", "missing-both":"Missing from both", "unlinked-local":"Not yet linked: OppKnox", "unlinked-vault":"Not yet linked: vault", unchanged:"Unchanged"}).map(([type,label])=>{const items=syncReview.changes.filter(c=>c.type===type);return items.length?<details key={type} open={["conflict","ambiguous","unavailable"].includes(type)}><summary>{label} ({items.length})</summary><ul>{items.map((item,i)=><li key={`${item.documentId||item.vaultPath}:${i}`}>{item.name}{item.type === "changed-local" && item.documentId && <button type="button" className="button secondary small" disabled={Boolean(busy)||Boolean(obsidian?.readOnly)} onClick={()=>void exportVaultChange(item.documentId!)}>Send OppKnox version</button>}{item.type === "changed-vault" && item.documentId && <button type="button" className="button secondary small" disabled={Boolean(busy)} onClick={()=>void importVaultChange(item.documentId!)}>Import vault version</button>}</li>)}</ul></details>:null;})}</div>{!syncReview.changes.length&&<p>No documents found.</p>}<div className="form-actions"><button className="button secondary" onClick={()=>setSyncReview(null)}>Close</button><button className="button primary" disabled={Boolean(busy)} onClick={()=>void reviewSync()}><RotateCw size={14}/>Refresh review</button></div></Modal>}
         {cleanup && <Modal title="Clean up vault" subtitle="Exports whose source documents are no longer in OppKnox" onClose={()=>{if(!busy)setCleanup(null);}}><p>{cleanup.files.length ? "These files will move to the vault’s .trash/Opportunity Knox folder. You can recover them there. Unrelated notes stay in place." : "No stale OppKnox exports found."}</p><ul style={{maxHeight:260,overflow:"auto"}}>{cleanup.files.map(file=><li key={file}>{file}</li>)}</ul><div className="form-actions"><button className="button secondary" disabled={Boolean(busy)} onClick={()=>setCleanup(null)}>Cancel</button><button className="button primary" disabled={Boolean(busy)||!cleanup.files.length} onClick={()=>void cleanupVault(cleanup.token)}>{busy?"Cleaning…":"Move to vault trash"}</button></div></Modal>}
         <div className="obsidian-header-actions">
           {isReady && (
@@ -5977,14 +6002,14 @@ function ObsidianVaultPanel({
                 className="button secondary small"
                 disabled={Boolean(busy)}
                 onClick={() => void handleSyncFromVault()}
-                title="Import new or edited Markdown notes and files from your Obsidian vault into your Career Hub"
+                title="Review new files in OppKnox Inbox"
               >
-                {busy === "sync" ? (
+                {busy === "inbox" ? (
                   <LoaderCircle size={14} className="spin" />
                 ) : (
                   <RotateCw size={14} />
                 )}
-                Sync from vault
+                Review Inbox
               </button>
               <button
                 type="button"
@@ -6000,6 +6025,8 @@ function ObsidianVaultPanel({
                 )}
                 Import sources to vault
               </button>
+              <button type="button" className="button secondary small" disabled={Boolean(busy)} onClick={()=>void reviewSync()}><Search size={14}/>Review sync</button>
+              <button type="button" className="button secondary small" disabled={Boolean(busy)||Boolean(obsidian?.readOnly)} onClick={()=>void wipeVault()}><Trash2 size={14}/>Wipe Vault</button>
               <button type="button" className="button secondary small" disabled={Boolean(busy)||Boolean(obsidian?.readOnly)} onClick={()=>void cleanupVault()}><Trash2 size={14}/>Clean up vault</button>
               {obsidian?.obsidianUrl && (
                 <a
@@ -6110,13 +6137,8 @@ function ObsidianVaultPanel({
                     </button>
                   </div>
                   <div className="obsidian-sync-box">
-                    <h4>Sync notes from Obsidian vault into library</h4>
-                    <p>
-                      Scans <code>{obsidian.vaultName}</code> for new or updated
-                      Markdown notes and attachments, adds them to your Career
-                      Library with <code>#Obsidian</code> and frontmatter tags,
-                      and prepares their text for Career Buddy.
-                    </p>
+                    <h4>Import new files from Obsidian</h4>
+                    <p>Put new notes and files in <code>OppKnox Inbox/</code>, then review them before importing. Linked files and other folders are excluded.</p>
                     <button
                       type="button"
                       className="button secondary small"
@@ -6128,10 +6150,7 @@ function ObsidianVaultPanel({
                       ) : (
                         <>
                           <RotateCw size={14} />
-                          Sync vault into library (
-                          {obsidian.vaultStats.totalFiles} file
-                          {obsidian.vaultStats.totalFiles === 1 ? "" : "s"} in
-                          vault)
+                          Review Inbox
                         </>
                       )}
                     </button>
@@ -6158,7 +6177,6 @@ function ObsidianVaultPanel({
                 className={action === "connect" ? "active" : ""}
                 onClick={() => {
                   setAction("connect");
-                  setSyncOnConnect(false);
                   setImportExisting(false);
                   setReadOnly(true);
                 }}
@@ -6239,19 +6257,7 @@ function ObsidianVaultPanel({
                   </span>
                 </label>
               )}
-              {action === "connect" && (
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={syncOnConnect}
-                    onChange={(e) => setSyncOnConnect(e.target.checked)}
-                  />
-                  <span>
-                    Import existing notes and attachments from this Obsidian
-                    vault into your Career Hub
-                  </span>
-                </label>
-              )}
+
             </div>
             <div className="form-actions">
               <button

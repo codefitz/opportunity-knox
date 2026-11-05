@@ -1,5 +1,33 @@
 # Implementation roadmap
 
+## Obsidian export name collisions — 5 November 2026
+
+- Same-named library documents now receive distinct vault note and attachment paths using their stable document IDs. Previously linked paths remain stable, and unrelated or changed vault files are not overwritten.
+- The four identified shortcut collisions in the local workspace were repaired with verified source hashes, separate document links, a database backup and recoverable vault archives. Independent Markdown notes were retained.
+- Full automated checks passed; eight repaired shortcuts and companion IDs were verified against their sources. Full bulk sync and conflict-resolution modes remain open.
+
+## Obsidian Inbox and linked documents — 5 November 2026
+
+- New vault imports are scoped to `OppKnox Inbox/`, with a review and stale-preview check before import. Imported originals stay linked in the Inbox, and are excluded from Wipe Vault. Existing tracked attachments and companion notes and unrelated vault folders are excluded from repeated imports. Potentially moved files matching a missing tracked copy are flagged for review rather than reimported.
+- Connections shows linked-document counts separately from physical vault notes and attachments. Review sync reports supporting-note edits separately. A one-sided tracked edit can be imported to OppKnox after a verified workspace backup, or sent to the vault while retaining its previous file in vault trash. Both-sided edits are flagged and neither side is automatically chosen. Legacy bulk export skips changed/untracked destination collisions and preserves existing companion notes.
+- The five planned bulk sync modes, mode-specific removal plans, and conflict-resolution choices remain open. Existing ambiguous paths and old supporting notes without a recorded baseline need review. Fictional browser verification covered Inbox review/import; the automated suite covers duplicate prevention, stale previews, change detection, backup, archive and conflicts.
+
+## Wipe Vault action — 5 November 2026
+
+- Connections → Obsidian Vault → Wipe Vault previews identified OppKnox-created files and moves them to the vault trash after checking the preview fingerprint. Inventoried files and marked legacy exports are included; unrelated or unidentifiable files remain. The other five planned sync actions and conflict-resolution application remain open.
+- Verified stale-preview rejection, recoverable moves and preservation of unrelated notes with automated checks; browser verification remains outstanding.
+
+## Obsidian sync review — 5 November 2026
+
+- Career Hub Connections → Obsidian Vault → Review sync shows tracked changes, both-sided conflicts, missing or unavailable copies, ambiguous paths, and unlinked files. Unlinked files are not assumed to be additions or deletions.
+- The preview fingerprint includes current file hashes, document revisions, inventory, vault location, companion hashes and unlinked files; the validation endpoint rejects a stale review. This is review-only: mode-specific plans, conflict resolution choices, applying changes and the six sync actions are not yet implemented. Existing legacy sync buttons have not gained conflict protection.
+- Automated checks cover both-sided changes, unlinked files and stale-token rejection. Browser verification remains outstanding.
+
+## Obsidian sync inventory — 5 November 2026
+
+- Stage 1 of the planned vault sync records successful transfers in the workspace database per vault location. Each entry links the OppKnox document ID and vault path with separate hashes of the bytes last transferred and any companion path. The read-only inventory endpoint reports whether each side exists or has changed.
+- Paths shared by multiple documents are flagged as ambiguous instead of being linked to either document. Existing untracked files are not silently enrolled. Existing transfer actions retain their previous behavior; the inventory alone does not provide previews, conflict protection, rename detection, or the six planned sync modes.
+
 ## Recoverable vault cleanup — 5 November 2026
 
 - Connections → Obsidian Vault has a Clean up vault action. Preview lists exported notes marked with an OppKnox document ID that is no longer present, plus companion attachments not retained by a current source. Confirmation moves them to `.trash/Opportunity Knox/<batch>/` in the vault. Unmarked notes are excluded; read-only vaults reject cleanup.

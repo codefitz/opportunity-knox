@@ -1316,6 +1316,23 @@ export function createApp(options = {}) {
     documentPath,
     safePath,
     buddy,
+    replaceDocumentContent: (id, revision, expectedHash, content) => {
+      const doc = getDocument(id);
+      if (doc.opportunityId || doc.status === "submitted") fail(409, "Submitted or opportunity documents cannot be replaced here.");
+      if ((doc.revision ?? 1) !== revision) fail(409, "The document changed. Review again.");
+      const file = documentPath(doc), original = readFileSync(file);
+      if (createHash("sha256").update(original).digest("hex") !== expectedHash || doc.sha256 !== expectedHash) fail(409, "The local file changed. Refresh storage and review again.");
+      if (content.length > 20 * 1024 * 1024) fail(413, "Maximum file size is 20 MB.");
+      const backup = createBackup();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        writeAtomic(file, content);
+        putDocument({ ...doc, size: content.length, sha256: createHash("sha256").update(content).digest("hex"), revision: (doc.revision ?? 1) + 1 });
+        db.prepare("DELETE FROM document_text WHERE id=?").run(id);
+        db.exec("COMMIT");
+      } catch (error) { db.exec("ROLLBACK"); writeAtomic(file, original); throw error; }
+      return { backup: backup.name };
+    },
     deleteSourceCache: (id) => db.prepare("DELETE FROM document_text WHERE id=?").run(id),
     fail,
   });

@@ -237,7 +237,6 @@ export default function DocumentStudio({
 
   // Connected Documents state (Phase 4)
   const [connections, setConnections] = useState<ConnectedSources | null>(null);
-  const [syncingObsidian, setSyncingObsidian] = useState(false);
   const [exportingObsidian, setExportingObsidian] = useState(false);
   const [showDriveSearch, setShowDriveSearch] = useState(false);
   const [driveQuery, setDriveQuery] = useState("");
@@ -272,24 +271,6 @@ export default function DocumentStudio({
     } catch {}
   }
 
-  async function handleSyncObsidian() {
-    setSyncingObsidian(true);
-    try {
-      const res = await api<{ ok: boolean; synced: any; obsidian: any }>(
-        "/document-studio/obsidian/sync",
-        { method: "POST" }
-      );
-      await loadData(true);
-      await loadConnections();
-      const count = res.synced?.importedNotesCount || 0;
-      setDriveNotice(`Obsidian sync complete (${count} notes synced).`);
-      setTimeout(() => setDriveNotice(null), 4000);
-    } catch (err: any) {
-      onError(err);
-    } finally {
-      setSyncingObsidian(false);
-    }
-  }
 
   async function handleExportToObsidian(doc: BoardDocument) {
     setExportingObsidian(true);
@@ -1279,12 +1260,11 @@ export default function DocumentStudio({
                 <button
                   type="button"
                   className="button secondary small"
-                  disabled={syncingObsidian}
-                  onClick={() => void handleSyncObsidian()}
-                  title="Sync new and updated files from Obsidian vault"
+                  onClick={() => { window.location.hash = "/library?section=connections"; }}
+                  title="Review new Obsidian Inbox files in Career Hub"
                 >
-                  {syncingObsidian ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-                  Sync Obsidian
+                  <RefreshCw size={12} />
+                  Review Obsidian Inbox
                 </button>
               </div>
             )}
