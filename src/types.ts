@@ -37,6 +37,7 @@ export type Activity = {
   history?: (Partial<Omit<Activity, "history">> & { changedAt: string })[];
 };
 export type BoardDocument = {
+  storageState?: "available" | "missing" | "unavailable" | "changed";
   category?: string;
   id: string;
   name: string;

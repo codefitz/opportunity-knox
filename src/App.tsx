@@ -1,3 +1,4 @@
+import CareerFileManager from "./components/CareerFileManager";
 import { uploadId } from "./lib/upload-queue";
 import DocumentThumbnail from "./components/DocumentThumbnail";
 import WorkspaceAction from "./components/WorkspaceAction";
@@ -17,7 +18,7 @@ import {OpportunityReviewForm,OpportunityOffers} from "./components/OpportunityW
 import Feedback from "./components/Feedback";
 import ApplicationPacks from "./components/ApplicationPacks";
 import DocumentCategory from "./components/DocumentCategory";
-import documentCategories from "../server/document-categories.json";
+import documentCategories, {libraryCategory} from "./lib/document-categories";
 import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
 import VectorIndex from "./components/VectorIndex";
@@ -4564,7 +4565,7 @@ function Documents({
   const files=queue.files,uploadAbort=useRef<AbortController|null>(null);
   useEffect(()=>()=>uploadAbort.current?.abort(),[]);
   useEffect(()=>{if(queue.ready)void queue.saveOptions({automaticDefaults:true,kind,status:"",notes,category:uploadCategory,batchUploads});},[queue.ready,kind,notes,uploadCategory,batchUploads]);
-  const documents=useMemo(()=>allDocuments.filter(d=>!categoryFilter||d.category===categoryFilter),[allDocuments,categoryFilter]);
+  const documents=useMemo(()=>allDocuments.filter(d=>!categoryFilter||libraryCategory(d.category)===categoryFilter),[allDocuments,categoryFilter]);
   async function categoriseSelected(){if(!bulkCategory||!selectedForMove.length)return;setCategorising(true);try{await api('/documents/categories',json({category:bulkCategory,documents:movableDocuments.filter(d=>selectedForMove.includes(d.id)).map(d=>({id:d.id,revision:d.revision??1}))}));setSelectedForMove([]);onChanged();onNotice?.('Document categories saved. Files stay in their current folders.');}catch(e){onError(e);}finally{setCategorising(false);}}
   const movableDocuments = documents.filter((d) => {
     const ready = extraction?.[d.id]?.status === "ready";
@@ -4960,7 +4961,7 @@ function Documents({
         )}
       </form>
       </details>
-      <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>d.category===c.id).length})</option>)}</select></label>
+      <label className="field"><span>Filter document category</span><select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All categories ({allDocuments.length})</option>{documentCategories.map(c=><option key={c.id} value={c.id}>{c.label} ({allDocuments.filter(d=>libraryCategory(d.category)===c.id).length})</option>)}</select></label>
 
       {!opportunityId && movableDocuments.length > 0 && (
         <div className="library-move-toolbar">
@@ -5284,6 +5285,7 @@ function Documents({
                                 )}
                               </small>
                               <DocumentCategory document={doc} onChanged={onChanged} onError={onError}/>
+                              {opportunityId && ["cv","cover"].includes(doc.kind) && <button type="button" className="button secondary small" onClick={async()=>{try{await api(`/documents/${doc.id}/reference`,json({revision:doc.revision??1}));onNotice?.("Saved as a reference for future applications.");onChanged();}catch(e){onError(e);}}}><Copy size={14}/>Use this {doc.kind==="cv"?"CV":"cover letter"} as a future reference</button>}
                               <div className="document-tags">
                                 {(doc.tags || []).map((tag) => (
                                   <span
@@ -5773,12 +5775,20 @@ function ObsidianVaultPanel({
     [importOnlyPrepared, setImportOnlyPrepared] = useState(false),
     [syncOnConnect, setSyncOnConnect] = useState(false),
     [readOnly, setReadOnly] = useState(true),
-    [onlyPreparedExport, setOnlyPreparedExport] = useState(false),
-    [includeExtractedText, setIncludeExtractedText] = useState(true),
+    [onlyPreparedExport] = useState(false),
+    [includeExtractedText] = useState(true),
     [busy, setBusy] = useState(""),
     [vaultSources, setVaultSources] = useState<{id: string; path: string; selected: boolean}[] | null>(null),
     [vaultQuery, setVaultQuery] = useState("");
 
+  const [cleanup, setCleanup] = useState<{files:string[];token:string}|null>(null);
+  async function cleanupVault(token?:string) {
+    setBusy("cleanup");
+    try {
+      if (!token) setCleanup(await api("/obsidian/cleanup",json({})));
+      else { const result=await api<{removedCount:number}>("/obsidian/cleanup",json({token}));setCleanup(null);await onReload();onNotice(`Moved ${result.removedCount} stale vault files to the vault’s .trash/Opportunity Knox folder.`); }
+    } catch(e) { onError(e); } finally { setBusy(""); }
+  }
   async function loadVaultSources() {
     setBusy("sources");
     try { const result = await api<{sources: {id: string; path: string; selected: boolean}[]}>("/obsidian/sources"); setVaultSources(result.sources); }
@@ -5958,6 +5968,7 @@ function ObsidianVaultPanel({
             <Badge kind="muted">Not connected</Badge>
           )}
         </button>
+        {cleanup && <Modal title="Clean up vault" subtitle="Exports whose source documents are no longer in OppKnox" onClose={()=>{if(!busy)setCleanup(null);}}><p>{cleanup.files.length ? "These files will move to the vault’s .trash/Opportunity Knox folder. You can recover them there. Unrelated notes stay in place." : "No stale OppKnox exports found."}</p><ul style={{maxHeight:260,overflow:"auto"}}>{cleanup.files.map(file=><li key={file}>{file}</li>)}</ul><div className="form-actions"><button className="button secondary" disabled={Boolean(busy)} onClick={()=>setCleanup(null)}>Cancel</button><button className="button primary" disabled={Boolean(busy)||!cleanup.files.length} onClick={()=>void cleanupVault(cleanup.token)}>{busy?"Cleaning…":"Move to vault trash"}</button></div></Modal>}
         <div className="obsidian-header-actions">
           {isReady && (
             <>
@@ -5989,6 +6000,7 @@ function ObsidianVaultPanel({
                 )}
                 Import sources to vault
               </button>
+              <button type="button" className="button secondary small" disabled={Boolean(busy)||Boolean(obsidian?.readOnly)} onClick={()=>void cleanupVault()}><Trash2 size={14}/>Clean up vault</button>
               {obsidian?.obsidianUrl && (
                 <a
                   className="button secondary small"
@@ -6071,32 +6083,6 @@ function ObsidianVaultPanel({
                       and copies PDFs, Word docs, PowerPoints, and transcripts
                       into <code>Attachments/</code> with companion notes.
                     </p>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={onlyPreparedExport}
-                        onChange={(e) =>
-                          setOnlyPreparedExport(e.target.checked)
-                        }
-                      />
-                      <span>
-                        Import only <strong>Used (prepared)</strong> sources (
-                        {preparedDocsCount} of {totalDocs})
-                      </span>
-                    </label>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={includeExtractedText}
-                        onChange={(e) =>
-                          setIncludeExtractedText(e.target.checked)
-                        }
-                      />
-                      <span>
-                        Include extracted text inside companion Markdown notes
-                        so PDFs, DOCX &amp; slides are searchable in Obsidian
-                      </span>
-                    </label>
                     <button
                       type="button"
                       className="button primary small"
@@ -6475,6 +6461,8 @@ function Library({
       </div>
       <WorkspaceSections label="Career Hub sections" sections={[
         { id: "documents", label: "Documents", content: <>
+      <CareerFileManager documents={docs} onChanged={()=>void load()} onError={onError} onNotice={onNotice}/>
+      <details><summary>Upload files & advanced library tools</summary>
       <div className="content-panel">
         <div className="library-browse-bar">
           <div className="search-input library-search">
@@ -6770,6 +6758,7 @@ function Library({
           career evidence establish your experience.
         </p>
       </div>
+      </details>
         </> },
         { id: "preparation", label: "Text preparation", content: <>
       <div className="library-intro-panel">
@@ -6887,11 +6876,9 @@ function Library({
       <VectorIndex onError={onError} refreshKey={connectionRevision} />
 
         </> },
-        { id: "connections", label: "Connections", content: <>
+        { id: "connections", label: "Connections", aliases: ["obsidian"], content: <>
       <DocumentConnections onError={onError} onChanged={()=>{setConnectionRevision(v=>v+1);void load();}} onRestart={onRestart} restarting={restarting} />
 
-        </> },
-        { id: "obsidian", label: "Obsidian vault", content: <>
       <ObsidianVaultPanel
         obsidian={obsidian}
         totalDocs={docs.length}

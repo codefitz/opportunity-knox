@@ -57,3 +57,10 @@ class ReliabilityTests(unittest.TestCase):
   plan=self.plan();db=r.connection(self.state);db.execute('UPDATE records SET data=?',(json.dumps({'id':'fictional','role':'Changed after preview'}),));db.commit();db.close();self.assertRaises(ValueError,r.install,self.state,self.config,plan,self.stop,self.start);self.assertEqual(self.stops,0);db=r.connection(self.state);self.assertEqual(r.rows(db,'records')[0]['role'],'Changed after preview');db.close()
  def test_interrupted_preparation_restarts_original_without_replacing_database(self):
   r.write(self.state/'maintenance'/'transaction.json',{'state':'preparing','oldConfig':self.config,'oldRuntime':{'original':True}});self.assertTrue(r.recover(self.state,self.stop,self.start));db=r.connection(self.state);self.assertEqual(r.rows(db,'records')[0]['role'],'Original role');db.close();self.assertEqual(self.starts[-1],self.config)
+
+ def test_snapshot_includes_configured_external_application_exports(self):
+  external=self.root/'external';external.mkdir();target=external/'application.txt';target.write_bytes(b'Fictional original')
+  db=r.connection(self.state);doc={**self.doc,'storageRoot':str(external),'relativePath':'application.txt'};db.execute('UPDATE documents SET data=?',(json.dumps(doc),));db.execute('INSERT INTO config VALUES(?,?)',('settings',json.dumps({'exportsPath':str(external)})));db.commit();db.close()
+  backup=r.snapshot(self.state,self.config)
+  self.assertEqual((backup/'documents'/self.id).read_bytes(),b'Fictional original')
+  self.assertEqual(r.read(backup/'manifest.json')['documents'][0]['id'],self.id)

@@ -2419,6 +2419,59 @@ Strict constraints:
         }
         if (path === "/api/documents" && method === "GET")
           return json(res, { documents: getDocuments().map(publicDocument) });
+        if (path === "/api/documents/refresh" && method === "POST") {
+          const result = { checked: 0, missing: 0, changed: 0, added: 0, unavailable: 0 };
+          const docs = getDocuments().filter(d => !d.opportunityId);
+          for (const doc of docs) {
+            result.checked++;
+            try {
+              const file = documentPath(doc), st = statSync(file);
+              if (!st.isFile()) throw new Error("Document path is not a file.");
+              const hash = createHash("sha256").update(readFileSync(file)).digest("hex");
+              // Submitted snapshots must never be silently accepted as changed originals.
+              const changed = hash !== doc.sha256;
+              const storageState = changed && doc.status === "submitted" ? "changed" : "available";
+              if (changed) result.changed++;
+              if (changed || (doc.storageState && doc.storageState !== storageState)) {
+                putDocument({ ...doc, storageState, ...(doc.status !== "submitted" ? { sha256: hash, size: st.size } : {}), revision: (doc.revision || 1) + 1 });
+                if (changed) db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+              }
+            } catch (error) {
+              // A detached drive or permission failure is different from a deleted file.
+              const missing = error.code === "ENOENT" && existsSync(doc.storageRoot);
+              const storageState = missing ? "missing" : "unavailable";
+              result[missing ? "missing" : "unavailable"]++;
+              if (doc.storageState !== storageState) putDocument({ ...doc, storageState, revision: (doc.revision || 1) + 1 });
+              db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+            }
+          }
+          const tracked = new Set(getDocuments().filter(d => resolve(d.storageRoot) === filesDir).map(d => d.relativePath));
+          const library = settings().referenceSubdir;
+          const privateRoots = [settings().documentsSubdir, settings().backupSubdir].map(p => resolve(filesDir, p));
+          if (settings().exportsPath) privateRoots.push(resolve(settings().exportsPath));
+          // Only discover inside the managed library. Application exports and backups stay private.
+          function scan(subdir, depth = 0) {
+            if (depth > 20 || result.added >= 500 || privateRoots.some(root => inside(root, resolve(filesDir, subdir)))) return;
+            let entries;
+            try { entries = readdirSync(safePath(filesDir, subdir), { withFileTypes: true }); } catch { return; }
+            for (const entry of entries) {
+              if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+              const path = subdir + "/" + entry.name;
+              if (entry.isDirectory()) { scan(path, depth + 1); continue; }
+              if (!entry.isFile() || tracked.has(path) || result.added >= 500) continue;
+              try {
+                const file = safePath(filesDir, path), st = statSync(file);
+                if (st.size > 20 * 1024 * 1024) continue;
+                const name = cleanDocumentName(path.slice(library.length + 1), true);
+                const classification = inferDocumentClassification({ name });
+                putDocument({ id: randomUUID(), name, ...classification, opportunityId: "", status: "", createdAt: now(), size: st.size, version: 1, revision: 1, notes: "", storageRoot: filesDir, relativePath: path, storageState: "available", sha256: createHash("sha256").update(readFileSync(file)).digest("hex") });
+                tracked.add(path); result.added++;
+              } catch { /* Leave unreadable files untouched. */ }
+            }
+          }
+          scan(library);
+          return json(res, result);
+        }
         if (path === "/api/documents" && method === "DELETE") {
           const scope = parsed.searchParams.get("scope") || "library";
           const opportunityId =
@@ -2815,7 +2868,7 @@ Strict constraints:
             documents: updatedDocs.map(publicDocument),
           });
         }
-        const docMatch = path.match(/^\/api\/documents\/([^/]+)(?:\/(content|duplicate))?$/);
+        const docMatch = path.match(/^\/api\/documents\/([^/]+)(?:\/(content|duplicate|reference))?$/);
         if (docMatch) {
           const doc = getDocument(docMatch[1]);
           if (docMatch[2] === "content" && method === "GET") {
@@ -2847,17 +2900,31 @@ Strict constraints:
             });
             return res.end(content);
           }
+          if (docMatch[2] === "reference" && method === "POST") {
+            const body = await readBody(req);
+            if (body.revision !== doc.revision) fail(409, "Document changed. Refresh before saving a reference.");
+            if (!doc.opportunityId || !["cv", "cover"].includes(doc.kind)) fail(400, "Choose an opportunity CV or cover letter.");
+            const existing = getDocuments().find(d => d.referenceSourceId === doc.id);
+            if (existing) return json(res, publicDocument(existing));
+            const saved = saveDocument({ name: doc.name.split("/").pop(), kind: doc.kind, category: doc.kind === "cv" ? "reference-cv" : "reference-cover", status: "approved", opportunityId: "", content: readFileSync(documentPath(doc)), notes: doc.notes || "", tags: doc.tags });
+            const reference = { ...getDocument(saved.id), referenceSourceId: doc.id };
+            putDocument(reference);
+            return json(res, publicDocument(reference), 201);
+          }
           if (docMatch[2] === "duplicate" && method === "POST") {
+            const body = req.headers["content-type"] ? await readBody(req) : {};
+            if (body.revision !== undefined && body.revision !== doc.revision) fail(409, "Document changed. Refresh before copying.");
             const bytes = readFileSync(documentPath(doc));
             const oldName = doc.name;
             const dotIdx = oldName.lastIndexOf(".");
             const ext = dotIdx > 0 ? oldName.slice(dotIdx) : "";
             const baseName = dotIdx > 0 ? oldName.slice(0, dotIdx) : oldName;
-            const newName = cleanDocumentName(`${baseName} (copy)${ext}`, true);
+            const newName = body.name === undefined ? cleanDocumentName(`${baseName} (copy)${ext}`, true) : cleanDocumentName(body.name, true);
+            if (extname(newName).toLowerCase() !== extname(oldName).toLowerCase()) fail(400, "Document extension cannot be changed.");
             const duplicated = saveDocument({
               name: newName,
               kind: doc.kind,
-              category: doc.category,
+              category: body.category === undefined ? doc.category : validateCategory(body.category),
               status: doc.status === "submitted" ? "draft" : (doc.status || "draft"),
               opportunityId: doc.opportunityId || "",
               content: bytes,

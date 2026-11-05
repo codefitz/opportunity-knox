@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { api, json, ApiError } from "../api";
 import type { BoardDocument, Opportunity } from "../types";
-import categories from "../../server/document-categories.json";
+import categories, {libraryCategory} from "../lib/document-categories";
 import MarkdownViewer from "./MarkdownViewer";
 
 type ConnectedSources = {
@@ -116,7 +116,7 @@ function getDocFolder(name: string): string {
 }
 
 function getCategoryLabel(categoryId?: string): string {
-  const found = categories.find((c) => c.id === categoryId);
+  const found = categories.find((c) => c.id === libraryCategory(categoryId));
   return found ? found.label : categoryId || "Other";
 }
 
@@ -1715,7 +1715,7 @@ export default function DocumentStudio({
                                 onClick={() => {
                                   setOpenMenuId(null);
                                   setBulkCategoryTarget([doc]);
-                                  setSelectedCategoryValue(doc.category || "master-cv");
+                                  setSelectedCategoryValue(libraryCategory(doc.category));
                                 }}
                               >
                                 <Sparkles size={13} /> Change Category

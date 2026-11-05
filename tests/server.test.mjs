@@ -5644,3 +5644,79 @@ test("full-disk application exports folder configuration, browsing, validation, 
   assert.equal(existsSync(backInWorkspace), true);
   assert.equal(readFileSync(backInWorkspace, "utf8"), "ACME-INITIAL-CV");
 });
+
+test('library refresh reconciles disk changes without deleting master or submitted records and discovers only library files', async t => {
+  const f = await fixture(t); await f.setup();
+  const upload = async (name, category, status='') => (await f.request('/api/documents', {method:'POST', body:{name,category,status,kind:'cv',contentBase64:Buffer.from('Fictional career evidence').toString('base64')}})).data;
+  const master = await upload('Master.docx','master-cv');
+  const deleted = await upload('Old.docx','reference-cv');
+  const changed = await upload('Updated.txt','note');
+  const submitted = await upload('Submitted.txt','reference-cv','submitted');
+  const stable = await upload('Stable.txt','note');
+  await f.request('/api/buddy/index',{method:'POST',body:{documentIds:[stable.id]}});
+  const db = new DatabaseSync(join(f.options.dataDir,'board.sqlite'));
+  const stored = id => JSON.parse(db.prepare('SELECT data FROM documents WHERE id=?').get(id).data);
+  const path = id => {const d=stored(id); return join(d.storageRoot,d.relativePath);};
+  rmSync(path(master.id)); rmSync(path(deleted.id));
+  writeFileSync(path(changed.id),'Changed fictional evidence');
+  writeFileSync(path(submitted.id),'Externally modified snapshot');
+  const library = dirname(path(changed.id));
+  writeFileSync(join(library,'Master_cover_letter.txt'),'Fictional cover');
+  writeFileSync(join(f.options.filesDir,'do-not-import.txt'),'Private outside library');
+  symlinkSync(join(f.options.filesDir,'do-not-import.txt'),join(library,'skip-link.txt'));
+  const refresh=await f.request('/api/documents/refresh',{method:'POST',body:{}});
+  assert.equal(refresh.status,200); assert.equal(refresh.data.missing,2); assert.equal(refresh.data.changed,2); assert.equal(refresh.data.added,1);
+  let docs=(await f.request('/api/documents')).data.documents;
+  assert.equal(docs.find(d=>d.id===master.id).storageState,'missing');
+  assert.equal(docs.find(d=>d.id===submitted.id).storageState,'changed');
+  assert.equal(stored(submitted.id).sha256,createHash('sha256').update('Fictional career evidence').digest('hex'));
+  assert.equal(docs.find(d=>d.name==='Master_cover_letter.txt').category,'master-cover-letter');
+  assert.equal(docs.length,6);
+  assert.ok(db.prepare('SELECT data FROM document_text WHERE id=?').get(stable.id), 'unchanged text stays prepared after refresh');
+  assert.equal((await f.request('/api/documents/refresh',{method:'POST',body:{}})).data.added,0);
+  writeFileSync(join(library,stored(master.id).relativePath.split('/').pop()),'Fictional career evidence');
+  await f.request('/api/documents/refresh',{method:'POST',body:{}});
+  assert.equal(stored(master.id).storageState,'available');
+  db.close(); await f.restart(); await f.login();
+  docs=(await f.request('/api/documents')).data.documents;
+  assert.equal(docs.find(d=>d.id===deleted.id).storageState,'missing');
+});
+
+test('opportunity references are exact idempotent library copies; paste checks stale revisions', async t => {
+  const f=await fixture(t); await f.setup();
+  const opp=(await f.request('/api/opportunities',{method:'POST',body:opportunity})).data;
+  for(const kind of ['cv','cover']) {
+    const source=(await f.request('/api/documents',{method:'POST',body:{name:`Application-${kind}.txt`,kind,opportunityId:opp.id,status:'submitted',contentBase64:Buffer.from(`Exact fictional ${kind}`).toString('base64')}})).data;
+    const url=`/api/documents/${source.id}/reference`;
+    assert.equal((await f.request(url,{method:'POST',body:{revision:99}})).status,409);
+    const saved=await f.request(url,{method:'POST',body:{revision:source.revision}});
+    assert.equal(saved.status,201); assert.equal(saved.data.opportunityId,''); assert.equal(saved.data.category,kind==='cv'?'reference-cv':'reference-cover');
+    assert.equal((await f.request(url,{method:'POST',body:{revision:source.revision}})).data.id,saved.data.id);
+    const bytes=(await f.request(`/api/documents/${saved.data.id}/content`,{binary:true})).data;
+    assert.equal(bytes.toString(),`Exact fictional ${kind}`);
+    const copy=await f.request(`/api/documents/${saved.data.id}/duplicate`,{method:'POST',body:{revision:saved.data.revision,name:'Projects/Copy.txt',category:'project'}});
+    assert.equal(copy.status,201); assert.equal(copy.data.name,'Projects/Copy.txt'); assert.equal(copy.data.category,'project');
+    assert.equal((await f.request(`/api/documents/${saved.data.id}/duplicate`,{method:'POST',body:{revision:99}})).status,409);
+    assert.equal((await f.request(`/api/documents/${source.id}`,{method:'DELETE'})).status,409);
+  }
+});
+
+test('vault cleanup previews stale exports, detects edits and archives only marked orphan files',async t=>{
+ const f=await fixture(t);await f.setup();
+ const doc=(await f.request('/api/documents',{method:'POST',body:{name:'Fictional.pdf',kind:'cv',contentBase64:Buffer.from('Fictional bytes').toString('base64')}})).data;
+ assert.equal((await f.request('/api/obsidian/configure',{method:'POST',body:{action:'create',subpath:'vault',vaultName:'Fictional Vault'}})).status,200);
+ await f.request('/api/obsidian/import-to-vault',{method:'POST',body:{includeExtractedText:false}});
+ const vault=join(f.options.filesDir,'vault');writeFileSync(join(vault,'Personal.md'),'Unrelated personal note');
+ assert.deepEqual((await f.request('/api/obsidian/cleanup',{method:'POST',body:{}})).data.files,[]);
+ await f.request(`/api/documents/${doc.id}`,{method:'DELETE'});
+ const plan=(await f.request('/api/obsidian/cleanup',{method:'POST',body:{}})).data;
+ assert.equal(plan.files.length,2);
+ const note=plan.files.find(p=>p.endsWith('.md'));writeFileSync(join(vault,note),readFileSync(join(vault,note),'utf8')+'\nEdited in vault');
+ assert.equal((await f.request('/api/obsidian/cleanup',{method:'POST',body:{token:plan.token}})).status,409);
+ const fresh=(await f.request('/api/obsidian/cleanup',{method:'POST',body:{}})).data;
+ const result=await f.request('/api/obsidian/cleanup',{method:'POST',body:{token:fresh.token}});
+ assert.equal(result.status,200);assert.equal(result.data.removedCount,2);
+ for(const path of fresh.files){assert.equal(existsSync(join(vault,path)),false);assert.equal(existsSync(join(vault,result.data.archive,path)),true);}
+ assert.equal(readFileSync(join(vault,'Personal.md'),'utf8'),'Unrelated personal note');
+ assert.deepEqual((await f.request('/api/obsidian/cleanup',{method:'POST',body:{}})).data.files,[]);
+});

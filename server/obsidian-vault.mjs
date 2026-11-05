@@ -978,7 +978,46 @@ export function createObsidianIntegration({
     if (!item) throw Error("Read-only source unavailable");
     return item.fullPath;
   }
+  function staleVaultSources() {
+    const cfg = getSettings(), resolved = resolveActiveVault(cfg);
+    if (!cfg.enabled || cfg.readOnly) fail(403, "Connect a writable vault to clean up exported sources.");
+    if (resolved.mountPending || !resolved.localDir || !existsSync(resolved.localDir)) fail(409, "Reconnect the vault before cleaning up.");
+    const root = realpathSync(resolved.localDir), live = new Set(getDocuments().map(d => d.id));
+    const candidates = new Set(), protectedAttachments = new Set();
+    const field = (text, key) => { const raw = text.match(new RegExp("^" + key + ":\\s*(.+)$", "m"))?.[1]?.trim(); if (!raw) return ""; try { return JSON.parse(raw); } catch { return raw; } };
+    for (const file of walkVaultFiles(root).files) {
+      if (!file.relPath.startsWith("Career Library/") || file.ext !== ".md") continue;
+      const text = readFileSync(file.fullPath, "utf8"), fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
+      if (!fm) continue;
+      const id = field(fm, "knox_document_id"), attachment = field(fm, "knox_companion_for");
+      if (typeof attachment === "string" && attachment.startsWith("Attachments/") && (!id || live.has(id))) protectedAttachments.add(attachment);
+      if (typeof id !== "string" || !id || live.has(id)) continue;
+      candidates.add(file.relPath);
+      if (typeof attachment === "string" && attachment.startsWith("Attachments/")) {
+        const path = safeVaultChild(root, attachment);
+        if (existsSync(path) && !lstatSync(path).isSymbolicLink() && statSync(path).isFile()) candidates.add(attachment);
+      }
+    }
+    const files = [...candidates].filter(p => !protectedAttachments.has(p)).sort();
+    const token = createHash("sha256").update(root + JSON.stringify(files.map(p => [p, createHash("sha256").update(readFileSync(safeVaultChild(root,p))).digest("hex")]))).digest("hex");
+    return { root, files, token };
+  }
+
   async function handle(path, method, req, res, { json, readBody }) {
+    if (path === "/api/obsidian/cleanup" && method === "POST") {
+      const body = await readBody(req), plan = staleVaultSources();
+      if (!body.token) { json(res, { files: plan.files, token: plan.token }); return true; }
+      if (body.token !== plan.token) fail(409, "Vault sources changed. Review the cleanup again.");
+      const archive = ".trash/Opportunity Knox/" + randomUUID(), moved = [];
+      try {
+        for (const file of plan.files) {
+          const source = safeVaultChild(plan.root, file), target = safeVaultChild(plan.root, archive + "/" + file, { createDirs: true });
+          renameSync(source, target); moved.push({ source, target });
+        }
+      } catch (error) { for (const item of moved.reverse()) renameSync(item.target, item.source); throw error; }
+      writeHubNote(plan.root, getSettings().vaultName);
+      json(res, { removedCount: moved.length, archive }); return true;
+    }
     if (path === "/api/obsidian" && method === "GET") {
       json(res, status());
       return true;

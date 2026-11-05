@@ -1,5 +1,24 @@
 # Implementation roadmap
 
+## Recoverable vault cleanup — 5 November 2026
+
+- Connections → Obsidian Vault has a Clean up vault action. Preview lists exported notes marked with an OppKnox document ID that is no longer present, plus companion attachments not retained by a current source. Confirmation moves them to `.trash/Opportunity Knox/<batch>/` in the vault. Unmarked notes are excluded; read-only vaults reject cleanup.
+- Preview fingerprints detect changed candidates before applying cleanup; failed moves roll back. Legacy notes without an OppKnox source marker cannot be automatically identified.
+- Validation: build, 360 Node tests and 48 launcher tests passed, including preview, content-change conflicts, archive recovery and unrelated-note preservation.
+
+## Career Hub categories and connections — 5 November 2026
+
+- Category selectors now offer only the eight requested document types. Legacy categories display under their matching new type without rewriting submitted records or application metadata.
+- Obsidian Vault setup now lives in Career Hub Connections alongside Google Drive and directory connections. Existing Obsidian section links still open Connections.
+
+## Career Hub visual file manager — 5 November 2026
+
+- Documents now opens a compact thumbnail/list file manager with eight type groups: Master CV, master cover letter, CV templates, cover letter templates, project files, notes, reference CVs and reference covers. Existing files keep their records and categories; older categories are grouped into the corresponding visual sections.
+- Search, format filters, sorting, folder selection, multi-selection, drag-to-type, category changes, rename, move (including new folder paths), copy/cut/paste and confirmed deletion reuse the existing document APIs. Submitted originals retain their existing protections. Upload and advanced preparation tools remain available in a collapsed panel.
+- Refresh storage checks managed library records against disk, invalidates prepared text for changed/missing files, and discovers up to 500 new library files per refresh. Missing/unavailable records stay recoverable in Needs attention; no automatic document deletion. Application export and backup directories are excluded from discovery; symlink entries are skipped.
+- Opportunity CVs and covers can be saved explicitly as reusable reference copies. The exact bytes are copied into the library; retries return the same reference and leave the opportunity/submitted document intact.
+- Verification: build, 359 Node tests and 47 launcher tests passed; isolated browser checks use fictional documents. This does not claim deployment to the running Docker installation or reconciliation of personal documents.
+
 ## External Volumes Navigation for Application Exports — 5 November 2026
 
 - Enabled seamless discovery, navigation, and selection of external volumes, removable drives, and mount points (e.g. `/Volumes/Hub`, `/Volumes/Traversys`, Linux `/media` or `/mnt`) for application exports:

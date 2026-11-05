@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import categories from "../../server/document-categories.json";
+import categories, {libraryCategory} from "../lib/document-categories";
 import { api, json } from "../api";
 import type { BoardDocument } from "../types";
 export default function DocumentCategory({
@@ -12,8 +12,8 @@ export default function DocumentCategory({
   onError: (e: unknown) => void;
 }) {
   const [busy, setBusy] = useState(false),
-    [value, setValue] = useState(document.category || "other");
-  useEffect(() => setValue(document.category || "other"), [document.category]);
+    [value, setValue] = useState(libraryCategory(document.category));
+  useEffect(() => setValue(libraryCategory(document.category)), [document.category]);
   return (
     <label className="field">
       <span>Category</span>
@@ -33,7 +33,7 @@ export default function DocumentCategory({
           )
             .then(onChanged)
             .catch((e) => {
-              setValue(document.category || "other");
+              setValue(libraryCategory(document.category));
               onError(e);
             })
             .finally(() => setBusy(false));

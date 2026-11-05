@@ -55,6 +55,8 @@ def snapshot(state,config,backup_root=None,fallback=None):
     db=connection(state)
     try:
         settings=config_value(db,'settings',{})
+        exports=settings.get('exportsPath','')
+        if exports and Path(exports).is_absolute():config={**config,'roots':[*config['roots'],exports]}
         root=Path(backup_root) if backup_root else safe_child(config['files'],settings.get('backupSubdir','backups'))
         readonly=[Path(s['hostPath']).resolve() for s in config.get('sourceRoots',[])]+([Path(config['vault']).resolve()] if config.get('vaultReadOnly') and config.get('vault') else [])
         if any(root.resolve()==s or root.resolve().is_relative_to(s) for s in readonly):raise ValueError('Backup destination is a read-only career source.')
