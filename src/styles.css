@@ -690,15 +690,26 @@ small {
   padding: 15px 14px 0;
   box-shadow: var(--shadow);
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
   transition:
     box-shadow 0.15s,
-    border 0.15s;
+    border 0.15s,
+    opacity 0.15s;
 }
 .opportunity-card:hover {
   box-shadow: var(--shadow);
   border-color: var(--line);
 }
 .opportunity-card:active {
+  cursor: grabbing;
+}
+.opportunity-card.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.drag-ghost-preview {
+  opacity: 0.95;
   cursor: grabbing;
 }
 .card-top {
@@ -806,6 +817,10 @@ small {
   border: 0;
   text-align: left;
   padding: 0;
+  cursor: grab;
+}
+.card-main:active {
+  cursor: grabbing;
 }
 .card-company {
   display: block;

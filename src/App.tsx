@@ -1675,7 +1675,10 @@ export default function App() {
                             if (dragging) {
                               e.preventDefault();
                               e.stopPropagation();
-                              setDropStage(stage.id);
+                              e.dataTransfer.dropEffect = "move";
+                              if (dropStage !== stage.id) {
+                                setDropStage(stage.id);
+                              }
                             }
                           }}
                           onDragLeave={(e) => {
@@ -1720,6 +1723,7 @@ export default function App() {
                                 selected={selectedOpportunityIds.includes(
                                   op.id,
                                 )}
+                                isDragging={dragging === op.id}
                                 onToggleSelect={() =>
                                   toggleSelectOpportunity(op.id)
                                 }
@@ -2097,6 +2101,7 @@ function OpportunityCard({
   hasDuplicate = false,
   timezone = "Europe/London",
   selected = false,
+  isDragging = false,
   onToggleSelect,
   onOpen,
   onDrag,
@@ -2106,6 +2111,7 @@ function OpportunityCard({
   hasDuplicate?: boolean;
   timezone?: string;
   selected?: boolean;
+  isDragging?: boolean;
   onToggleSelect?: () => void;
   onOpen: () => void;
   onDrag: (id: string) => void;
@@ -2120,9 +2126,44 @@ function OpportunityCard({
   );
   return (
     <article
-      className={`opportunity-card ${selected ? "selected" : ""}`}
+      className={`opportunity-card ${selected ? "selected" : ""} ${isDragging ? "is-dragging" : ""}`}
       draggable
       onDragStart={(e) => {
+        const card = e.currentTarget;
+        if (e.dataTransfer?.setDragImage) {
+          const rect = card.getBoundingClientRect();
+          const clone = card.cloneNode(true) as HTMLElement;
+          clone.style.width = `${rect.width}px`;
+          clone.style.height = `${rect.height}px`;
+          clone.style.position = "fixed";
+          clone.style.top = "0px";
+          clone.style.left = "0px";
+          clone.style.zIndex = "-9999";
+          clone.style.margin = "0";
+          clone.style.pointerEvents = "none";
+          clone.style.boxSizing = "border-box";
+          clone.style.transform = "none";
+          clone.style.borderRadius = "9px";
+          clone.style.background = "var(--surface)";
+          clone.style.boxShadow =
+            "var(--shadow), 0 10px 24px rgba(0, 0, 0, 0.16)";
+          clone.classList.add("drag-ghost-preview");
+          document.body.appendChild(clone);
+
+          const offsetX = Math.min(
+            Math.max(16, e.clientX - rect.left),
+            rect.width - 16,
+          );
+          const offsetY = Math.min(
+            Math.max(16, e.clientY - rect.top),
+            rect.height - 16,
+          );
+          e.dataTransfer.setDragImage(clone, offsetX, offsetY);
+
+          setTimeout(() => {
+            clone.remove();
+          }, 0);
+        }
         e.dataTransfer.setData("application/x-opportunity", o.id);
         e.dataTransfer.effectAllowed = "move";
         onDrag(o.id);
@@ -2134,6 +2175,7 @@ function OpportunityCard({
           type="checkbox"
           className="card-select-checkbox"
           checked={selected}
+          draggable={false}
           onChange={(e) => {
             e.stopPropagation();
             onToggleSelect?.();
@@ -2176,6 +2218,7 @@ function OpportunityCard({
               className="icon-button"
               aria-label={`Open job listing for ${o.role}`}
               title="Open job listing in new tab"
+              draggable={false}
               onClick={(e) => e.stopPropagation()}
             >
               <ExternalLink size={15} />
@@ -2184,13 +2227,14 @@ function OpportunityCard({
           <button
             className="icon-button"
             aria-label={`Open details for ${o.role}`}
+            draggable={false}
             onClick={onOpen}
           >
             <MoreHorizontal size={17} />
           </button>
         </div>
       </div>
-      <button className="card-main" onClick={onOpen}>
+      <button className="card-main" draggable={false} onClick={onOpen}>
         <span className="card-company">{o.company}</span>
         <h3>{o.role}</h3>
       </button>
