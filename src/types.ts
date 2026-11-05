@@ -158,7 +158,11 @@ export type Theme =
   | "espresso-cream"
   | "harbour"
   | "ink-paper"
-  | "moonlight";
+  | "moonlight"
+  | "alpine-mint"
+  | "sandstone-slate"
+  | "nordic-frost"
+  | "solar-dark";
 export type Appearance = {
   theme: Theme;
   themeAccent: string;

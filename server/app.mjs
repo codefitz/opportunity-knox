@@ -2417,6 +2417,10 @@ export function createApp(options = {}) {
                 "harbour",
                 "ink-paper",
                 "moonlight",
+                "alpine-mint",
+                "sandstone-slate",
+                "nordic-frost",
+                "solar-dark",
               ],
               "theme",
             );

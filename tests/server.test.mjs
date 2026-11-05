@@ -831,7 +831,16 @@ test("mixed contrast themes persist while preserving custom colours and existing
     },
   });
   assert.equal(customized.status, 200);
-  for (const theme of ["espresso-cream", "harbour", "ink-paper", "moonlight"]) {
+  for (const theme of [
+    "espresso-cream",
+    "harbour",
+    "ink-paper",
+    "moonlight",
+    "alpine-mint",
+    "sandstone-slate",
+    "nordic-frost",
+    "solar-dark",
+  ]) {
     const changed = await f.request("/api/settings", {
       method: "PATCH",
       body: { theme },

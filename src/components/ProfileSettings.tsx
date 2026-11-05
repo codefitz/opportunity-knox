@@ -98,6 +98,35 @@ export const THEMES: {
     dark: true,
     navDark: false,
   },
+  {
+    id: "alpine-mint",
+    name: "Alpine Mint",
+    description: "Deep evergreen navigation with a crisp mint workspace.",
+    swatches: ["#f2f7f4", "#1b5e43", "#12221b"],
+    navDark: true,
+  },
+  {
+    id: "sandstone-slate",
+    name: "Sandstone & Slate",
+    description: "Deep slate navigation beside a sunlit sandstone workspace.",
+    swatches: ["#f7f3ee", "#82552f", "#1c2024"],
+    navDark: true,
+  },
+  {
+    id: "nordic-frost",
+    name: "Nordic Frost",
+    description: "Midnight fjord navigation with a bright arctic workspace.",
+    swatches: ["#f0f4f8", "#1d5f8a", "#0e1722"],
+    navDark: true,
+  },
+  {
+    id: "solar-dark",
+    name: "Solar Dark",
+    description: "An obsidian night workspace with warm parchment navigation.",
+    swatches: ["#15171c", "#e6a838", "#f9f5ec"],
+    dark: true,
+    navDark: false,
+  },
 ];
 const isHex = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
 const themeVars = [

@@ -1,5 +1,16 @@
 # Implementation roadmap
 
+## Extended Mixed-Contrast Themes — 5 November 2026
+
+- Added four new mixed-contrast themes to the Theme picker in Settings:
+  - **Alpine Mint:** Deep evergreen navigation (`#12221b`) with a crisp, daylight mint workspace (`#f2f7f4`).
+  - **Sandstone & Slate:** Mineral slate navigation (`#1c2024`) beside a warm, sunlit sandstone workspace (`#f7f3ee`).
+  - **Nordic Frost:** Midnight fjord blue-black navigation (`#0e1722`) with a bright glacial arctic workspace (`#f0f4f8`).
+  - **Solar Dark:** Obsidian night workspace (`#15171c`) paired with warm parchment/ivory navigation (`#f9f5ec`).
+- Implemented full CSS token sets with WCAG AA compliance across text, backgrounds, and stages in `src/themes.css`.
+- Registered types in `src/types.ts`, server validation in `server/app.mjs`, and interactive theme preview cards in `src/components/ProfileSettings.tsx`.
+- Verified persistence across server restarts and custom color tint overrides in `tests/server.test.mjs`.
+
 ## Structured Fit Assessment Criteria — 4 November 2026
 
 - Introduced structured candidate fit criteria (`targetTitles`, `minSalary`, `salaryCurrency`, `salaryPeriod`, `targetSeniorities`, `targetSkills`, `workModes`) to define explicit parameters for opportunity evaluation alongside freeform criterion rules.
