@@ -17,6 +17,7 @@ import {
 } from "./calendar.mjs";
 import {
   opportunityFolderName,
+  opportunityFolderPath,
   opportunitySubdirectory,
   buildOpportunityDocumentPath,
   isOpportunityDocumentOrganized,
@@ -63,6 +64,7 @@ import {
   renameSync,
   unlinkSync,
   rmSync,
+  rmdirSync,
 } from "node:fs";
 import {
   resolve,
@@ -541,12 +543,27 @@ export function createApp(options = {}) {
         "INSERT INTO documents(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
       )
       .run(doc.id, JSON.stringify(doc));
+  const pruneEmptyParents = (dir, root) => {
+    let curr = resolve(dir);
+    const stop = resolve(root);
+    while (curr.startsWith(stop) && curr !== stop) {
+      try {
+        rmdirSync(curr);
+        curr = dirname(curr);
+      } catch {
+        break;
+      }
+    }
+  };
   const removeDocument = (doc) => {
     db.prepare("DELETE FROM documents WHERE id=?").run(doc.id);
     db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
     try {
       const target = documentPath(doc);
-      if (inside(filesDir, target)) rmSync(target, { force: true });
+      if (inside(filesDir, target)) {
+        rmSync(target, { force: true });
+        pruneEmptyParents(dirname(target), join(filesDir, settings().documentsSubdir));
+      }
     } catch {
       /* Missing or read-only prior storage root; metadata is already removed. */
     }
@@ -562,6 +579,7 @@ export function createApp(options = {}) {
     );
     const profile = candidateProfile || getCandidateProfile();
     const alignment = calculateAlignment(record, profile);
+    const outputFolder = `${s.documentsSubdir}/${opportunityFolderPath(record)}`;
     return {
       ...record,
       seniority,
@@ -571,6 +589,7 @@ export function createApp(options = {}) {
       matchedSkills: alignment.matchedSkills,
       missingSkills: alignment.missingSkills || [],
       alignmentBreakdown: alignment.breakdown,
+      outputFolder,
       documents: getDocuments()
         .filter((d) => d.opportunityId === record.id)
         .map(publicDocument),
@@ -827,6 +846,9 @@ export function createApp(options = {}) {
     const event = addEvent(record, body);
     record.stageEnteredAt = event.effectiveAt;
     record.currentStageEventId = event.id;
+    try {
+      folder(filesDir, join(s.documentsSubdir, opportunityFolderPath(record)));
+    } catch {}
     putRecord(record);
     if(!skipAutomation)queueMicrotask(()=>buddy.automate(record.id,{useLibrary:body.autoUseLibrary===true}));
     return fullRecord(record);
@@ -871,6 +893,12 @@ export function createApp(options = {}) {
         status,
         category: resolvedCategory,
       });
+      const checkTarget = safePath(filesDir, relativePath);
+      if (existsSync(checkTarget)) {
+        const ext = extname(relativePath);
+        const base = relativePath.slice(0, relativePath.length - ext.length);
+        relativePath = `${base}-${id.slice(0, 8)}${ext}`;
+      }
       folder(filesDir, dirname(relativePath));
     } else {
       const baseSubdir = settings().referenceSubdir;
@@ -1906,6 +1934,8 @@ export function createApp(options = {}) {
             requireRevision(body, record);
             const oldStage = record.stage;
             const oldOutcome = record.outcome;
+            const oldCompany = record.company;
+            const oldRole = record.role;
             for (const key of textFields)
               if (body[key] !== undefined)
                 record[key] = cleanText(
@@ -1982,6 +2012,42 @@ export function createApp(options = {}) {
                 record.nextAction = "";
                 record.nextActionDate = "";
               }
+            }
+            if (record.company !== oldCompany || record.role !== oldRole) {
+              const s = settings();
+              try {
+                folder(filesDir, join(s.documentsSubdir, opportunityFolderPath(record)));
+              } catch {}
+              try {
+                const oppDocs = getDocuments().filter((d) => d.opportunityId === record.id);
+                for (const doc of oppDocs) {
+                  let targetRelPath = buildOpportunityDocumentPath({
+                    documentsSubdir: s.documentsSubdir,
+                    opportunity: record,
+                    documentId: doc.id,
+                    name: doc.name,
+                    kind: doc.kind,
+                    status: doc.status,
+                    category: doc.category,
+                  });
+                  if (doc.relativePath === targetRelPath) continue;
+                  const source = documentPath(doc);
+                  if (!existsSync(source)) continue;
+                  let target = safePath(filesDir, targetRelPath);
+                  if (existsSync(target) && target !== source) {
+                    const ext = extname(targetRelPath);
+                    const base = targetRelPath.slice(0, targetRelPath.length - ext.length);
+                    targetRelPath = `${base}-${doc.id.slice(0, 8)}${ext}`;
+                    target = safePath(filesDir, targetRelPath);
+                  }
+                  folder(filesDir, dirname(targetRelPath));
+                  copyFileSync(source, target);
+                  unlinkSync(source);
+                  pruneEmptyParents(dirname(source), join(filesDir, s.documentsSubdir));
+                  doc.relativePath = targetRelPath;
+                  putDocument(doc);
+                }
+              } catch {}
             }
             return json(res, changed(record));
           }
@@ -2410,7 +2476,7 @@ export function createApp(options = {}) {
           const oppDocs = allDocs.filter((d) => d.opportunityId === opportunity.id);
           const planned = [];
           for (const doc of oppDocs) {
-            const targetRelPath = buildOpportunityDocumentPath({
+            let targetRelPath = buildOpportunityDocumentPath({
               documentsSubdir: settings().documentsSubdir,
               opportunity,
               documentId: doc.id,
@@ -2426,6 +2492,16 @@ export function createApp(options = {}) {
             } catch {
               fail(404, `Document file for ${doc.name} is unavailable.`);
             }
+            const checkTarget = safePath(filesDir, targetRelPath);
+            if (
+              resolve(source) !== resolve(checkTarget) &&
+              (existsSync(checkTarget) || planned.some((p) => p.targetRelPath === targetRelPath))
+            ) {
+              const ext = extname(targetRelPath);
+              const base = targetRelPath.slice(0, targetRelPath.length - ext.length);
+              targetRelPath = `${base}-${doc.id.slice(0, 8)}${ext}`;
+            }
+            if (doc.relativePath === targetRelPath) continue;
             planned.push({
               doc,
               source,
@@ -2500,6 +2576,7 @@ export function createApp(options = {}) {
               if (createHash("sha256").update(current).digest("hex") === item.sourceHash) {
                 unlinkSync(item.source);
                 removed++;
+                pruneEmptyParents(dirname(item.source), join(filesDir, settings().documentsSubdir));
               }
             } catch {}
           }

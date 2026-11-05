@@ -18,6 +18,19 @@ export function sanitizeFolderToken(text, fallback = "unspecified", maxLength = 
 }
 
 /**
+ * Build 2 subdirectories for an opportunity:
+ * `Company > Role` -> `${company}/${role}`
+ */
+export function opportunityFolderPath(record) {
+  if (!record || typeof record !== "object") {
+    throw new Error("Opportunity record required to generate folder path.");
+  }
+  const company = sanitizeFolderToken(record.company, "company");
+  const role = sanitizeFolderToken(record.role, "role");
+  return `${company}/${role}`;
+}
+
+/**
  * Build the stable human-readable folder name for an opportunity:
  * `<stable-id>-<company>-<role>`
  */
@@ -26,10 +39,9 @@ export function opportunityFolderName(record) {
     throw new Error("Opportunity record required to generate folder name.");
   }
   const id = record.id;
-  if (!id) throw new Error("Opportunity record must have an id.");
   const company = sanitizeFolderToken(record.company, "company");
   const role = sanitizeFolderToken(record.role, "role");
-  return `${id}-${company}-${role}`;
+  return id ? `${id}-${company}-${role}` : `${company}-${role}`;
 }
 
 /**
@@ -73,8 +85,8 @@ export function opportunitySubdirectory({ kind, status, category, name } = {}) {
 }
 
 /**
- * Build managed relative path for an opportunity document:
- * `${documentsSubdir}/${folderName}/${subfolder}/${id}${ext}`
+ * Build managed relative path for an opportunity document in 2 subdirectories:
+ * `${documentsSubdir}/${company}/${role}/${fileName}`
  */
 export function buildOpportunityDocumentPath({
   documentsSubdir = "opportunities",
@@ -85,30 +97,25 @@ export function buildOpportunityDocumentPath({
   status,
   category,
 }) {
-  const folderName = opportunity ? opportunityFolderName(opportunity) : "unassigned";
-  const subfolder = opportunitySubdirectory({ kind, status, category, name });
+  const folderPath = opportunity ? opportunityFolderPath(opportunity) : "unassigned";
   const ext = (name ? extname(name) : "").replace(/[^.a-zA-Z0-9]/g, "");
-  return `${documentsSubdir}/${folderName}/${subfolder}/${documentId}${ext}`;
+  const baseName = name
+    ? name.replace(/[/\\]/g, "-").replace(extname(name), "").trim()
+    : "";
+  const fileName = baseName ? `${baseName}${ext}` : `${documentId}${ext}`;
+  return `${documentsSubdir}/${folderPath}/${fileName}`;
 }
 
 /**
- * Check if a document is already in the expected managed stage subfolder and folder path.
+ * Check if a document is already in the expected Company > Role folder path.
  */
 export function isOpportunityDocumentOrganized({
   documentsSubdir = "opportunities",
   opportunity,
   document,
 }) {
-  if (!document || !document.opportunityId) return true;
-  const targetPath = buildOpportunityDocumentPath({
-    documentsSubdir,
-    opportunity,
-    documentId: document.id,
-    name: document.name,
-    kind: document.kind,
-    status: document.status,
-    category: document.category,
-  });
-  return document.relativePath === targetPath;
+  if (!document || !document.opportunityId || !opportunity) return true;
+  const expectedPrefix = `${documentsSubdir}/${opportunityFolderPath(opportunity)}/`;
+  return Boolean(document.relativePath && document.relativePath.startsWith(expectedPrefix));
 }
 

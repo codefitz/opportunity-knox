@@ -4006,7 +4006,7 @@ test('calendar ICS export supports authenticated global, opportunity, and single
  assert.ok(actCalRes.data.includes('END:VCALENDAR'));
 });
 
-test('managed folders: saves opportunity documents into human-readable stage subfolders and supports organization migration', async t => {
+test('managed folders: saves opportunity documents into 2 subdirectories Company > Role and supports organization migration', async t => {
  const f = await fixture(t);
  await f.setup();
  const op = (await f.request('/api/opportunities', {
@@ -4020,6 +4020,8 @@ test('managed folders: saves opportunity documents into human-readable stage sub
  })).data;
  assert.equal(op.company, 'Acme Corp');
  assert.equal(op.role, 'Senior Platform Engineer');
+ assert.equal(op.outputFolder, 'opportunities/acme-corp/senior-platform-engineer');
+ assert.ok(existsSync(join(f.options.filesDir, 'opportunities/acme-corp/senior-platform-engineer')));
 
  // 1. Upload JD document for this opportunity
  const jdRes = await f.request('/api/documents', {
@@ -4069,9 +4071,9 @@ test('managed folders: saves opportunity documents into human-readable stage sub
  const storedCv = allDocs.find(d => d.id === cvDoc.id);
  const storedSub = allDocs.find(d => d.id === submittedDoc.id);
 
- assert.ok(storedJd.relativePath.includes('acme-corp-senior-platform-engineer/job-description/'));
- assert.ok(storedCv.relativePath.includes('acme-corp-senior-platform-engineer/drafts/'));
- assert.ok(storedSub.relativePath.includes('acme-corp-senior-platform-engineer/submitted/'));
+ assert.equal(storedJd.relativePath, 'opportunities/acme-corp/senior-platform-engineer/Job Spec.txt');
+ assert.equal(storedCv.relativePath, 'opportunities/acme-corp/senior-platform-engineer/Platform CV.pdf');
+ assert.equal(storedSub.relativePath, 'opportunities/acme-corp/senior-platform-engineer/Submitted Application.pdf');
 
  // Content download works transparently
  const jdContent = await f.request('/api/documents/' + jdDoc.id + '/content', { binary: true });
@@ -4113,12 +4115,33 @@ test('managed folders: saves opportunity documents into human-readable stage sub
 
  // Check new location of legacy document
  const updatedLegacyRow = JSON.parse(f.app.db.prepare('SELECT data FROM documents WHERE id=?').get(legacyId).data);
- assert.ok(updatedLegacyRow.relativePath.includes('acme-corp-senior-platform-engineer/interviews/'));
+ assert.equal(updatedLegacyRow.relativePath, 'opportunities/acme-corp/senior-platform-engineer/Interview Prep.txt');
  assert.ok(!existsSync(legacyFullPath), 'Old legacy file was cleaned up after move');
 
  // Verify content resolves from new location
  const legacyPost = await f.request('/api/documents/' + legacyId + '/content', { binary: true });
  assert.equal(legacyPost.data.toString(), 'Legacy interview notes');
+
+ // 6. Test updating company and role moves documents and creates new Company > Role folder
+ const renameRes = await f.request('/api/opportunities/' + op.id, {
+   method: 'PATCH',
+   body: {
+     revision: op.revision,
+     company: 'Beta Corp',
+     role: 'Staff Platform Engineer',
+   },
+ });
+ assert.equal(renameRes.status, 200);
+ assert.equal(renameRes.data.company, 'Beta Corp');
+ assert.equal(renameRes.data.role, 'Staff Platform Engineer');
+ assert.equal(renameRes.data.outputFolder, 'opportunities/beta-corp/staff-platform-engineer');
+ assert.ok(existsSync(join(f.options.filesDir, 'opportunities/beta-corp/staff-platform-engineer')));
+
+ const renamedDocs = f.app.db.prepare("SELECT data FROM documents WHERE json_extract(data, '$.opportunityId') = ?").all(op.id).map(r => JSON.parse(r.data));
+ for (const d of renamedDocs) {
+   assert.ok(d.relativePath.startsWith('opportunities/beta-corp/staff-platform-engineer/'));
+   assert.ok(existsSync(join(f.options.filesDir, d.relativePath)));
+ }
 });
 
 test("update check: /api/board includes updateStatus and /api/updates/check checks status", async (t) => {

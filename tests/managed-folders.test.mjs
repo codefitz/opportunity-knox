@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   sanitizeFolderToken,
+  opportunityFolderPath,
   opportunityFolderName,
   opportunitySubdirectory,
   buildOpportunityDocumentPath,
+  isOpportunityDocumentOrganized,
 } from "../server/managed-folders.mjs";
 
 test("sanitizeFolderToken normalizes diacritics, symbols, spaces and bounds length", () => {
@@ -103,7 +105,23 @@ test("opportunitySubdirectory categorizes documents according to managed stage f
   );
 });
 
-test("buildOpportunityDocumentPath generates clean relative path", () => {
+test("opportunityFolderPath generates 2 subdirectories Company > Role", () => {
+  const opp = {
+    id: "abc-456",
+    company: "Google UK Ltd",
+    role: "Senior AI Engineer",
+  };
+  assert.equal(opportunityFolderPath(opp), "google-uk-ltd/senior-ai-engineer");
+
+  const oppBlank = {
+    id: "abc-789",
+    company: "",
+    role: "",
+  };
+  assert.equal(opportunityFolderPath(oppBlank), "company/role");
+});
+
+test("buildOpportunityDocumentPath generates clean relative path in 2 subdirectories Company > Role", () => {
   const path = buildOpportunityDocumentPath({
     documentsSubdir: "opportunities",
     opportunity: {
@@ -120,6 +138,40 @@ test("buildOpportunityDocumentPath generates clean relative path", () => {
 
   assert.equal(
     path,
-    "opportunities/abc-456-acme-backend-dev/drafts/doc-789.pdf"
+    "opportunities/acme/backend-dev/My Tailored CV.pdf"
+  );
+
+  const fallbackPath = buildOpportunityDocumentPath({
+    documentsSubdir: "opportunities",
+    opportunity: {
+      id: "abc-456",
+      company: "Acme",
+      role: "Backend Dev",
+    },
+    documentId: "doc-789",
+    name: "",
+  });
+
+  assert.equal(
+    fallbackPath,
+    "opportunities/acme/backend-dev/doc-789"
+  );
+
+  assert.equal(
+    isOpportunityDocumentOrganized({
+      documentsSubdir: "opportunities",
+      opportunity: { id: "abc-456", company: "Acme", role: "Backend Dev" },
+      document: { opportunityId: "abc-456", relativePath: path },
+    }),
+    true
+  );
+
+  assert.equal(
+    isOpportunityDocumentOrganized({
+      documentsSubdir: "opportunities",
+      opportunity: { id: "abc-456", company: "Acme", role: "Backend Dev" },
+      document: { opportunityId: "abc-456", relativePath: "opportunities/legacy/old.pdf" },
+    }),
+    false
   );
 });

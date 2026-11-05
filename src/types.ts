@@ -143,6 +143,7 @@ export type Opportunity = {
     titleSeniority?: number;
     constraints?: number;
   };
+  outputFolder?: string;
   description: string;
   priority: "normal" | "high" | "low";
   nextAction: string;

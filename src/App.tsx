@@ -2804,6 +2804,15 @@ function OpportunityDetail({
           <Clock3 size={13} />
           Added {formatDate(o.createdAt, timezone)}
         </span>
+        {o.outputFolder && (
+          <span
+            title={`Dedicated folder: ${o.outputFolder}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+          >
+            <Folder size={13} />
+            {o.outputFolder}
+          </span>
+        )}
         {o.url && (
           <a
             className="button secondary small"
@@ -4323,10 +4332,10 @@ function Documents({
       onChanged();
       if (res.organizedCount > 0) {
         onNotice?.(
-          `Organized ${res.organizedCount} document${res.organizedCount === 1 ? "" : "s"} into stage subfolders.`,
+          `Organized ${res.organizedCount} document${res.organizedCount === 1 ? "" : "s"} into Company > Role folder.`,
         );
       } else {
-        onNotice?.("All opportunity documents are already in stage subfolders.");
+        onNotice?.("All opportunity documents are already in the Company > Role folder.");
       }
     } catch (e) {
       onError(e);
@@ -4522,10 +4531,10 @@ function Documents({
               className="button secondary small"
               disabled={busy || organizing}
               onClick={() => void organizeOpportunityFolders()}
-              title="Ensure all documents for this opportunity are structured into stage subfolders (job-description, drafts, approved, submitted, interviews, correspondence)."
+              title="Ensure all documents for this opportunity are structured into the dedicated Company > Role folder."
             >
               <FolderInput size={15} />
-              {organizing ? "Organizing…" : "Organize stage folders"}
+              {organizing ? "Organizing…" : "Organize into Company > Role"}
             </button>
           )}
           <button

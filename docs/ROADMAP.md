@@ -1,5 +1,26 @@
 # Implementation roadmap
 
+## Dedicated Opportunity Output Folders (Company > Role) — 5 November 2026
+
+- Replaced stage subfolder fragmentation (`job-description/`, `drafts/`, `submitted/`, etc.) with a clean, dedicated 2-level directory structure on disk: `<documentsSubdir>/<Company>/<Role>`:
+  - **Deterministic 2-Level Folder Path Generation (`server/managed-folders.mjs`):**
+    - Added `opportunityFolderPath(record)` generating `${sanitizeFolderToken(company)}/${sanitizeFolderToken(role)}` with robust fallback to `company/role` when blank.
+    - Updated `buildOpportunityDocumentPath` to store all opportunity files (job specs, tailored CVs, cover letters, application packs, notes) directly in `<documentsSubdir>/<Company>/<Role>/<filename>` with sanitized human-readable names.
+    - Updated `isOpportunityDocumentOrganized` to check membership within the 2-level opportunity directory.
+  - **Immediate Folder Creation & Realtime Move on Employer/Role Edits (`server/app.mjs`):**
+    - `POST /api/opportunities`: Immediately provisions `<documentsSubdir>/<Company>/<Role>` on disk upon opportunity creation (manual or job intake).
+    - `PATCH /api/opportunities/:id`: Detects company or role modifications, immediately creates the new `<Company>/<Role>` directory, atomically copies and migrates existing documents to the new location, updates document records in SQLite, unlinks old copies, and prunes empty source parent directories.
+    - `POST /api/opportunities/:id/organize-folders`: Migrates legacy single-folder or stage-subfolder documents into the `<Company>/<Role>` folder, handling filename collisions gracefully (appending 8-character ID suffix if needed) and pruning empty old directories.
+    - Exposed `outputFolder` in `fullRecord(opportunity)` (`<documentsSubdir>/<Company>/<Role>`).
+  - **Frontend Integration (`src/App.tsx`, `src/types.ts`):**
+    - Added `outputFolder` property to `Opportunity` type definition.
+    - Added visual folder badge with `Folder` icon and path tooltip in `OpportunityDetail` header.
+    - Updated Documents section button from "Organize stage folders" to "Organize into Company > Role" with clear user-facing notice messages.
+  - **Verification:**
+    - Updated `tests/managed-folders.test.mjs` with tests for `opportunityFolderPath` and `buildOpportunityDocumentPath`.
+    - Updated `tests/server.test.mjs` validating 2-subdirectory document paths, instant folder provisioning, organize-folders migration, and PATCH rename migration.
+    - Verified full build, Node test suite (353 tests), and Python launcher tests (46 tests).
+
 ## Conventional ML Fit Assessment Engine — 5 November 2026
 
 - Implemented a local-first, deterministic **Conventional Machine Learning Fit Assessment Engine** (`server/ml-fit-engine.mjs`) to replace opaque 0% classifications and eliminate mandatory LLM/cloud token dependency for opportunity fit evaluations:
