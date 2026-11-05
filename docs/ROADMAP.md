@@ -1,5 +1,33 @@
 # Implementation roadmap
 
+## Conventional ML Fit Assessment Engine — 5 November 2026
+
+- Implemented a local-first, deterministic **Conventional Machine Learning Fit Assessment Engine** (`server/ml-fit-engine.mjs`) to replace opaque 0% classifications and eliminate mandatory LLM/cloud token dependency for opportunity fit evaluations:
+  - **TF-IDF & Sublinear Cosine Similarity:**
+    - Tokenizes job specifications and candidate Career Library documents (`document_text`, CVs, cover letters) with unigrams and phrase bigrams, filtering natural stop words and preserving technical symbols (`c++`, `.net`, `c#`, `node.js`).
+    - Computes L2-normalized TF-IDF vectors with sublinear scaling ($1 + \ln(f)$) and smoothed inverse document frequency.
+    - Evaluates sublinear cosine similarity with square-root scaling, mapping sparse high-dimensional text relevance accurately across the 0–100 scale.
+  - **Technical Skill Extraction & Canonical Matching:**
+    - Built comprehensive skill taxonomy (`COMMON_SKILLS_DICTIONARY`) and canonicalization map (`SKILL_CANONICAL_MAP`) covering modern languages, frontend, backend, cloud, databases, and architectural patterns.
+    - Automatically computes `matchedSkills` and `missingSkills` by comparing job specifications against target skills and candidate career library texts.
+  - **Seniority & Constraint Distance Modeling:**
+    - Models seniority rank distance using `SENIORITY_ORDER` (`entry` to `executive`), penalizing rank mismatches gracefully.
+    - Evaluates work arrangement alignment (`remote`, `hybrid`, `onsite`) and compensation constraints.
+  - **Unified Candidate Profile & Score Aggregation:**
+    - Integrated candidate profile resolution (`getCandidateProfile` in `server/app.mjs`) uniting `settings` target titles/skills, structured fit criteria (`fitCriteria.structured`), and SQLite `document_text` rows from the Career Library.
+    - Dynamically weights TF-IDF document similarity, skill coverage, title alignment, seniority distance, and work mode constraints.
+  - **Offline Automated Fit Assessment:**
+    - Extended `POST /api/buddy/decisions/:id` to execute the Conventional ML engine locally when `generalFit: true` (via `engine: "ml"` or when external AI is disabled/offline).
+    - Automatically advances opportunity to `"review"` stage, adds stage event, persists structured strengths and gaps, and saves assessment records in SQLite.
+  - **Frontend UI & Missing Skills Visibility:**
+    - Updated `Opportunity` type to include `missingSkills` and `alignmentBreakdown`.
+    - Added missing skills badges (`✗ Skill`) alongside matched skills (`✓ Skill`) in opportunity detail view (`src/App.tsx`).
+    - Enhanced tooltips on Kanban card alignment pills and Table alignment badges to surface both matched and missing competencies.
+  - **Verification:**
+    - Added comprehensive unit and integration test suite `tests/ml-fit-engine.test.mjs` (5 tests passing).
+    - Verified 100% pass across all 352 Node tests and 46 Python launcher tests via `npm run check`.
+
+
 ## Bulk Actions & Multi-Select Operations — 5 November 2026
 
 - Delivered comprehensive multi-select and bulk action workflows across Table and Kanban views:

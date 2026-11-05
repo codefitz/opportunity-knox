@@ -210,6 +210,7 @@ export default function BulkActionsBar({
             revision: opp.revision,
             requestId: reqId,
             generalFit: true,
+            engine: "ml",
             documentIds: [],
           }),
         );

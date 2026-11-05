@@ -3,12 +3,30 @@
  */
 
 import { buildKeywordRegex } from "./exclusions.mjs";
+import {
+  evaluateOpportunityFit,
+  extractSkills,
+  extractTermFrequencies,
+  buildTfIdfVector,
+  cosineSimilarity,
+  COMMON_SKILLS_DICTIONARY,
+} from "./ml-fit-engine.mjs";
+
+export {
+  evaluateOpportunityFit,
+  extractSkills,
+  extractTermFrequencies,
+  buildTfIdfVector,
+  cosineSimilarity,
+  COMMON_SKILLS_DICTIONARY,
+};
 
 export const ALIGNMENT_TIER_LABELS = {
   strong: "Strong match",
   moderate: "Moderate match",
   reach: "Reach / Partial",
   mismatch: "Low alignment",
+  unscored: "Awaiting profile data",
 };
 
 function normalizeWords(text) {
@@ -84,40 +102,28 @@ export function computeSkillsMatch(text, targetSkills = []) {
 
 export function calculateAlignment(
   opportunity,
-  targetTitles = [],
+  targetTitlesOrProfile = [],
   targetSkills = [],
+  extraOptions = {},
 ) {
-  const role = opportunity.role || "";
-  const combinedText = [
-    opportunity.role || "",
-    opportunity.description || "",
-    ...(opportunity.tags || []),
-  ].join(" \n ");
+  // Support passing candidate fit profile object or discrete arguments
+  const profile =
+    typeof targetTitlesOrProfile === "object" && !Array.isArray(targetTitlesOrProfile)
+      ? targetTitlesOrProfile
+      : {
+          targetTitles: Array.isArray(targetTitlesOrProfile) ? targetTitlesOrProfile : [],
+          targetSkills: Array.isArray(targetSkills) ? targetSkills : [],
+          ...extraOptions,
+        };
 
-  const hasTargets = targetTitles.length > 0 || targetSkills.length > 0;
+  const hasTargets =
+    (profile.targetTitles && profile.targetTitles.length > 0) ||
+    (profile.targetSkills && profile.targetSkills.length > 0) ||
+    (profile.careerTexts && profile.careerTexts.length > 0);
+
   if (!hasTargets) {
-    return { score: 0, tier: "mismatch", matchedSkills: [] };
+    return { score: 0, tier: "mismatch", matchedSkills: [], missingSkills: [] };
   }
 
-  const titleScore = targetTitles.length > 0 ? computeTitleSimilarity(role, targetTitles) : 50;
-  const { score: skillsScore, matchedSkills } =
-    targetSkills.length > 0 ? computeSkillsMatch(combinedText, targetSkills) : { score: 50, matchedSkills: [] };
-
-  const finalScore =
-    targetTitles.length && targetSkills.length
-      ? Math.round(titleScore * 0.5 + skillsScore * 0.5)
-      : targetTitles.length
-        ? titleScore
-        : skillsScore;
-
-  let tier = "mismatch";
-  if (finalScore >= 75) tier = "strong";
-  else if (finalScore >= 45) tier = "moderate";
-  else if (finalScore >= 25) tier = "reach";
-
-  return {
-    score: finalScore,
-    tier,
-    matchedSkills,
-  };
+  return evaluateOpportunityFit(opportunity, profile);
 }

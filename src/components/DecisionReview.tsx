@@ -596,7 +596,7 @@ export default function DecisionReview({ opportunity, onError, onAssessed, onBus
     setRequestId(id);
     try {
       const result = await api<{reviewDraft: FitDraft; opportunity: Opportunity}>("/buddy/decisions/" + opportunity.id, json({
-        revision: opportunity.revision, requestId: id, generalFit: true, documentIds: [],
+        revision: opportunity.revision, requestId: id, generalFit: true, engine: "ml", documentIds: [],
       }));
       onAssessed(result.reviewDraft, result.opportunity);
       setNotice("Assessment saved. Active opportunities move to Fit review.");
@@ -612,7 +612,7 @@ export default function DecisionReview({ opportunity, onError, onAssessed, onBus
     <button type="button" className="button primary" disabled={busy || disabled} onClick={() => void assess()}>
       {busy ? "Assessing…" : "Run Automated Fit Assessment"}
     </button>
-    <p>AI selects relevant career evidence, saves strengths, gaps and the review date, and moves active opportunities to Fit review. You can edit the saved result.</p>
+    <p>Conventional ML analyzes your career library, extracted skills, target criteria and seniority, saves strengths, gaps and review date, and advances active opportunities to Fit review. You can edit the saved result.</p>
     <AIRequestProgress id={requestId} scope={"decision:" + opportunity.id} onError={onError}/>
     {error && <p role="alert" className="alert" style={{ marginTop: 10 }}>{error} Your review fields have been kept. You can retry the assessment.</p>}
     {notice && <p role="status" className="saved" style={{ marginTop: 10, display: "block" }}>{notice}</p>}

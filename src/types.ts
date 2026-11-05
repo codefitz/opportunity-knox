@@ -107,7 +107,12 @@ export type SeniorityLevel =
   | "director"
   | "executive";
 
-export type AlignmentTier = "strong" | "moderate" | "reach" | "mismatch";
+export type AlignmentTier =
+  | "strong"
+  | "moderate"
+  | "reach"
+  | "mismatch"
+  | "unscored";
 
 export type Opportunity = {
   applicationRoute?: string;
@@ -131,6 +136,13 @@ export type Opportunity = {
   alignmentScore?: number;
   alignmentTier?: AlignmentTier;
   matchedSkills?: string[];
+  missingSkills?: string[];
+  alignmentBreakdown?: {
+    tfidf?: number;
+    skills?: number;
+    titleSeniority?: number;
+    constraints?: number;
+  };
   description: string;
   priority: "normal" | "high" | "low";
   nextAction: string;

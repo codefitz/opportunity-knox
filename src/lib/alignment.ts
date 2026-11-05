@@ -5,13 +5,19 @@
 
 import { buildKeywordRegex } from "./exclusions.ts";
 
-export type AlignmentTier = "strong" | "moderate" | "reach" | "mismatch";
+export type AlignmentTier =
+  | "strong"
+  | "moderate"
+  | "reach"
+  | "mismatch"
+  | "unscored";
 
 export const ALIGNMENT_TIER_LABELS: Record<AlignmentTier, string> = {
   strong: "Strong match",
   moderate: "Moderate match",
   reach: "Reach / Partial",
   mismatch: "Low alignment",
+  unscored: "Awaiting profile data",
 };
 
 function normalizeWords(text: string): Set<string> {
@@ -123,7 +129,7 @@ export function calculateAlignment(
         : skillsScore;
 
   let tier: AlignmentTier = "mismatch";
-  if (finalScore >= 75) tier = "strong";
+  if (finalScore >= 70) tier = "strong";
   else if (finalScore >= 45) tier = "moderate";
   else if (finalScore >= 25) tier = "reach";
 

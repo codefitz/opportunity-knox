@@ -1,6 +1,7 @@
 import {requireAIStage,workflowSettings} from "./ai-workflow.mjs";
 import { statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { evaluateOpportunityFit } from "./ml-fit-engine.mjs";
 import {
   defaultBuddy,
   publicBuddy,
@@ -226,10 +227,11 @@ export function createDecisionReview(ctx) {
   const stale = (a, opportunity) =>
     a.opportunityRevision !== opportunity.revision ||
     (!a.generalFit && a.criteria.revision !== criteria().revision) ||
-    a.modelRevision !==
-      (a.modelSource === "careerBuddy"
-        ? (getConfig("careerBuddy") || defaultBuddy()).revision
-        : config().revision) ||
+    (a.provider !== "conventional-ml" &&
+      a.modelRevision !==
+        (a.modelSource === "careerBuddy"
+          ? (getConfig("careerBuddy") || defaultBuddy()).revision
+          : config().revision)) ||
     JSON.stringify(a.sourceSignatures) !==
       JSON.stringify(sourceSignatures(Object.keys(a.sourceSignatures || {})));
 
@@ -332,6 +334,111 @@ export function createDecisionReview(ctx) {
             {id:"gaps",description:"Candidate gaps, concerns and missing evidence against this role’s requirements.",priority:"preferred"},
           ],
         } : criteria();
+
+      const isMlEngine =
+        body.generalFit === true &&
+        (!c.enabled || body.engine === "ml" || body.useML === true);
+
+      if (isMlEngine) {
+        if (body.revision !== opportunity.revision)
+          throw buddyError(
+            409,
+            "The opportunity changed. Reload before assessing.",
+          );
+
+        const candidateProfile = ctx.getCandidateProfile
+          ? ctx.getCandidateProfile()
+          : {
+              targetTitles: criteria().structured?.targetTitles || [],
+              targetSkills: criteria().structured?.targetSkills || [],
+              targetSeniorities: criteria().structured?.targetSeniorities || [],
+              workModes: criteria().structured?.workModes || [],
+              careerTexts: [],
+            };
+
+        const mlResult = evaluateOpportunityFit(opportunity, candidateProfile);
+        const strengthsText = mlResult.strengths.join("\n");
+        const gapsText = mlResult.gaps.join("\n");
+        const effectiveAt = new Date().toISOString();
+
+        let savedOpportunity;
+        db.exec("BEGIN");
+        try {
+          savedOpportunity = ctx.saveFitReview(opportunity.id, {
+            strengths: strengthsText,
+            gaps: gapsText,
+            effectiveAt,
+          });
+          const assessment = {
+            id: randomUUID(),
+            opportunityId: opportunity.id,
+            opportunityRevision: savedOpportunity.revision,
+            sourceSignatures: {},
+            criteria: profile,
+            results: [
+              {
+                id: "strengths",
+                status: "met",
+                reason: strengthsText,
+                sourceIds: [opportunity.id],
+                questions: [],
+              },
+              {
+                id: "gaps",
+                status: mlResult.missingSkills?.length > 0 ? "unmet" : "met",
+                reason: gapsText,
+                sourceIds: [opportunity.id],
+                questions: [],
+              },
+            ],
+            generalFit: true,
+            engine: "ml",
+            modelRevision: 1,
+            modelSource: "conventionalML",
+            provider: "conventional-ml",
+            model: "ml-fit-engine-v1",
+            createdAt: effectiveAt,
+            sources: [
+              {
+                id: opportunity.id,
+                name: opportunity.company + " · " + opportunity.role,
+              },
+            ],
+            retrieval: {
+              mode: "ml-composite",
+              reason:
+                "Evaluated using TF-IDF cosine similarity, skill taxonomy, seniority rank, and constraints",
+              omittedChunks: 0,
+            },
+            breakdown: mlResult.breakdown,
+            matchedSkills: mlResult.matchedSkills,
+            missingSkills: mlResult.missingSkills,
+          };
+          db.prepare("INSERT INTO decision_assessments VALUES (?,?)").run(
+            assessment.id,
+            JSON.stringify(assessment),
+          );
+          db.exec("COMMIT");
+
+          json(res, {
+            opportunity: savedOpportunity,
+            reviewDraft: {
+              strengths: strengthsText,
+              gaps: gapsText,
+              effectiveAt,
+            },
+            assessment: {
+              ...assessment,
+              stale: false,
+            },
+          });
+          return true;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }
+
       if (!c.enabled)
         throw buddyError(400, "Enable Career Buddy or the decision model in Settings first.");
       assertConfigured(c);

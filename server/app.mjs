@@ -551,7 +551,7 @@ export function createApp(options = {}) {
       /* Missing or read-only prior storage root; metadata is already removed. */
     }
   };
-  const fullRecord = (record) => {
+  const fullRecord = (record, candidateProfile = null) => {
     const s = settings();
     const seniority =
       record.seniority ||
@@ -560,11 +560,8 @@ export function createApp(options = {}) {
       record,
       s.exclusionKeywords || [],
     );
-    const alignment = calculateAlignment(
-      record,
-      s.targetTitles || [],
-      s.targetSkills || [],
-    );
+    const profile = candidateProfile || getCandidateProfile();
+    const alignment = calculateAlignment(record, profile);
     return {
       ...record,
       seniority,
@@ -572,6 +569,8 @@ export function createApp(options = {}) {
       alignmentScore: alignment.score,
       alignmentTier: alignment.tier,
       matchedSkills: alignment.matchedSkills,
+      missingSkills: alignment.missingSkills || [],
+      alignmentBreakdown: alignment.breakdown,
       documents: getDocuments()
         .filter((d) => d.opportunityId === record.id)
         .map(publicDocument),
@@ -617,6 +616,70 @@ export function createApp(options = {}) {
       pendingHostPath,
       hostDocumentsPath: hostFilesDir,
       storagePath: filesDir,
+    };
+  };
+  const getCandidateProfile = () => {
+    const s = settings();
+    const crit = getConfig("fitCriteria") || {};
+    const structured = crit.structured || {};
+
+    const targetTitles = [
+      ...(s.targetTitles || []),
+      ...(structured.targetTitles || []),
+    ].filter((t, i, arr) => t && arr.indexOf(t) === i);
+
+    const targetSkills = [
+      ...(s.targetSkills || []),
+      ...(structured.targetSkills || []),
+    ].filter((sk, i, arr) => sk && arr.indexOf(sk) === i);
+
+    const targetSeniorities = structured.targetSeniorities || [];
+    const workModes = structured.workModes || [];
+
+    const careerTexts = [];
+    try {
+      const rows = db
+        .prepare(
+          `SELECT dt.data
+           FROM document_text dt
+           JOIN documents d ON dt.id = d.id
+           WHERE json_extract(d.data, '$.opportunityId') IS NULL`,
+        )
+        .all();
+      for (const r of rows) {
+        try {
+          const parsed = JSON.parse(r.data);
+          if (
+            parsed.text &&
+            typeof parsed.text === "string" &&
+            parsed.text.trim()
+          ) {
+            careerTexts.push(parsed.text);
+          }
+        } catch {}
+      }
+    } catch {}
+
+    try {
+      const docs = getDocuments().filter((d) => !d.opportunityId);
+      for (const doc of docs) {
+        if (
+          doc.generation?.content &&
+          typeof doc.generation.content === "string"
+        ) {
+          if (!careerTexts.includes(doc.generation.content)) {
+            careerTexts.push(doc.generation.content);
+          }
+        }
+      }
+    } catch {}
+
+    return {
+      targetTitles,
+      targetSkills,
+      targetSeniorities,
+      workModes,
+      careerTexts,
     };
   };
   for (const key of ["documentsSubdir", "referenceSubdir", "backupSubdir"])
@@ -1082,6 +1145,7 @@ export function createApp(options = {}) {
     getRecord,
     putRecord,
     fullRecord,
+    getCandidateProfile,
     getDocuments: () => [...getDocuments(), ...(obsidian?.sourceDocuments() || []),...directories.sourceDocuments()],
     documentPath: (doc) => doc.readOnlyDirectorySource ? directories.sourcePath(doc) : doc.readOnlyVaultSource ? obsidian.sourcePath(doc) : documentPath(doc),
     settings,
@@ -1133,6 +1197,7 @@ export function createApp(options = {}) {
     putRecord,
     listRecords,
     fullRecord,
+    getCandidateProfile,
     getDocuments: () => [
       ...getDocuments(),
       ...(obsidian?.sourceDocuments() || []),
@@ -1502,8 +1567,9 @@ export function createApp(options = {}) {
         }
         if (path === "/api/board" && method === "GET") {
           const documents = getDocuments();
+          const profile = getCandidateProfile();
           return json(res, {
-            opportunities: listRecords().map(fullRecord),
+            opportunities: listRecords().map((r) => fullRecord(r, profile)),
             settings: settings(),
             stages,
             profile: publicProfile(),

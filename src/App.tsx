@@ -963,9 +963,16 @@ export default function App() {
                 {o.alignmentScore != null ? (
                   <span
                     title={
-                      o.matchedSkills?.length
-                        ? `Matched skills: ${o.matchedSkills.join(", ")}`
-                        : undefined
+                      [
+                        o.matchedSkills?.length
+                          ? `Matched skills: ${o.matchedSkills.join(", ")}`
+                          : null,
+                        o.missingSkills?.length
+                          ? `Missing skills: ${o.missingSkills.join(", ")}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || undefined
                     }
                   >
                     <Badge
@@ -2227,9 +2234,16 @@ function OpportunityCard({
             <span
               className={`card-alignment-pill alignment-${o.alignmentTier || "mismatch"}`}
               title={
-                o.matchedSkills?.length
-                  ? `Matched skills: ${o.matchedSkills.join(", ")}`
-                  : undefined
+                [
+                  o.matchedSkills?.length
+                    ? `Matched: ${o.matchedSkills.join(", ")}`
+                    : null,
+                  o.missingSkills?.length
+                    ? `Missing: ${o.missingSkills.join(", ")}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
               }
             >
               {o.alignmentScore}% match
@@ -3071,8 +3085,8 @@ function Overview({
         <div className="alignment-overview-card" style={{ marginBottom: 16 }}>
           <div className="alignment-overview-header">
             <div>
-              <strong>Target Profile Alignment</strong>
-              <p>Calculated against your target role titles and skills in Settings.</p>
+              <strong>Candidate Profile Alignment</strong>
+              <p>Calculated using conventional ML over your career library documents, target titles, skills, and seniority.</p>
             </div>
             {o.alignmentScore != null && (
               <Badge
@@ -3097,6 +3111,20 @@ function Overview({
                 {o.matchedSkills.map((sk) => (
                   <span key={sk} className="matched-skill-tag">
                     ✓ {sk}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {o.missingSkills && o.missingSkills.length > 0 && (
+            <div className="missing-skills-section" style={{ marginTop: 8 }}>
+              <span className="missing-skills-title" style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                Unverified skills in job specification:
+              </span>
+              <div className="tags" style={{ marginTop: 4 }}>
+                {o.missingSkills.map((sk) => (
+                  <span key={sk} className="tag tag-missing-skill" style={{ opacity: 0.85 }}>
+                    ✗ {sk}
                   </span>
                 ))}
               </div>

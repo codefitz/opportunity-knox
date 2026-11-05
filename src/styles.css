@@ -6238,6 +6238,12 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   border: 1px solid var(--line);
 }
 
+.card-alignment-pill.alignment-unscored {
+  background: var(--panel-soft);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
 .alignment-overview-card {
   background: var(--panel-soft);
   border: 1px solid var(--line);
@@ -6284,6 +6290,18 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   background: var(--accent-soft);
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  margin-right: 4px;
+}
+
+.tag-missing-skill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  border: 1px dashed var(--line);
   margin-right: 4px;
 }
 
