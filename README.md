@@ -1,6 +1,6 @@
 # Opportunity Knox
 
-[Latest stable release: v0.4.9](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current version: v0.4.9**
+[Latest stable release: v0.4.9](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current development version: v0.4.10-dev.0** (`main`)
 
 A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
@@ -8,7 +8,7 @@ A private career workspace, from a saved job description to the final hiring dec
 
 ## Releases and development
 
-Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release.
+Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release; it can contain changes beyond v0.4.9.
 
 The sidebar and Settings show the installed version, development/release label, and short Git commit linked to GitHub. Builds made with uncommitted changes also show **+ local changes**, because the commit alone does not describe their complete source. The **Latest release** link always opens GitHub's latest published release. Build labels describe the running app, not newer code waiting on the host.
 

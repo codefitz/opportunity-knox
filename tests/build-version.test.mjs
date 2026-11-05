@@ -21,8 +21,8 @@ test('installed build identifies development source, commit and local edits; lin
   const status = checker.getStatusSync();
   assert.equal(status.currentCommit, commit);
   assert.equal(status.buildDirty, true);
-  const html = renderToStaticMarkup(createElement(BuildVersion, {status: {...status, currentVersion: "0.4.9"}}));
-  assert.match(html, /v0\.4\.9 \(release\)/);
+  const html = renderToStaticMarkup(createElement(BuildVersion, {status: {...status, currentVersion: "0.4.10-dev.0"}}));
+  assert.match(html, /v0\.4\.10-dev\.0 \(development\)/);
   assert.match(html, new RegExp(`href="https://github.com/codefitz/opportunity-knox/commit/${commit}"`));
   assert.match(html, /<code>aaaaaaa<\/code>/);
   assert.match(html, /\+ local changes/);
@@ -31,7 +31,7 @@ test('installed build identifies development source, commit and local edits; lin
   assert.match(released, /\(release\)/);
   assert.match(released, /Commit not recorded/);
   assert.doesNotMatch(released, /\/commit\/|local changes/);
-  assert.equal(isNewerVersion('0.4.9', '0.4.8'), false);
-  assert.equal(isNewerVersion('0.4.8', '0.4.9'), true);
-  assert.equal(isNewerVersion('0.4.9', '0.4.10'), true);
+  assert.equal(isNewerVersion('0.4.10-dev.0', '0.4.9'), false);
+  assert.equal(isNewerVersion('0.4.10-dev.0', '0.4.10'), true);
+  assert.equal(isNewerVersion('0.4.10', '0.4.10-dev.0'), false);
 });
