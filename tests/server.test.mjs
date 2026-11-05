@@ -5453,3 +5453,57 @@ test("opportunity AI description summary generates ~100-word summary, checks pre
   );
   assert.equal(loaded.aiSummaryGeneratedAt, genRes.data.aiSummaryGeneratedAt);
 });
+
+test("global settings for applications & exports folder migrates opportunity documents and supports alias", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  // Create an opportunity and add a document to it
+  const op = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { company: "GlobalCorp", role: "Staff Engineer" },
+    })
+  ).data;
+
+  const doc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        opportunityId: op.id,
+        name: "Tailored-CV.docx",
+        kind: "cv",
+        contentBase64: Buffer.from("DOCX-TEST-BYTES").toString("base64"),
+      },
+    })
+  ).data;
+
+  const getStoredDoc = (id) => JSON.parse(f.app.db.prepare("SELECT data FROM documents WHERE id=?").get(id).data);
+  const storedBefore = getStoredDoc(doc.id);
+  assert.ok(storedBefore.relativePath.startsWith("opportunities/globalcorp/staff-engineer/"));
+  const initialDiskPath = (await import("node:path")).join(f.options.filesDir, storedBefore.relativePath);
+  assert.equal((await import("node:fs")).existsSync(initialDiskPath), true);
+
+  // Update exports folder via PATCH /api/settings using exportsSubdir alias
+  const updated = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { exportsSubdir: "applications-export" },
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.data.documentsSubdir, "applications-export");
+
+  // Document record in SQLite updated to new path
+  const storedAfter = getStoredDoc(doc.id);
+  assert.ok(storedAfter.relativePath.startsWith("applications-export/globalcorp/staff-engineer/"));
+
+  // Old file moved to new location on disk
+  const newDiskPath = (await import("node:path")).join(f.options.filesDir, storedAfter.relativePath);
+  assert.equal((await import("node:fs")).existsSync(newDiskPath), true);
+  assert.equal((await import("node:fs")).existsSync(initialDiskPath), false);
+  assert.equal((await import("node:fs")).readFileSync(newDiskPath, "utf8"), "DOCX-TEST-BYTES");
+
+  // Document download endpoint continues to serve content from new location
+  const downloaded = await f.request(doc.url);
+  assert.equal(downloaded.status, 200);
+  assert.equal(downloaded.data, "DOCX-TEST-BYTES");
+});

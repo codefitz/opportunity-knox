@@ -1,7 +1,33 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SlidersHorizontal, ShieldAlert, Target, Award, Zap, Plus, X, LoaderCircle, Check, RotateCcw, AlertCircle } from "lucide-react";
+import {
+  SlidersHorizontal,
+  ShieldAlert,
+  Target,
+  Award,
+  Zap,
+  Plus,
+  X,
+  LoaderCircle,
+  Check,
+  RotateCcw,
+  AlertCircle,
+  Briefcase,
+  DollarSign,
+  Building,
+  Sparkles,
+  Trash2,
+  ListChecks,
+} from "lucide-react";
 import { api, json } from "../api";
-import type { Settings } from "../types";
+import type {
+  Settings,
+  Criteria,
+  Criterion,
+  StructuredCriteria,
+  SeniorityLevel,
+} from "../types";
+import { SENIORITY_OPTIONS, WORK_MODES } from "./DecisionReview";
+import { SENIORITY_LABELS } from "../lib/seniority";
 
 const POPULAR_EXCLUSIONS = [
   "DV clearance",
@@ -57,20 +83,37 @@ export default function AlignmentSettings({
     defaultFollowUpDays: settings.defaultFollowUpDays || 7,
     dailyTarget: settings.dailyTarget || 3,
   });
-  const [undoStack, setUndoStack] = useState<AlignmentState[]>([]);
+
+  const [criteriaProfile, setCriteriaProfile] = useState<Criteria | null>(null);
+  const [undoStack, setUndoStack] = useState<{ state: AlignmentState; criteria?: Criteria | null }[]>([]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState("");
 
   const stateRef = useRef(state);
   stateRef.current = state;
-  const lastSavedRef = useRef<AlignmentState>(state);
+  const criteriaRef = useRef(criteriaProfile);
+  criteriaRef.current = criteriaProfile;
+
+  const lastSavedStateRef = useRef<AlignmentState>(state);
+  const lastSavedCriteriaRef = useRef<Criteria | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef(false);
-  const pendingSaveRef = useRef(false);
 
   const [inputExclusion, setInputExclusion] = useState("");
   const [inputTitle, setInputTitle] = useState("");
   const [inputSkill, setInputSkill] = useState("");
+  const [newCriterionDesc, setNewCriterionDesc] = useState("");
+  const [newCriterionPriority, setNewCriterionPriority] = useState<Criterion["priority"]>("required");
+
+  // Load criteria profile on mount
+  useEffect(() => {
+    void api<Criteria>("/buddy/fit-criteria")
+      .then((p) => {
+        setCriteriaProfile(p);
+        lastSavedCriteriaRef.current = p;
+      })
+      .catch(onError);
+  }, [onError]);
 
   useEffect(() => {
     const next: AlignmentState = {
@@ -83,7 +126,7 @@ export default function AlignmentSettings({
       dailyTarget: settings.dailyTarget || 3,
     };
     setState(next);
-    lastSavedRef.current = next;
+    lastSavedStateRef.current = next;
   }, [
     settings.exclusionKeywords,
     settings.targetTitles,
@@ -94,34 +137,60 @@ export default function AlignmentSettings({
     settings.dailyTarget,
   ]);
 
-  const performSave = useCallback(
-    async (targetState: AlignmentState, isUndo = false) => {
+  const performUnifiedSave = useCallback(
+    async (
+      targetState: AlignmentState,
+      targetCriteria: Criteria | null | undefined,
+      isUndo = false,
+    ) => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      if (!isUndo && areAlignmentStatesEqual(targetState, lastSavedRef.current)) {
+
+      const stateChanged = !isUndo && !areAlignmentStatesEqual(targetState, lastSavedStateRef.current);
+      const criteriaChanged =
+        !isUndo &&
+        targetCriteria &&
+        JSON.stringify(targetCriteria) !== JSON.stringify(lastSavedCriteriaRef.current);
+
+      if (!isUndo && !stateChanged && !criteriaChanged) {
         return true;
       }
-      if (isSavingRef.current) {
-        pendingSaveRef.current = true;
-        return false;
-      }
-      isSavingRef.current = true;
-      setSaveStatus("saving");
 
-      const prior = lastSavedRef.current;
+      setSaveStatus("saving");
+      isSavingRef.current = true;
+
+      const priorState = lastSavedStateRef.current;
+      const priorCriteria = lastSavedCriteriaRef.current;
+
       try {
-        const updated = await api<Settings>(
-          "/settings",
-          json(targetState, "PATCH"),
-        );
-        onSaved(updated);
-        lastSavedRef.current = targetState;
+        let updatedSettings = settings;
+        if (stateChanged || isUndo) {
+          updatedSettings = await api<Settings>(
+            "/settings",
+            json(targetState, "PATCH"),
+          );
+          onSaved(updatedSettings);
+          lastSavedStateRef.current = targetState;
+        }
+
+        if (targetCriteria && (criteriaChanged || isUndo)) {
+          const savedCrit = await api<Criteria>(
+            "/buddy/fit-criteria",
+            json(targetCriteria, "PATCH"),
+          );
+          setCriteriaProfile(savedCrit);
+          lastSavedCriteriaRef.current = savedCrit;
+        }
+
         if (!isUndo) {
-          setUndoStack((prev) => [...prev.slice(-19), prior]);
+          setUndoStack((prev) => [
+            ...prev.slice(-19),
+            { state: priorState, criteria: priorCriteria },
+          ]);
           setSaveStatus("saved");
-          setStatusMessage("Settings saved");
+          setStatusMessage("Changes saved");
         } else {
           setSaveStatus("undone");
           setStatusMessage("Undid last change");
@@ -134,49 +203,49 @@ export default function AlignmentSettings({
         return false;
       } finally {
         isSavingRef.current = false;
-        if (pendingSaveRef.current) {
-          pendingSaveRef.current = false;
-          void performSave(stateRef.current);
-        }
       }
     },
-    [onSaved, onError],
+    [settings, onSaved, onError],
   );
 
-  const scheduleSave = useCallback(
-    (nextState: AlignmentState, delay = 600) => {
+  const scheduleUnifiedSave = useCallback(
+    (
+      nextState: AlignmentState,
+      nextCriteria: Criteria | null | undefined,
+      delay = 600,
+    ) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveStatus("saving");
       if (delay === 0) {
         saveTimerRef.current = null;
-        void performSave(nextState);
+        void performUnifiedSave(nextState, nextCriteria);
       } else {
         saveTimerRef.current = setTimeout(() => {
           saveTimerRef.current = null;
-          void performSave(nextState);
+          void performUnifiedSave(nextState, nextCriteria);
         }, delay);
       }
     },
-    [performSave],
+    [performUnifiedSave],
   );
 
   const handleBlur = useCallback(() => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
-      void performSave(stateRef.current);
+      void performUnifiedSave(stateRef.current, criteriaRef.current);
     }
-  }, [performSave]);
+  }, [performUnifiedSave]);
 
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
-        void performSave(stateRef.current);
+        void performUnifiedSave(stateRef.current, criteriaRef.current);
       }
     };
-  }, [performSave]);
+  }, [performUnifiedSave]);
 
   const handleUndo = useCallback(async () => {
     if (undoStack.length === 0 || isSavingRef.current) return;
@@ -186,17 +255,120 @@ export default function AlignmentSettings({
     }
     const previous = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
-    setState(previous);
-    await performSave(previous, true);
-  }, [undoStack, performSave]);
+    setState(previous.state);
+    if (previous.criteria !== undefined) {
+      setCriteriaProfile(previous.criteria);
+    }
+    await performUnifiedSave(previous.state, previous.criteria, true);
+  }, [undoStack, performUnifiedSave]);
 
+  // Target Titles helper
+  const addTitle = (val: string) => {
+    const term = val.trim();
+    if (!term) return;
+    const currTitles = state.targetTitles || [];
+    if (!currTitles.some((t) => t.toLowerCase() === term.toLowerCase())) {
+      const nextTitles = [...currTitles, term];
+      const nextState = { ...stateRef.current, targetTitles: nextTitles };
+      setState(nextState);
+
+      let nextCriteria = criteriaRef.current;
+      if (nextCriteria) {
+        nextCriteria = {
+          ...nextCriteria,
+          structured: {
+            ...(nextCriteria.structured || {}),
+            targetTitles: nextTitles,
+          },
+        };
+        setCriteriaProfile(nextCriteria);
+      }
+      scheduleUnifiedSave(nextState, nextCriteria, 0);
+    }
+    setInputTitle("");
+  };
+
+  const removeTitle = (term: string) => {
+    const nextTitles = stateRef.current.targetTitles.filter(
+      (t) => t.toLowerCase() !== term.toLowerCase(),
+    );
+    const nextState = { ...stateRef.current, targetTitles: nextTitles };
+    setState(nextState);
+
+    let nextCriteria = criteriaRef.current;
+    if (nextCriteria) {
+      nextCriteria = {
+        ...nextCriteria,
+        structured: {
+          ...(nextCriteria.structured || {}),
+          targetTitles: nextTitles,
+        },
+      };
+      setCriteriaProfile(nextCriteria);
+    }
+    scheduleUnifiedSave(nextState, nextCriteria, 0);
+  };
+
+  // Target Skills helper
+  const addSkill = (val: string) => {
+    const term = val.trim();
+    if (!term) return;
+    const currSkills = state.targetSkills || [];
+    if (!currSkills.some((s) => s.toLowerCase() === term.toLowerCase())) {
+      const nextSkills = [...currSkills, term];
+      const nextState = { ...stateRef.current, targetSkills: nextSkills };
+      setState(nextState);
+
+      let nextCriteria = criteriaRef.current;
+      if (nextCriteria) {
+        nextCriteria = {
+          ...nextCriteria,
+          structured: {
+            ...(nextCriteria.structured || {}),
+            targetTitles: stateRef.current.targetTitles || [],
+            targetSkills: nextSkills,
+          },
+        };
+        setCriteriaProfile(nextCriteria);
+      }
+      scheduleUnifiedSave(nextState, nextCriteria, 0);
+    }
+    setInputSkill("");
+  };
+
+  const removeSkill = (term: string) => {
+    const nextSkills = stateRef.current.targetSkills.filter(
+      (s) => s.toLowerCase() !== term.toLowerCase(),
+    );
+    const nextState = { ...stateRef.current, targetSkills: nextSkills };
+    setState(nextState);
+
+    let nextCriteria = criteriaRef.current;
+    if (nextCriteria) {
+      nextCriteria = {
+        ...nextCriteria,
+        structured: {
+          ...(nextCriteria.structured || {}),
+          targetTitles: stateRef.current.targetTitles || [],
+          targetSkills: nextSkills,
+        },
+      };
+      setCriteriaProfile(nextCriteria);
+    }
+    scheduleUnifiedSave(nextState, nextCriteria, 0);
+  };
+
+  // Exclusion keywords helper
   const addExclusion = (val: string) => {
     const term = val.trim();
     if (!term) return;
     if (!state.exclusionKeywords.some((k) => k.toLowerCase() === term.toLowerCase())) {
-      const next = { ...stateRef.current, exclusionKeywords: [...stateRef.current.exclusionKeywords, term] };
+      const next = {
+        ...stateRef.current,
+        exclusionKeywords: [...stateRef.current.exclusionKeywords, term],
+      };
       setState(next);
-      scheduleSave(next, 0);
+      scheduleUnifiedSave(next, criteriaRef.current, 0);
     }
     setInputExclusion("");
   };
@@ -204,50 +376,144 @@ export default function AlignmentSettings({
   const removeExclusion = (term: string) => {
     const next = {
       ...stateRef.current,
-      exclusionKeywords: stateRef.current.exclusionKeywords.filter((k) => k.toLowerCase() !== term.toLowerCase()),
+      exclusionKeywords: stateRef.current.exclusionKeywords.filter(
+        (k) => k.toLowerCase() !== term.toLowerCase(),
+      ),
     };
     setState(next);
-    scheduleSave(next, 0);
+    scheduleUnifiedSave(next, criteriaRef.current, 0);
   };
 
-  const addTitle = (val: string) => {
-    const term = val.trim();
-    if (!term) return;
-    if (!state.targetTitles.some((t) => t.toLowerCase() === term.toLowerCase())) {
-      const next = { ...stateRef.current, targetTitles: [...stateRef.current.targetTitles, term] };
-      setState(next);
-      scheduleSave(next, 0);
+  // Structured Criteria (Seniority, Work modes, Salary)
+  const structured: StructuredCriteria = {
+    targetTitles: criteriaProfile?.structured?.targetTitles || state.targetTitles || [],
+    targetSkills: criteriaProfile?.structured?.targetSkills || state.targetSkills || [],
+    minSalary: criteriaProfile?.structured?.minSalary ?? null,
+    salaryCurrency: criteriaProfile?.structured?.salaryCurrency || "USD",
+    salaryPeriod: criteriaProfile?.structured?.salaryPeriod || "year",
+    targetSeniorities: criteriaProfile?.structured?.targetSeniorities || [],
+    workModes: criteriaProfile?.structured?.workModes || [],
+  };
+
+  const updateStructured = (partial: Partial<StructuredCriteria>, delay = 0) => {
+    if (!criteriaRef.current) return;
+    const next: Criteria = {
+      ...criteriaRef.current,
+      structured: {
+        ...structured,
+        ...partial,
+        targetTitles: partial.targetTitles ?? structured.targetTitles,
+      },
+    };
+    setCriteriaProfile(next);
+    scheduleUnifiedSave(stateRef.current, next, delay);
+  };
+
+  const toggleSeniority = (level: SeniorityLevel) => {
+    const curr = structured.targetSeniorities || [];
+    const next = curr.includes(level)
+      ? curr.filter((l) => l !== level)
+      : [...curr, level];
+    updateStructured({ targetSeniorities: next }, 0);
+  };
+
+  const toggleWorkMode = (mode: "remote" | "hybrid" | "onsite") => {
+    const curr = structured.workModes || [];
+    const next = curr.includes(mode)
+      ? curr.filter((m) => m !== mode)
+      : [...curr, mode];
+    updateStructured({ workModes: next }, 0);
+  };
+
+  // Criteria Items helpers
+  const generateCriteriaFromPreferences = () => {
+    if (!criteriaProfile) return;
+    const s = structured;
+    const newItems: Criterion[] = [];
+
+    if (state.targetTitles?.length || s.targetSeniorities?.length) {
+      const titlePart = state.targetTitles?.length
+        ? `roles matching "${state.targetTitles.join(", ")}"`
+        : "target roles";
+      const seniorityPart = s.targetSeniorities?.length
+        ? ` at ${s.targetSeniorities.map((sn) => SENIORITY_LABELS[sn] || sn).join(" or ")} level`
+        : "";
+      newItems.push({
+        id: "role-seniority-fit",
+        description: `Target role fit: Opportunity aligns with ${titlePart}${seniorityPart}.`,
+        priority: "required",
+      });
     }
-    setInputTitle("");
-  };
 
-  const removeTitle = (term: string) => {
-    const next = {
-      ...stateRef.current,
-      targetTitles: stateRef.current.targetTitles.filter((t) => t.toLowerCase() !== term.toLowerCase()),
-    };
-    setState(next);
-    scheduleSave(next, 0);
-  };
-
-  const addSkill = (val: string) => {
-    const term = val.trim();
-    if (!term) return;
-    if (!state.targetSkills.some((s) => s.toLowerCase() === term.toLowerCase())) {
-      const next = { ...stateRef.current, targetSkills: [...stateRef.current.targetSkills, term] };
-      setState(next);
-      scheduleSave(next, 0);
+    if (s.minSalary && s.minSalary > 0) {
+      const curr = s.salaryCurrency || "USD";
+      const per = s.salaryPeriod || "year";
+      newItems.push({
+        id: "compensation-fit",
+        description: `Compensation: Package meets or exceeds ${curr} ${s.minSalary.toLocaleString()} per ${per}.`,
+        priority: "required",
+      });
     }
-    setInputSkill("");
+
+    if (state.targetSkills?.length) {
+      newItems.push({
+        id: "skills-alignment",
+        description: `Skills alignment: Candidate evidence demonstrates core skills (${state.targetSkills.join(", ")}).`,
+        priority: "preferred",
+      });
+    }
+
+    if (s.workModes?.length) {
+      newItems.push({
+        id: "work-mode-fit",
+        description: `Working arrangement: Opportunity supports ${s.workModes.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" or ")} arrangement.`,
+        priority: "preferred",
+      });
+    }
+
+    if (!newItems.length) {
+      onNotice("Add target titles, salary, seniority, or skills to generate criteria.");
+      return;
+    }
+
+    const existingIds = new Set(newItems.map((i) => i.id));
+    const mergedItems = [
+      ...newItems,
+      ...(criteriaProfile.items || []).filter((item) => !existingIds.has(item.id)),
+    ];
+
+    const next: Criteria = {
+      ...criteriaProfile,
+      items: mergedItems.slice(0, 30),
+    };
+    setCriteriaProfile(next);
+    scheduleUnifiedSave(stateRef.current, next, 0);
   };
 
-  const removeSkill = (term: string) => {
-    const next = {
-      ...stateRef.current,
-      targetSkills: stateRef.current.targetSkills.filter((s) => s.toLowerCase() !== term.toLowerCase()),
+  const addCriterion = () => {
+    const text = newCriterionDesc.trim();
+    if (!text || !criteriaProfile) return;
+    const id = "crit-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+    const next: Criteria = {
+      ...criteriaProfile,
+      items: [
+        ...(criteriaProfile.items || []),
+        { id, description: text, priority: newCriterionPriority },
+      ].slice(0, 30),
     };
-    setState(next);
-    scheduleSave(next, 0);
+    setCriteriaProfile(next);
+    setNewCriterionDesc("");
+    scheduleUnifiedSave(stateRef.current, next, 0);
+  };
+
+  const removeCriterion = (id: string) => {
+    if (!criteriaProfile) return;
+    const next: Criteria = {
+      ...criteriaProfile,
+      items: (criteriaProfile.items || []).filter((c) => c.id !== id),
+    };
+    setCriteriaProfile(next);
+    scheduleUnifiedSave(stateRef.current, next, 0);
   };
 
   const {
@@ -261,17 +527,431 @@ export default function AlignmentSettings({
   } = state;
 
   return (
-    <section className="settings-section alignment-settings-section">
+    <section className="settings-section alignment-settings-section" aria-label="Target roles & criteria">
       <div className="settings-section-heading">
         <SlidersHorizontal size={21} />
         <div>
-          <h2>Alignment & Exclusion Filters</h2>
+          <h2>Target Roles, Fit &amp; Criteria</h2>
           <p>
-            Filter out unwanted roles and score opportunities based on your target titles and skills.
+            Unified preferences for role titles, technical skills, seniority, working arrangements, fit criteria, and exclusion filters.
           </p>
         </div>
       </div>
 
+      {/* Top Auto-Save Status Bar */}
+      <div className="auto-save-bar" style={{ marginBottom: 16 }}>
+        <div className="auto-save-status" role="status" aria-live="polite">
+          {saveStatus === "saving" && (
+            <span className="status-saving">
+              <LoaderCircle size={14} className="spin" />
+              <span>Saving…</span>
+            </span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="status-saved">
+              <Check size={14} />
+              <span>{statusMessage || "All preferences saved"}</span>
+            </span>
+          )}
+          {saveStatus === "undone" && (
+            <span className="status-undone">
+              <RotateCcw size={14} />
+              <span>{statusMessage || "Undid last change"}</span>
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span className="status-error">
+              <AlertCircle size={14} />
+              <span>{statusMessage || "Could not save settings"}</span>
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="button secondary small undo-button"
+          disabled={undoStack.length === 0 || saveStatus === "saving"}
+          onClick={() => void handleUndo()}
+          title="Undo last change (Cmd+Z or Ctrl+Z)"
+        >
+          <RotateCcw size={13} />
+          Undo last change
+        </button>
+      </div>
+
+      {/* 1. Target Job Titles */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Target size={18} className="text-blue" />
+            <div>
+              <h3>Target Job Titles</h3>
+              <p>
+                The job titles you are actively pursuing. Used to score role relevance and assess fit.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="tags-input-group">
+            <input
+              type="text"
+              placeholder="e.g. Solutions Architect, Staff Engineer, Head of Engineering…"
+              value={inputTitle}
+              onChange={(e) => setInputTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addTitle(inputTitle);
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => addTitle(inputTitle)}
+              disabled={!inputTitle.trim()}
+            >
+              <Plus size={14} /> Add title
+            </button>
+          </div>
+
+          <div className="active-tag-chips">
+            {targetTitles.length === 0 ? (
+              <span className="empty-hint">No target titles configured yet.</span>
+            ) : (
+              targetTitles.map((title) => (
+                <span key={title} className="tag-chip title-chip">
+                  <span>{title}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove target title ${title}`}
+                    onClick={() => removeTitle(title)}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Target Seniority Levels */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Award size={18} className="text-amber" />
+            <div>
+              <h3>Target Seniority Levels</h3>
+              <p>
+                Seniority levels that match your background and current search.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="settings-card-body">
+          <div className="structured-chips-row">
+            {SENIORITY_OPTIONS.map((opt) => {
+              const isSelected = (structured.targetSeniorities || []).includes(opt.id);
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`structured-toggle-chip ${isSelected ? "selected" : ""}`}
+                  onClick={() => toggleSeniority(opt.id)}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Core Skills & Technologies */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Award size={18} className="text-green" />
+            <div>
+              <h3>Target Skills &amp; Technologies</h3>
+              <p>
+                Core competencies and tools to look for in job descriptions to calculate alignment.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-card-body">
+          <div className="tags-input-group">
+            <input
+              type="text"
+              placeholder="e.g. TypeScript, React, Python, AWS, System Design…"
+              value={inputSkill}
+              onChange={(e) => setInputSkill(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addSkill(inputSkill);
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => addSkill(inputSkill)}
+              disabled={!inputSkill.trim()}
+            >
+              <Plus size={14} /> Add skill
+            </button>
+          </div>
+
+          <div className="active-tag-chips">
+            {targetSkills.length === 0 ? (
+              <span className="empty-hint">No target skills configured yet.</span>
+            ) : (
+              targetSkills.map((skill) => (
+                <span key={skill} className="tag-chip skill-chip">
+                  <span>{skill}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove target skill ${skill}`}
+                    onClick={() => removeSkill(skill)}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Working Arrangements & Compensation */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Building size={18} style={{ color: "var(--accent)" }} />
+            <div>
+              <h3>Work Arrangements &amp; Compensation Target</h3>
+              <p>
+                Working modes and minimum compensation baseline used when evaluating opportunities.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="structured-group">
+            <label className="structured-group-label">
+              <Building size={12} />
+              Desired Work Arrangements
+            </label>
+            <div className="structured-chips-row">
+              {WORK_MODES.map((wm) => {
+                const isSelected = (structured.workModes || []).includes(wm.id);
+                return (
+                  <button
+                    key={wm.id}
+                    type="button"
+                    className={`structured-toggle-chip work-mode-chip ${isSelected ? "selected" : ""}`}
+                    onClick={() => toggleWorkMode(wm.id)}
+                  >
+                    {wm.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="structured-group">
+            <label className="structured-group-label">
+              <DollarSign size={12} />
+              Minimum Compensation Target
+            </label>
+            <div className="structured-salary-row">
+              <input
+                type="number"
+                min={0}
+                step={1000}
+                value={structured.minSalary ?? ""}
+                placeholder="e.g. 100000"
+                onChange={(e) =>
+                  updateStructured(
+                    {
+                      minSalary: e.target.value ? Number(e.target.value) : null,
+                    },
+                    600,
+                  )
+                }
+                onBlur={handleBlur}
+              />
+              <select
+                value={structured.salaryCurrency || "USD"}
+                onChange={(e) =>
+                  updateStructured({ salaryCurrency: e.target.value }, 0)
+                }
+              >
+                <option value="USD">USD ($)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="CAD">CAD ($)</option>
+                <option value="AUD">AUD ($)</option>
+                <option value="CHF">CHF (Fr)</option>
+              </select>
+              <select
+                value={structured.salaryPeriod || "year"}
+                onChange={(e) =>
+                  updateStructured(
+                    {
+                      salaryPeriod: e.target.value as StructuredCriteria["salaryPeriod"],
+                    },
+                    0,
+                  )
+                }
+              >
+                <option value="year">/ year</option>
+                <option value="month">/ month</option>
+                <option value="day">/ day</option>
+                <option value="hour">/ hour</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Custom Fit & Evaluation Criteria */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", width: "100%", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <ListChecks size={18} style={{ color: "var(--accent)" }} />
+              <div>
+                <h3>Fit Assessment Criteria</h3>
+                <p>
+                  Specific criteria evaluated during fit assessments. Required criteria act as hard gates.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={generateCriteriaFromPreferences}
+              title="Translate above titles, skills, salary and arrangements into criteria"
+            >
+              <Sparkles size={13} />
+              Generate from preferences
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Add new criterion row */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              type="text"
+              style={{ flex: 1, minWidth: 220 }}
+              placeholder="e.g. Modern tech stack (AWS, Kubernetes, Go)"
+              value={newCriterionDesc}
+              onChange={(e) => setNewCriterionDesc(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCriterion();
+                }
+              }}
+            />
+            <select
+              value={newCriterionPriority}
+              onChange={(e) => setNewCriterionPriority(e.target.value as Criterion["priority"])}
+              style={{ width: "auto" }}
+            >
+              <option value="required">Required</option>
+              <option value="preferred">Preferred</option>
+            </select>
+            <button
+              type="button"
+              className="button primary small"
+              onClick={addCriterion}
+              disabled={!newCriterionDesc.trim()}
+            >
+              <Plus size={13} /> Add Criterion
+            </button>
+          </div>
+
+          {/* Criteria items list */}
+          {criteriaProfile?.items && criteriaProfile.items.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {criteriaProfile.items.map((item, idx) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 12px",
+                    background: "var(--panel-soft)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", width: 20 }}>
+                    #{idx + 1}
+                  </span>
+                  <input
+                    type="text"
+                    style={{ flex: 1, fontSize: 13 }}
+                    value={item.description}
+                    onChange={(e) => {
+                      if (!criteriaRef.current) return;
+                      const next = {
+                        ...criteriaRef.current,
+                        items: (criteriaRef.current.items || []).map((c) =>
+                          c.id === item.id ? { ...c, description: e.target.value } : c,
+                        ),
+                      };
+                      setCriteriaProfile(next);
+                      scheduleUnifiedSave(stateRef.current, next, 600);
+                    }}
+                    onBlur={handleBlur}
+                  />
+                  <select
+                    value={item.priority}
+                    style={{ width: "auto", fontSize: 12 }}
+                    onChange={(e) => {
+                      if (!criteriaRef.current) return;
+                      const next = {
+                        ...criteriaRef.current,
+                        items: (criteriaRef.current.items || []).map((c) =>
+                          c.id === item.id ? { ...c, priority: e.target.value as Criterion["priority"] } : c,
+                        ),
+                      };
+                      setCriteriaProfile(next);
+                      scheduleUnifiedSave(stateRef.current, next, 0);
+                    }}
+                  >
+                    <option value="required">Required</option>
+                    <option value="preferred">Preferred</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => removeCriterion(item.id)}
+                    title="Remove criterion"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="empty-hint">No custom criteria items added yet. Click &ldquo;Generate from preferences&rdquo; or add one above.</span>
+          )}
+        </div>
+      </div>
+
+      {/* 6. Exclusion Keywords (Dealbreakers) */}
       <div className="settings-card">
         <div className="settings-card-header">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -348,128 +1028,13 @@ export default function AlignmentSettings({
         </div>
       </div>
 
-      <div className="settings-card">
-        <div className="settings-card-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Target size={18} className="text-blue" />
-            <div>
-              <h3>Target Job Titles</h3>
-              <p>
-                Specify the role titles you are actively seeking. Used to calculate candidate-role title alignment.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-card-body">
-          <div className="tags-input-group">
-            <input
-              type="text"
-              placeholder="e.g. Principal Architect, Staff Engineer, Head of Engineering…"
-              value={inputTitle}
-              onChange={(e) => setInputTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTitle(inputTitle);
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="button secondary small"
-              onClick={() => addTitle(inputTitle)}
-              disabled={!inputTitle.trim()}
-            >
-              <Plus size={14} /> Add title
-            </button>
-          </div>
-
-          <div className="active-tag-chips">
-            {targetTitles.length === 0 ? (
-              <span className="empty-hint">No target titles configured yet.</span>
-            ) : (
-              targetTitles.map((title) => (
-                <span key={title} className="tag-chip title-chip">
-                  <span>{title}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove target title ${title}`}
-                    onClick={() => removeTitle(title)}
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="settings-card">
-        <div className="settings-card-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Award size={18} className="text-green" />
-            <div>
-              <h3>Target Skills & Technologies</h3>
-              <p>
-                Core competencies and tools to look for in job descriptions to calculate technical alignment.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-card-body">
-          <div className="tags-input-group">
-            <input
-              type="text"
-              placeholder="e.g. TypeScript, React, Python, AWS, System Design…"
-              value={inputSkill}
-              onChange={(e) => setInputSkill(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addSkill(inputSkill);
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="button secondary small"
-              onClick={() => addSkill(inputSkill)}
-              disabled={!inputSkill.trim()}
-            >
-              <Plus size={14} /> Add skill
-            </button>
-          </div>
-
-          <div className="active-tag-chips">
-            {targetSkills.length === 0 ? (
-              <span className="empty-hint">No target skills configured yet.</span>
-            ) : (
-              targetSkills.map((skill) => (
-                <span key={skill} className="tag-chip skill-chip">
-                  <span>{skill}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove target skill ${skill}`}
-                    onClick={() => removeSkill(skill)}
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
+      {/* 7. Progression Automation & Application Targets */}
       <div className="settings-card">
         <div className="settings-card-header">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Zap size={18} className="text-amber" />
             <div>
-              <h3>Workflow Automation & Targets</h3>
+              <h3>Workflow Automation &amp; Targets</h3>
               <p>
                 Streamline stage transitions, next action scheduling, and daily application momentum.
               </p>
@@ -485,13 +1050,13 @@ export default function AlignmentSettings({
               onChange={(e) => {
                 const next = { ...stateRef.current, autoAdvanceStages: e.target.checked };
                 setState(next);
-                scheduleSave(next, 0);
+                scheduleUnifiedSave(next, criteriaRef.current, 0);
               }}
             />
             <span>
               <strong>Auto-advance stages on milestone completion</strong>
               <small style={{ display: "block", color: "var(--ink-secondary)" }}>
-                Automatically moves opportunities forward (e.g. to CV & cover letter when tailoring a document in Studio; to Interviews when scheduling an interview). Never moves cards backward.
+                Automatically moves opportunities forward (e.g. to CV &amp; cover letter when tailoring a document in Studio; to Interviews when scheduling an interview). Never moves cards backward.
               </small>
             </span>
           </label>
@@ -503,11 +1068,11 @@ export default function AlignmentSettings({
               onChange={(e) => {
                 const next = { ...stateRef.current, autoGenerateTasks: e.target.checked };
                 setState(next);
-                scheduleSave(next, 0);
+                scheduleUnifiedSave(next, criteriaRef.current, 0);
               }}
             />
             <span>
-              <strong>Auto-generate next actions & To-Do tasks</strong>
+              <strong>Auto-generate next actions &amp; To-Do tasks</strong>
               <small style={{ display: "block", color: "var(--ink-secondary)" }}>
                 Populates intelligent next actions and creates linked tasks on stage transitions (e.g. 7-day follow-up after submission; interview preparation).
               </small>
@@ -527,7 +1092,7 @@ export default function AlignmentSettings({
                   const val = Math.max(1, Number(e.target.value) || 1);
                   const next = { ...stateRef.current, defaultFollowUpDays: val };
                   setState(next);
-                  scheduleSave(next, 600);
+                  scheduleUnifiedSave(next, criteriaRef.current, 600);
                 }}
                 onBlur={handleBlur}
               />
@@ -545,7 +1110,7 @@ export default function AlignmentSettings({
                   const val = Math.max(1, Number(e.target.value) || 1);
                   const next = { ...stateRef.current, dailyTarget: val };
                   setState(next);
-                  scheduleSave(next, 600);
+                  scheduleUnifiedSave(next, criteriaRef.current, 600);
                 }}
                 onBlur={handleBlur}
               />
@@ -554,6 +1119,7 @@ export default function AlignmentSettings({
         </div>
       </div>
 
+      {/* Bottom Auto-Save Status Bar */}
       <div className="auto-save-bar">
         <div className="auto-save-status" role="status" aria-live="polite">
           {saveStatus === "saving" && (
@@ -565,7 +1131,7 @@ export default function AlignmentSettings({
           {saveStatus === "saved" && (
             <span className="status-saved">
               <Check size={14} />
-              <span>{statusMessage || "Settings saved"}</span>
+              <span>{statusMessage || "All preferences saved"}</span>
             </span>
           )}
           {saveStatus === "undone" && (

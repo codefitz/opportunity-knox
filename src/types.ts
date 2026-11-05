@@ -216,6 +216,7 @@ export type Settings = {
   themeBackground: string;
   timezone: string;
   documentsSubdir: string;
+  exportsSubdir?: string;
   referenceSubdir: string;
   backupSubdir: string;
   hostDocumentsPath: string;

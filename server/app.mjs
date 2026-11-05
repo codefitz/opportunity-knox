@@ -2905,8 +2905,35 @@ Strict constraints:
             }
             updated.timezone = zone;
           }
+          const reqDocSubdir = body.documentsSubdir ?? body.exportsSubdir;
+          if (reqDocSubdir !== undefined) {
+            const oldSub = updated.documentsSubdir || "opportunities";
+            const newSub = cleanText(reqDocSubdir, "Folder", 500).replace(/\/+$/, "");
+            if (!newSub) fail(400, "Choose a named subfolder.");
+            folder(filesDir, newSub);
+            updated.documentsSubdir = newSub;
+            if (oldSub !== newSub) {
+              const oppDocs = getDocuments().filter(
+                (d) => d.opportunityId && d.relativePath && d.relativePath.startsWith(`${oldSub}/`),
+              );
+              for (const doc of oppDocs) {
+                const rest = doc.relativePath.slice(oldSub.length + 1);
+                const newRel = `${newSub}/${rest}`;
+                const srcPath = safePath(filesDir, doc.relativePath);
+                const dstPath = safePath(filesDir, newRel);
+                if (existsSync(srcPath)) {
+                  folder(filesDir, dirname(newRel));
+                  renameSync(srcPath, dstPath);
+                }
+                doc.relativePath = newRel;
+                putDocument(doc);
+              }
+              try {
+                pruneEmptyParents(join(filesDir, oldSub), filesDir);
+              } catch {}
+            }
+          }
           for (const key of [
-            "documentsSubdir",
             "referenceSubdir",
             "backupSubdir",
           ])

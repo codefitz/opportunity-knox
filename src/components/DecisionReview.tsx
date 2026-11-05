@@ -27,7 +27,7 @@ import {
   Building,
 } from "lucide-react";
 
-const SENIORITY_OPTIONS: { id: SeniorityLevel; label: string }[] = [
+export const SENIORITY_OPTIONS: { id: SeniorityLevel; label: string }[] = [
   { id: "entry", label: "Entry / Junior" },
   { id: "mid", label: "Mid-level" },
   { id: "senior", label: "Senior / Staff" },
@@ -36,7 +36,7 @@ const SENIORITY_OPTIONS: { id: SeniorityLevel; label: string }[] = [
   { id: "executive", label: "Executive / VP / C-Level" },
 ];
 
-const WORK_MODES: { id: "remote" | "hybrid" | "onsite"; label: string }[] = [
+export const WORK_MODES: { id: "remote" | "hybrid" | "onsite"; label: string }[] = [
   { id: "remote", label: "Remote" },
   { id: "hybrid", label: "Hybrid" },
   { id: "onsite", label: "On-site" },

@@ -1,5 +1,33 @@
 # Implementation roadmap
 
+## Unified Settings: Target Roles & Criteria, AI Models & Opportunity Exports Config — 5 November 2026
+
+- Delivered a streamlined reorganization and unification of settings navigation, fit/alignment criteria, and opportunity export storage configuration:
+  - **Global Opportunity Applications & Exports Storage Configuration:**
+    - Added a prominent configuration card in **Files & storage** settings allowing users to point applications to any local folder (subfolder of document root).
+    - Explains that Opportunity Knox automatically handles the 2-level directory hierarchy (`Company > Role`) for all generated CVs, cover letters, and application materials.
+    - Explicitly reassures that files stored in this folder are private application materials and are **never ingested** or indexed into the Career Library or vector index.
+    - Added backend migration logic in `PATCH /settings` that automatically moves existing opportunity documents when the subfolder changes, updating SQLite relative paths and pruning empty parent directories. Supported `exportsSubdir` as an accepted alias.
+  - **Unified "Target Roles & Criteria" Page (Fit & Decision + Alignment & Filters Combined):**
+    - Consolidated the previously disjointed "Alignment & Filters" and "Fit & decision model" sections into a single, comprehensive settings page (`Target roles & criteria`, ID `alignment`, with aliases `decisions`, `fit-criteria`, `filters`).
+    - Unifies target job titles and target skills as a single source of truth, synchronizing changes across `/settings` and `/buddy/fit-criteria`.
+    - Integrates target seniority levels (Entry through Executive chips) and working arrangements (Remote, Hybrid, On-site).
+    - Integrates minimum compensation target (amount, currency selector, pay period).
+    - Features full interactive fit assessment criteria list (`Criterion[]` with required/preferred priority selection, delete, add new criterion, and "Generate from preferences" automation).
+    - Retains all dealbreaker exclusion keywords and quick-add preset suggestions.
+    - Preserves workflow automation (auto-advance stages, auto-generate tasks, follow-up days, daily application target) with debounced auto-save and multi-step undo.
+  - **"AI Models" Reorganization:**
+    - Renamed the "Career Buddy" settings section to **"AI Models"** (ID `ai-models`, with aliases `career-buddy`, `embeddings`, `decisions`).
+    - Groups all three AI capabilities in one dedicated, organized space:
+      1. **Career Buddy Model**: Generative provider and model for career chat, application drafting, and interview advice.
+      2. **Decision Model**: Specialized AI model used for evaluating criteria matches, scoring alignment, and assessing candidate fit.
+      3. **Embeddings & Semantic Search**: Vector embeddings configuration for library document indexing and contextual retrieval.
+    - Eliminated redundant standalone "Embeddings" and "Fit & decision model" tabs from top-level navigation, while maintaining seamless alias routing for deep links and hash navigation.
+  - **Verification:**
+    - Added backend unit tests in `tests/server.test.mjs` verifying export folder configuration, document disk migration, and alias support.
+    - Added `WorkspaceSections` alias deep-linking test in `tests/workspace-sections.test.mjs`.
+    - Verified full test suite passing with all 356 Node tests and 46 Python tests (`npm run check`).
+
 ## AI Summary Tab for Opportunities (with Top 5 Skills & Key Responsibilities) — 5 November 2026
 
 - Introduced a dedicated **"AI Summary"** tab in the Opportunity detail modal situated directly between "Overview" and "Fit assessment":

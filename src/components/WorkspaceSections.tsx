@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 // Keep panels mounted so switching sections preserves drafts and running work.
 export default function WorkspaceSections({ label, sections }: {
   label: string;
-  sections: { id: string; label: string; content: ReactNode }[];
+  sections: { id: string; label: string; aliases?: string[]; content: ReactNode }[];
 }) {
   const readSection = () => new URLSearchParams(window.location.hash.split("?")[1]).get("section");
   const [requested, setRequested] = useState(readSection);
@@ -12,7 +12,7 @@ export default function WorkspaceSections({ label, sections }: {
     window.addEventListener("hashchange", changed);
     return () => window.removeEventListener("hashchange", changed);
   }, []);
-  const selected = sections.find(section => section.id === requested)?.id || sections[0].id;
+  const selected = sections.find(section => section.id === requested || (requested && section.aliases?.includes(requested)))?.id || sections[0].id;
   const page = window.location.hash.split("?")[0];
   return <div className="workspace-sections">
     <nav className="workspace-section-nav" aria-label={label}>

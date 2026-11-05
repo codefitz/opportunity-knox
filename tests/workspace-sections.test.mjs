@@ -17,12 +17,12 @@ const WorkspaceSections = module.exports.default;
 test('workspace sections support deep links, safe fallback and mounted inactive drafts', () => {
   const previous = globalThis.window;
   try {
-    for (const [query, selected] of [['', 'profile'], ['?section=storage', 'storage'], ['?section=missing', 'profile']]) {
+    for (const [query, selected] of [['', 'profile'], ['?section=storage', 'storage'], ['?section=missing', 'profile'], ['?section=legacy-alias', 'storage']]) {
       globalThis.window = { location: { hash: '#/settings' + query } };
       const markup = renderToStaticMarkup(createElement(WorkspaceSections, {
         label: 'Settings sections', sections: [
           { id: 'profile', label: 'Profile', content: createElement('input', { defaultValue: 'Unsaved profile' }) },
-          { id: 'storage', label: 'Storage', content: 'Storage controls' },
+          { id: 'storage', label: 'Storage', aliases: ['legacy-alias'], content: 'Storage controls' },
         ],
       }));
       assert.match(markup, new RegExp(`href="#/settings\\?section=${selected}" aria-current="page"`));

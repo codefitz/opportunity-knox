@@ -20,7 +20,6 @@ import DocumentCategory from "./components/DocumentCategory";
 import documentCategories from "../server/document-categories.json";
 import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
-import { FitCriteria } from "./components/DecisionReview";
 import VectorIndex from "./components/VectorIndex";
 import OpportunityAISummary from "./components/OpportunityAISummary";
 import {
@@ -40,6 +39,8 @@ import {
   ArrowDownToLine,
   ArrowRight,
   ArrowUpRight,
+  Bot,
+  Briefcase,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -57,6 +58,7 @@ import {
   Folder,
   FolderOpen,
   FolderInput,
+  Layers,
   LayoutGrid,
   ChartNoAxesCombined,
   ListTodo,
@@ -7104,7 +7106,7 @@ function SettingsPage({
       />
 
         </> },
-        { id: "alignment", label: "Alignment & Filters", content: <>
+        { id: "alignment", label: "Target roles & criteria", aliases: ["decisions", "fit-criteria", "filters"], content: <>
       <AlignmentSettings
         settings={settings}
         onSaved={onSaved}
@@ -7134,22 +7136,47 @@ function SettingsPage({
               Connected
             </Badge>
           </div>
+
+          {/* Opportunity Applications & Exports Folder Global Setting */}
+          <div className="location-box" style={{ flexDirection: "column", alignItems: "stretch", gap: 10, margin: "14px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Briefcase size={16} style={{ color: "var(--accent)" }} />
+                <strong style={{ fontSize: 13 }}>Opportunity exports &amp; applications folder</strong>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Badge kind="muted">Auto Company &gt; Role</Badge>
+                <Badge kind="green">Not ingested</Badge>
+              </div>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+              Local directory where generated CVs, cover letters, and opportunity files are stored. Opportunity Knox automatically maintains the 2-level folder structure (<code>Company &gt; Role</code>). Files here are strictly for external applications and are <strong>never ingested</strong> into your Career Library or vector index.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, alignItems: "center" }}>
+              <Field
+                label="Application exports subfolder"
+                hint="Relative to your document root."
+              >
+                <input
+                  required
+                  value={form.documentsSubdir}
+                  onChange={(e) => {
+                    const updated = { ...formRef.current, documentsSubdir: e.target.value };
+                    setForm(updated);
+                    scheduleStorageSave(updated, 600);
+                  }}
+                  onBlur={handleStorageBlur}
+                  placeholder="opportunities"
+                />
+              </Field>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span>Resolved export path:</span>
+              <code>{(settings.hostDocumentsPath || settings.storagePath).replace(/\/+$/, "")}/{form.documentsSubdir || "opportunities"}/&lt;Company&gt;/&lt;Role&gt;/</code>
+            </div>
+          </div>
+
           <div className="form-grid">
-            <Field
-              label="Application document subfolder"
-              hint="Relative to your document root."
-            >
-              <input
-                required
-                value={form.documentsSubdir}
-                onChange={(e) => {
-                  const updated = { ...formRef.current, documentsSubdir: e.target.value };
-                  setForm(updated);
-                  scheduleStorageSave(updated, 600);
-                }}
-                onBlur={handleStorageBlur}
-              />
-            </Field>
             <Field label="Reference library subfolder">
               <input
                 required
@@ -7426,17 +7453,41 @@ function SettingsPage({
       <DocumentConnections onError={onError} onRestart={onRestart} restarting={restarting} />
 
         </> },
-        { id: "career-buddy", label: "Career Buddy", content: <>
-      <CareerBuddySettings onError={onError} />
+        { id: "ai-models", label: "AI Models", aliases: ["career-buddy", "embeddings", "decisions"], content: <>
+      <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        <section className="settings-section" id="career-buddy-settings">
+          <div className="settings-section-heading">
+            <Bot size={21} />
+            <div>
+              <h2>Career Buddy Model</h2>
+              <p>Configure the primary generative AI provider and model used for career chats, tailored CVs, and application drafting.</p>
+            </div>
+          </div>
+          <CareerBuddySettings onError={onError} />
+        </section>
 
-        </> },
-        { id: "embeddings", label: "Embeddings", content: <>
-      <EmbeddingSettings onError={onError} />
+        <section className="settings-section" id="decision-model-settings">
+          <div className="settings-section-heading">
+            <Sparkles size={21} />
+            <div>
+              <h2>Decision Model</h2>
+              <p>Configure the AI model used for evaluating role alignment, criteria match scoring, and candidate fit assessments.</p>
+            </div>
+          </div>
+          <CareerBuddySettings decision onError={onError} />
+        </section>
 
-        </> },
-        { id: "decisions", label: "Fit & decision model", content: <>
-      <FitCriteria onError={onError} />
-      <CareerBuddySettings decision onError={onError} />
+        <section className="settings-section" id="embeddings-settings">
+          <div className="settings-section-heading">
+            <Layers size={21} />
+            <div>
+              <h2>Embeddings &amp; Semantic Search</h2>
+              <p>Configure vector embeddings for indexing reference documents and retrieving relevant evidence from your Career Library.</p>
+            </div>
+          </div>
+          <EmbeddingSettings onError={onError} />
+        </section>
+      </div>
         </> },
         { id: "mcp", label: "MCP Server", content: <>
       <MCPSettings onError={onError} />
