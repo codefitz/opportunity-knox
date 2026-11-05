@@ -131,6 +131,7 @@ import { SENIORITY_LABELS } from "./lib/seniority.ts";
 import { ALIGNMENT_TIER_LABELS } from "./lib/alignment.ts";
 import TargetWishlist from "./components/TargetWishlist";
 import AlignmentSettings from "./components/AlignmentSettings";
+import BulkActionsBar from "./components/BulkActionsBar";
 
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
@@ -364,6 +365,33 @@ export default function App() {
     [studioOpportunityId, setStudioOpportunityId] = useState<string>(""),
     [dragging, setDragging] = useState(""),
     [dropStage, setDropStage] = useState("");
+  const [selectedOpportunityIds, setSelectedOpportunityIds] = useState<
+    string[]
+  >([]);
+
+  const toggleSelectOpportunity = (id: string) => {
+    setSelectedOpportunityIds((curr) =>
+      curr.includes(id) ? curr.filter((x) => x !== id) : [...curr, id],
+    );
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedOpportunityIds(filtered.map((o) => o.id));
+  };
+
+  const clearSelection = () => {
+    setSelectedOpportunityIds([]);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectedOpportunityIds.length > 0) {
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedOpportunityIds.length]);
   const [token] = useState(
     () => new URLSearchParams(window.location.hash.slice(1)).get("setup") || "",
   );
@@ -786,9 +814,22 @@ export default function App() {
       ["interviews", "final-interview"].includes(o.stage),
     ),
     overdue = active.filter(o => overdueIds.has(o.id));
-  const renderOpportunityRow = (o: Opportunity) => (
-    <tr key={o.id} className={groupByCompany ? "company-grouped-row" : undefined}>
-      {visibleColumns.map((colId) => {
+  const renderOpportunityRow = (o: Opportunity) => {
+    const isSelected = selectedOpportunityIds.includes(o.id);
+    return (
+      <tr
+        key={o.id}
+        className={`${groupByCompany ? "company-grouped-row" : ""} ${isSelected ? "selected" : ""}`}
+      >
+        <td className="select-col" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => toggleSelectOpportunity(o.id)}
+            aria-label={`Select ${o.role} at ${o.company}`}
+          />
+        </td>
+        {visibleColumns.map((colId) => {
         switch (colId) {
           case "opportunity":
             return (
@@ -977,7 +1018,8 @@ export default function App() {
         </div>
       </td>
     </tr>
-  );
+    );
+  };
   if (bootError)
     return (
       <div className="auth-screen">
@@ -1668,6 +1710,12 @@ export default function App() {
                                 opportunity={op}
                                 hasDuplicate={duplicateMap.has(op.id)}
                                 timezone={settings?.timezone}
+                                selected={selectedOpportunityIds.includes(
+                                  op.id,
+                                )}
+                                onToggleSelect={() =>
+                                  toggleSelectOpportunity(op.id)
+                                }
                                 onOpen={() => void openOpportunity(op.id)}
                                 onDrag={setDragging}
                                 onDragEnd={() => {
@@ -1701,6 +1749,38 @@ export default function App() {
                     <table className="opportunity-table">
                       <thead>
                         <tr>
+                          <th className="select-col">
+                            <input
+                              type="checkbox"
+                              aria-label="Select all opportunities"
+                              checked={
+                                filtered.length > 0 &&
+                                filtered.every((o) =>
+                                  selectedOpportunityIds.includes(o.id),
+                                )
+                              }
+                              ref={(el) => {
+                                if (el) {
+                                  const some = filtered.some((o) =>
+                                    selectedOpportunityIds.includes(o.id),
+                                  );
+                                  const all =
+                                    filtered.length > 0 &&
+                                    filtered.every((o) =>
+                                      selectedOpportunityIds.includes(o.id),
+                                    );
+                                  el.indeterminate = some && !all;
+                                }
+                              }}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  selectAllFiltered();
+                                } else {
+                                  clearSelection();
+                                }
+                              }}
+                            />
+                          </th>
                           {visibleColumns.map((colId) => {
                             const colMeta = AVAILABLE_COLUMNS.find(
                               (c) => c.id === colId,
@@ -1742,7 +1822,7 @@ export default function App() {
                           companyGroups.map(([companyName, items]) => {
                             const isCollapsed =
                               !!collapsedCompanies[companyName];
-                            const totalCols = visibleColumns.length + 1;
+                            const totalCols = visibleColumns.length + 2;
                             const activeCount = items.filter((x) => !x.outcome).length;
                             return (
                               <Fragment key={companyName}>
@@ -1969,6 +2049,18 @@ export default function App() {
           }}
         />
       )}
+      {selectedOpportunityIds.length > 0 && !selected && (
+        <BulkActionsBar
+          selectedIds={selectedOpportunityIds}
+          allFilteredCount={filtered.length}
+          opportunities={opportunities}
+          onSelectAllFiltered={selectAllFiltered}
+          onClearSelection={clearSelection}
+          onReload={() => load(true)}
+          onError={(e) => setError(displayError(e))}
+          onNotice={(msg) => setNotice(msg)}
+        />
+      )}
     </div>
   );
 }
@@ -1997,6 +2089,8 @@ function OpportunityCard({
   opportunity: o,
   hasDuplicate = false,
   timezone = "Europe/London",
+  selected = false,
+  onToggleSelect,
   onOpen,
   onDrag,
   onDragEnd,
@@ -2004,6 +2098,8 @@ function OpportunityCard({
   opportunity: Opportunity;
   hasDuplicate?: boolean;
   timezone?: string;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   onOpen: () => void;
   onDrag: (id: string) => void;
   onDragEnd: () => void;
@@ -2017,7 +2113,7 @@ function OpportunityCard({
   );
   return (
     <article
-      className="opportunity-card"
+      className={`opportunity-card ${selected ? "selected" : ""}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("application/x-opportunity", o.id);
@@ -2027,6 +2123,17 @@ function OpportunityCard({
       onDragEnd={onDragEnd}
     >
       <div className="card-top">
+        <input
+          type="checkbox"
+          className="card-select-checkbox"
+          checked={selected}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleSelect?.();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select ${o.role} at ${o.company}`}
+        />
         <span className={`company-avatar tint-${o.company.length % 4}`}>
           {initials(o.company)}
         </span>

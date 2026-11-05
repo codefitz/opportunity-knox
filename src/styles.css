@@ -6514,6 +6514,251 @@ input:is([type="checkbox"],[type="radio"]) { width:14px; height:14px; min-height
   width: auto;
 }
 
+/* Bulk Actions Toolbar & Selection */
+.bulk-actions-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px var(--overlay), 0 2px 8px var(--overlay);
+  border-radius: 40px;
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 95vw;
+  animation: bulk-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes bulk-slide-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.bulk-actions-selection-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.bulk-selected-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--panel-soft);
+  padding: 4px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+}
+
+.bulk-link-btn {
+  background: none;
+  border: none;
+  font-size: 11.5px;
+  color: var(--green);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 2px 4px;
+}
+
+.bulk-link-btn:hover {
+  color: var(--accent-hover);
+}
+
+.bulk-actions-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.bulk-actions-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.bulk-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  border-radius: 20px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.bulk-select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bulk-select-icon {
+  position: absolute;
+  left: 9px;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.bulk-select-wrapper select {
+  padding-left: 26px;
+  padding-right: 20px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  height: 28px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.bulk-select-wrapper select:hover {
+  border-color: var(--ink-secondary);
+}
+
+.bulk-tag-container {
+  position: relative;
+}
+
+.bulk-tag-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px var(--overlay);
+  padding: 12px;
+  min-width: 260px;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulk-tag-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bulk-tag-input-row input {
+  flex: 1;
+  height: 28px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.bulk-common-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.bulk-common-tags-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.bulk-common-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bulk-assessing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.bulk-close-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+  border-radius: 50%;
+}
+
+.bulk-close-btn:hover {
+  color: var(--ink);
+  background: var(--panel-hover);
+}
+
+/* Checkbox & Selection Styles in Table & Cards */
+.opportunity-table th.select-col,
+.opportunity-table td.select-col {
+  width: 38px;
+  min-width: 38px;
+  max-width: 38px;
+  padding: 6px 4px 6px 12px;
+  text-align: center;
+}
+
+.opportunity-table tr.selected {
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.opportunity-table tr.selected:hover {
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
+}
+
+.card-select-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.opportunity-card:hover .card-select-checkbox,
+.card-select-checkbox:checked {
+  opacity: 1;
+}
+
+.opportunity-card.selected {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 35%, transparent);
+}
+
+@media (max-width: 768px) {
+  .bulk-actions-bar {
+    bottom: 12px;
+    border-radius: 12px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    max-width: 98vw;
+  }
+}
+
+
 
 
 

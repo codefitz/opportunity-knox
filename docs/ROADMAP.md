@@ -1,5 +1,28 @@
 # Implementation roadmap
 
+## Bulk Actions & Multi-Select Operations — 5 November 2026
+
+- Delivered comprehensive multi-select and bulk action workflows across Table and Kanban views:
+  - **Batch Backend API (`POST /api/opportunities/batch` in `server/app.mjs`):**
+    - `action: "stage"`: Batch stage updates with audit trail provenance notes (`"Stage updated via bulk action"`), updated stage entry timestamps, outcome clearance, and automated next action / linked task synchronization.
+    - `action: "outcome"`: Batch outcome assignments (`hired`, `rejected`, `ignored`, `withdrawn`, `closed`) and clearing/reactivation with stage event notes.
+    - `action: "add-tag"` / `action: "remove-tag"`: Batch tag tagging and untagging across opportunities.
+    - `action: "delete"`: Atomic batch deletion of opportunities, unlinking associated documents, and cleaning linked tasks and decision records.
+  - **Floating Bulk Actions Toolbar (`src/components/BulkActionsBar.tsx`):**
+    - Pinned bottom actions bar displaying selected count, "Select all filtered" toggle, and quick-action controls.
+    - **Bulk Fit Assessment:** Sequential execution of automated AI fit assessments with live progress (`Assessing N of M: Role at Company...`), cancellation support, and in-transaction transitions to Fit review.
+    - **Move Stage:** Stage dropdown selector for instantaneous batch transitions.
+    - **Tag Management:** Popover to add new tags or remove existing tags present across selected opportunities.
+    - **Outcome Selector:** Dropdown menu for mass status updates or reactivation.
+    - **Batch Deletion:** Danger action with confirmation prompt.
+  - **Selection UI & Table/Kanban Integration (`src/App.tsx`, `src/styles.css`):**
+    - Table View: Selection column header with tri-state checkbox (checked / indeterminate / unchecked), row checkboxes, and active row highlight.
+    - Kanban View: Card-level checkboxes and selected card styling.
+    - Keyboard shortcut: `Escape` key clears active selection.
+  - **Verification:**
+    - Integration test suite `tests/bulk-actions.test.mjs` covering all 6 validation and batch execution scenarios.
+    - Verified full test suite passing (`npm run check`).
+
 ## Extended Mixed-Contrast Themes — 5 November 2026
 
 - Added four new mixed-contrast themes to the Theme picker in Settings:

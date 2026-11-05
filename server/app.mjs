@@ -1552,6 +1552,156 @@ export function createApp(options = {}) {
             archivedIds,
           });
         }
+        if (path === "/api/opportunities/batch" && method === "POST") {
+          const body = await readBody(req);
+          if (!body || typeof body !== "object") fail(400, "Invalid batch request.");
+          const ids = Array.isArray(body.ids)
+            ? body.ids.filter((id) => typeof id === "string" && id.trim())
+            : [];
+          if (!ids.length) fail(400, "Provide at least one opportunity ID.");
+          if (ids.length > 500)
+            fail(400, "Cannot process more than 500 opportunities at once.");
+          const action = choice(
+            body.action,
+            ["stage", "outcome", "add-tag", "remove-tag", "delete"],
+            "action",
+          );
+
+          const updatedIds = [];
+          if (action === "delete") {
+            for (const id of ids) {
+              try {
+                const record = getRecord(id);
+                db.prepare(
+                  "UPDATE documents SET data = json_set(data, '$.opportunityId', null) WHERE json_extract(data, '$.opportunityId') = ?",
+                ).run(record.id);
+                db.prepare(
+                  "DELETE FROM tasks WHERE json_extract(data, '$.opportunityId') = ?",
+                ).run(record.id);
+                try {
+                  db.prepare(
+                    "DELETE FROM decision_assessments WHERE opportunity_id = ?",
+                  ).run(record.id);
+                  db.prepare(
+                    "DELETE FROM opportunity_automation WHERE opportunity_id = ?",
+                  ).run(record.id);
+                } catch {}
+                db.prepare("DELETE FROM records WHERE id = ?").run(record.id);
+                updatedIds.push(record.id);
+              } catch {}
+            }
+            return json(res, {
+              success: true,
+              count: updatedIds.length,
+              updatedIds,
+            });
+          }
+
+          const s = settings();
+          for (const id of ids) {
+            try {
+              const record = getRecord(id);
+              const oldStage = record.stage;
+              const oldOutcome = record.outcome;
+              let changed = false;
+
+              if (action === "stage") {
+                const targetStage = choice(body.stage, stageIds, "stage");
+                if (targetStage !== "outcome") {
+                  record.stage = targetStage;
+                  record.outcome = "";
+                } else {
+                  record.stage = "outcome";
+                  record.outcome =
+                    body.outcome && outcomes.includes(body.outcome)
+                      ? body.outcome
+                      : "closed";
+                }
+                if (oldStage !== record.stage || oldOutcome !== record.outcome) {
+                  const event = addEvent(record, {
+                    note: body.note || "Stage updated via bulk action",
+                  });
+                  record.stageEnteredAt = event.effectiveAt;
+                  record.currentStageEventId = event.id;
+                  if (record.stage !== "outcome") {
+                    const plan = computeNextActionForStage(record.stage, {
+                      today: calendarDay(new Date(), s.timezone),
+                      followUpDays: s.defaultFollowUpDays,
+                      role: record.role,
+                      company: record.company,
+                    });
+                    record.nextAction = plan.nextAction;
+                    record.nextActionDate = plan.nextActionDate;
+                    if (s.autoGenerateTasks && plan.taskTitle) {
+                      putTask({
+                        id: randomUUID(),
+                        title: plan.taskTitle,
+                        notes: "",
+                        dueDate: plan.nextActionDate,
+                        completed: false,
+                        opportunityId: record.id,
+                        revision: 1,
+                        createdAt: now(),
+                        updatedAt: now(),
+                      });
+                    }
+                  }
+                  changed = true;
+                }
+              } else if (action === "outcome") {
+                const targetOutcome = choice(
+                  body.outcome,
+                  ["", ...outcomes],
+                  "outcome",
+                );
+                if (targetOutcome) {
+                  record.stage = "outcome";
+                  record.outcome = targetOutcome;
+                } else {
+                  record.outcome = "";
+                  if (record.stage === "outcome") record.stage = "review";
+                }
+                if (oldStage !== record.stage || oldOutcome !== record.outcome) {
+                  const event = addEvent(record, {
+                    note: body.note || "Outcome updated via bulk action",
+                  });
+                  record.stageEnteredAt = event.effectiveAt;
+                  record.currentStageEventId = event.id;
+                  changed = true;
+                }
+              } else if (action === "add-tag") {
+                const tag = cleanText(body.tag || "", "tag", 40);
+                if (!tag) fail(400, "Tag cannot be empty.");
+                if (!Array.isArray(record.tags)) record.tags = [];
+                if (!record.tags.includes(tag)) {
+                  record.tags.push(tag);
+                  changed = true;
+                }
+              } else if (action === "remove-tag") {
+                const tag = cleanText(body.tag || "", "tag", 40);
+                if (Array.isArray(record.tags) && record.tags.includes(tag)) {
+                  record.tags = record.tags.filter((t) => t !== tag);
+                  changed = true;
+                }
+              }
+
+              if (changed) {
+                record.revision++;
+                record.updatedAt = now();
+                putRecord(record);
+                updatedIds.push(record.id);
+              }
+            } catch (err) {
+              // Skip invalid record ID and continue batch
+            }
+          }
+
+          return json(res, {
+            success: true,
+            count: updatedIds.length,
+            updatedIds,
+          });
+        }
         if (path === "/api/calendar/interviews.ics" && method === "GET") {
           const opportunities = listRecords().map(fullRecord);
           const ics = generateAllInterviewsCalendarIcs(opportunities);
