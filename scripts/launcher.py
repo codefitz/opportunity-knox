@@ -244,6 +244,8 @@ def compose_override(config: dict, state_dir: Path, token: str) -> dict:
     vault_host = config.get("vault")
     mounts = [{"type": "bind", "source": str(state_dir), "target": "/data", "bind": {"create_host_path": False}}]
     mounts += [{"type": "bind", "source": root, "target": mount_path(root), "read_only": (root != config["files"] and (root != vault_host or config.get("vaultReadOnly", False))), "bind": {"create_host_path": False}} for root in roots]
+    if os.path.isdir("/Volumes") and "/Volumes" not in roots:
+        mounts.append({"type": "bind", "source": "/Volumes", "target": "/Volumes", "read_only": False, "bind": {"create_host_path": False}})
     env = {"BOARD_DATA_DIR": "/data", "BOARD_FILES_DIR": mount_path(config["files"]), "BOARD_HOST_FILES_DIR": config["files"], "BOARD_DOCUMENT_ROOTS": json.dumps([mount_path(root) for root in roots]), "BOARD_SETUP_TOKEN": token}
     if vault_host:
         if vault_host in roots and not config.get("vaultReadOnly", False):

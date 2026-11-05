@@ -1,5 +1,28 @@
 # Implementation roadmap
 
+## External Volumes Navigation for Application Exports — 5 November 2026
+
+- Enabled seamless discovery, navigation, and selection of external volumes, removable drives, and mount points (e.g. `/Volumes/Hub`, `/Volumes/Traversys`, Linux `/media` or `/mnt`) for application exports:
+  - **Docker Compose Mount for External Volumes:**
+    - Updated `scripts/launcher.py` (`compose_override`) to detect when `/Volumes` exists on macOS hosts and automatically bind-mount `/Volumes` to `/Volumes` in the container.
+    - Verified volume mounting precedence so workspace document roots, vaults, and sources maintain their expected mount order.
+    - Added unit test in `tests/test_launcher.py` verifying `/Volumes` mount generation.
+  - **System Volumes Detection & Resilient Scanning:**
+    - `GET /api/system/folders` now discovers mounted external volumes (`/Volumes` on macOS, `/media` and `/mnt` on Linux) and returns them in a dedicated `volumes: [{ name, path }]` response.
+    - Resolves symbolic links (such as `/Volumes/Macintosh HD -> /`) using `statSync(target).isDirectory()` so link-based drives are recognized as directories.
+    - Wrapped per-entry stat operations with isolated error handling to gracefully skip virtual system items (like `com.apple.TimeMachine.*`) or permission-restricted mount points without breaking the listing.
+    - Added `notFound` detection when a user enters an unmounted or non-existent path, cleanly falling back to home while signaling clear feedback to the UI.
+  - **Interactive Folder Browser UI Enhancements:**
+    - **External Volumes Row:** Prominently displays connected external drives with distinct `HardDrive` icons and active volume highlighting (e.g. `[💽 Hub]`, `[💽 Traversys]`, `[/Volumes]`).
+    - **Interactive Breadcrumb Navigation:** Visual path breadcrumbs (`/` > `Volumes` > `Hub` > `Applications`) allowing instant one-click jumping to any parent ancestor folder.
+    - **Direct Path Address Bar:** Editable input bar with "Go" button and `Enter` key support allowing users to directly paste or type full paths to external drives.
+    - **Drive Badges in Directory List:** Folders corresponding to external volumes or items in `/Volumes` display distinct drive icons and a `Volume` badge.
+    - **Storage Settings Quick-Select Chips:** Discovered external volumes appear directly in the **Files & storage** card's quick-select chips (e.g. `[💽 Hub/Applications]`) with automatic prefetching on mount.
+  - **Verification:**
+    - Added unit test in `tests/test_launcher.py` validating compose override mounting of `/Volumes`.
+    - Added API test in `tests/server.test.mjs` verifying volume array return and graceful `notFound` handling.
+    - Verified full verification suite passing via `npm run check`.
+
 ## Selectable Full-Disk Application Exports Folder — 5 November 2026
 
 - Upgraded the Opportunity Applications & Exports configuration from a relative workspace subfolder to a full-disk selectable destination:

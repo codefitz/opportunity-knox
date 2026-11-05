@@ -2924,12 +2924,25 @@ Strict constraints:
           let currentPath = requestedPath
             ? resolve(requestedPath)
             : (settings().exportsPath || home);
-          try {
-            if (!existsSync(currentPath) || !statSync(currentPath).isDirectory()) {
+          let notFound = false;
+          if (requestedPath) {
+            try {
+              if (!existsSync(currentPath) || !statSync(currentPath).isDirectory()) {
+                notFound = true;
+                currentPath = home;
+              }
+            } catch {
+              notFound = true;
               currentPath = home;
             }
-          } catch {
-            currentPath = home;
+          } else {
+            try {
+              if (!existsSync(currentPath) || !statSync(currentPath).isDirectory()) {
+                currentPath = home;
+              }
+            } catch {
+              currentPath = home;
+            }
           }
 
           let isWritable = false;
@@ -2944,8 +2957,19 @@ Strict constraints:
           try {
             const entries = readdirSync(currentPath, { withFileTypes: true });
             for (const entry of entries) {
-              if (entry.isDirectory() && !entry.name.startsWith(".")) {
-                if (["node_modules", ".git", ".Trashes", "Library"].includes(entry.name)) continue;
+              if (entry.name.startsWith(".")) continue;
+              if (["node_modules", ".git", ".Trashes", "Library"].includes(entry.name)) continue;
+              if (entry.name.startsWith("com.apple.TimeMachine")) continue;
+              let isDir = false;
+              if (entry.isDirectory()) {
+                isDir = true;
+              } else if (entry.isSymbolicLink()) {
+                try {
+                  const targetStat = statSync(join(currentPath, entry.name));
+                  if (targetStat.isDirectory()) isDir = true;
+                } catch {}
+              }
+              if (isDir) {
                 folders.push({
                   name: entry.name,
                   path: join(currentPath, entry.name),
@@ -2954,6 +2978,62 @@ Strict constraints:
             }
             folders.sort((a, b) => a.name.localeCompare(b.name));
           } catch {}
+
+          const volumes = [];
+          if (existsSync("/Volumes")) {
+            try {
+              const entries = readdirSync("/Volumes", { withFileTypes: true });
+              for (const entry of entries) {
+                if (entry.name.startsWith(".") || entry.name.startsWith("com.apple.TimeMachine")) continue;
+                const full = join("/Volumes", entry.name);
+                try {
+                  const st = statSync(full);
+                  if (st.isDirectory()) {
+                    volumes.push({ name: entry.name, path: full });
+                  }
+                } catch {}
+              }
+            } catch {}
+          }
+          for (const linuxMount of ["/media", "/mnt"]) {
+            if (existsSync(linuxMount)) {
+              try {
+                const entries = readdirSync(linuxMount, { withFileTypes: true });
+                for (const entry of entries) {
+                  if (entry.name.startsWith(".")) continue;
+                  const full = join(linuxMount, entry.name);
+                  try {
+                    const st = statSync(full);
+                    if (st.isDirectory()) {
+                      if (linuxMount === "/media") {
+                        try {
+                          const subEntries = readdirSync(full, { withFileTypes: true });
+                          let hasSub = false;
+                          for (const sub of subEntries) {
+                            if (sub.name.startsWith(".")) continue;
+                            const subFull = join(full, sub.name);
+                            try {
+                              const subSt = statSync(subFull);
+                              if (subSt.isDirectory()) {
+                                volumes.push({ name: `${entry.name}/${sub.name}`, path: subFull });
+                                hasSub = true;
+                              }
+                            } catch {}
+                          }
+                          if (!hasSub) volumes.push({ name: entry.name, path: full });
+                        } catch {
+                          volumes.push({ name: entry.name, path: full });
+                        }
+                      } else {
+                        volumes.push({ name: entry.name, path: full });
+                      }
+                    }
+                  } catch {}
+                }
+              } catch {}
+            }
+          }
+          volumes.sort((a, b) => a.name.localeCompare(b.name));
 
           const presets = [
             { label: "Home", path: home },
@@ -2967,6 +3047,7 @@ Strict constraints:
               ? [{ label: "Downloads", path: join(home, "Downloads") }]
               : []),
             ...(existsSync("/Volumes") ? [{ label: "Volumes", path: "/Volumes" }] : []),
+            ...volumes.map((v) => ({ label: `Volume: ${v.name}`, path: v.path })),
             {
               label: "Document workspace",
               path: join(filesDir, settings().documentsSubdir || "opportunities"),
@@ -2983,7 +3064,9 @@ Strict constraints:
             parentPath,
             folders,
             presets,
+            volumes,
             writable: isWritable,
+            notFound,
           });
         }
         if (path === "/api/system/folders" && method === "POST") {

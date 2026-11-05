@@ -58,6 +58,7 @@ import {
   Folder,
   FolderOpen,
   FolderInput,
+  HardDrive,
   Layers,
   LayoutGrid,
   ChartNoAxesCombined,
@@ -6961,6 +6962,7 @@ function SettingsPage({
   const storageTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   type FolderEntry = { name: string; path: string };
+  type VolumeEntry = { name: string; path: string };
   const [folderBrowser, setFolderBrowser] = useState<{
     open: boolean;
     loading: boolean;
@@ -6968,10 +6970,12 @@ function SettingsPage({
     parentPath: string | null;
     folders: FolderEntry[];
     presets: { label: string; path: string }[];
+    volumes: VolumeEntry[];
     writable: boolean;
     error: string | null;
     newFolderName: string;
     creating: boolean;
+    addressInput: string;
   }>({
     open: false,
     loading: false,
@@ -6979,14 +6983,22 @@ function SettingsPage({
     parentPath: null,
     folders: [],
     presets: [],
+    volumes: [],
     writable: true,
     error: null,
     newFolderName: "",
     creating: false,
+    addressInput: "",
   });
 
   const loadFolders = useCallback(async (targetPath?: string) => {
-    setFolderBrowser((prev) => ({ ...prev, open: true, loading: true, error: null }));
+    setFolderBrowser((prev) => ({
+      ...prev,
+      open: true,
+      loading: true,
+      error: null,
+      addressInput: targetPath !== undefined ? targetPath : prev.addressInput,
+    }));
     try {
       const url = targetPath ? `/system/folders?path=${encodeURIComponent(targetPath)}` : "/system/folders";
       const data = await api<{
@@ -6994,7 +7006,9 @@ function SettingsPage({
         parentPath: string | null;
         folders: FolderEntry[];
         presets: { label: string; path: string }[];
+        volumes: VolumeEntry[];
         writable: boolean;
+        notFound?: boolean;
       }>(url);
       setFolderBrowser((prev) => ({
         ...prev,
@@ -7003,9 +7017,11 @@ function SettingsPage({
         currentPath: data.currentPath,
         parentPath: data.parentPath,
         folders: data.folders,
-        presets: data.presets,
+        presets: data.presets || [],
+        volumes: data.volumes || [],
         writable: data.writable,
-        error: null,
+        addressInput: data.currentPath,
+        error: data.notFound ? `Location "${targetPath}" could not be opened.` : null,
       }));
     } catch (err: any) {
       setFolderBrowser((prev) => ({
@@ -7016,6 +7032,38 @@ function SettingsPage({
       }));
     }
   }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await api<{
+          currentPath: string;
+          parentPath: string | null;
+          folders: FolderEntry[];
+          presets: { label: string; path: string }[];
+          volumes: VolumeEntry[];
+          writable: boolean;
+        }>("/system/folders");
+        setFolderBrowser((prev) => ({
+          ...prev,
+          presets: data.presets || [],
+          volumes: data.volumes || [],
+        }));
+      } catch {}
+    })();
+  }, []);
+
+  const breadcrumbSegments = useMemo(() => {
+    const cur = folderBrowser.currentPath || "/";
+    const parts = cur.split("/").filter(Boolean);
+    const crumbs: { label: string; path: string }[] = [{ label: "/", path: "/" }];
+    let accumulated = "";
+    for (const part of parts) {
+      accumulated += "/" + part;
+      crumbs.push({ label: part, path: accumulated });
+    }
+    return crumbs;
+  }, [folderBrowser.currentPath]);
 
   const handleSelectFolder = (selectedPath: string) => {
     const updated = { ...formRef.current, exportsPath: selectedPath };
@@ -7316,8 +7364,8 @@ function SettingsPage({
               </Field>
             </div>
 
-            {/* Quick Presets */}
-            {folderBrowser.presets.length > 0 && (
+            {/* Quick Presets & External Volumes */}
+            {(folderBrowser.presets.length > 0 || folderBrowser.volumes.length > 0) && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11.5 }}>
                 <span style={{ color: "var(--muted)" }}>Quick select:</span>
                 <button
@@ -7332,20 +7380,40 @@ function SettingsPage({
                 >
                   Workspace default
                 </button>
-                {folderBrowser.presets.slice(0, 4).map((preset) => (
+                {folderBrowser.presets
+                  .filter((p) => ["Home", "Documents", "Desktop", "Downloads"].includes(p.label))
+                  .map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      className="button secondary small"
+                      style={{ padding: "2px 8px", fontSize: 11 }}
+                      onClick={() => {
+                        const target = `${preset.path.replace(/\/+$/, "")}/Applications`;
+                        const updated = { ...formRef.current, exportsPath: target };
+                        setForm(updated);
+                        void performStorageSave(updated);
+                      }}
+                    >
+                      {preset.label}/Applications
+                    </button>
+                  ))}
+                {folderBrowser.volumes.map((vol) => (
                   <button
-                    key={preset.label}
+                    key={vol.path}
                     type="button"
                     className="button secondary small"
-                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    style={{ padding: "2px 8px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4 }}
                     onClick={() => {
-                      const target = `${preset.path.replace(/\/+$/, "")}/Applications`;
+                      const target = `${vol.path.replace(/\/+$/, "")}/Applications`;
                       const updated = { ...formRef.current, exportsPath: target };
                       setForm(updated);
                       void performStorageSave(updated);
                     }}
+                    title={`Export to ${vol.path}/Applications`}
                   >
-                    {preset.label}/Applications
+                    <HardDrive size={11} style={{ color: "var(--accent)" }} />
+                    <span>{vol.name}/Applications</span>
                   </button>
                 ))}
               </div>
@@ -7487,14 +7555,14 @@ function SettingsPage({
           <div
             className="modal modal-wide"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: 680, display: "flex", flexDirection: "column", gap: 16 }}
+            style={{ maxWidth: 700, display: "flex", flexDirection: "column", gap: 14 }}
           >
             <div className="modal-heading" style={{ marginBottom: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <FolderOpen size={20} style={{ color: "var(--accent)" }} />
                 <div>
                   <h2 style={{ fontSize: 18 }}>Select Application Export Folder</h2>
-                  <p>Browse full disk to select where your opportunity application materials and exports are saved.</p>
+                  <p>Browse full disk and external volumes to select where your opportunity application materials and exports are saved.</p>
                 </div>
               </div>
               <button
@@ -7507,40 +7575,169 @@ function SettingsPage({
               </button>
             </div>
 
-            {/* Quick jump presets */}
-            {folderBrowser.presets.length > 0 && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "6px 10px", background: "var(--panel-soft)", borderRadius: 8 }}>
-                <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>Locations:</span>
-                {folderBrowser.presets.map((p) => (
-                  <button
-                    key={p.label}
-                    type="button"
-                    className="button secondary small"
-                    style={{ padding: "2px 8px", fontSize: 11 }}
-                    onClick={() => loadFolders(p.path)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Quick jump locations & external volumes */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {folderBrowser.presets.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "6px 10px", background: "var(--panel-soft)", borderRadius: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>Locations:</span>
+                  {folderBrowser.presets
+                    .filter((p) => ["Home", "Documents", "Desktop", "Downloads", "Document workspace"].includes(p.label))
+                    .map((p) => (
+                      <button
+                        key={p.label}
+                        type="button"
+                        className="button secondary small"
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          borderColor: folderBrowser.currentPath === p.path ? "var(--accent)" : undefined,
+                          background: folderBrowser.currentPath === p.path ? "var(--accent-soft)" : undefined,
+                        }}
+                        onClick={() => loadFolders(p.path)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                </div>
+              )}
 
-            {/* Current path and navigation */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--field-bg)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
+              {(folderBrowser.volumes.length > 0 || folderBrowser.presets.some((p) => p.path === "/Volumes")) && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "6px 10px", background: "var(--panel-soft)", borderRadius: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                    <HardDrive size={12} />
+                    <span>External Volumes:</span>
+                  </span>
+                  {folderBrowser.volumes.map((v) => {
+                    const isInside = folderBrowser.currentPath === v.path || folderBrowser.currentPath.startsWith(v.path + "/");
+                    return (
+                      <button
+                        key={v.path}
+                        type="button"
+                        className="button secondary small"
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          borderColor: isInside ? "var(--accent)" : undefined,
+                          background: isInside ? "var(--accent-soft)" : undefined,
+                        }}
+                        onClick={() => loadFolders(v.path)}
+                        title={`Browse ${v.path}`}
+                      >
+                        <HardDrive size={11} style={{ color: "var(--accent)" }} />
+                        <span>{v.name}</span>
+                      </button>
+                    );
+                  })}
+                  {folderBrowser.presets.some((p) => p.path === "/Volumes") && (
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      style={{
+                        padding: "2px 8px",
+                        fontSize: 11,
+                        borderColor: folderBrowser.currentPath === "/Volumes" ? "var(--accent)" : undefined,
+                        background: folderBrowser.currentPath === "/Volumes" ? "var(--accent-soft)" : undefined,
+                      }}
+                      onClick={() => loadFolders("/Volumes")}
+                    >
+                      /Volumes
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Breadcrumb Navigation Bar */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+                padding: "6px 10px",
+                background: "var(--field-bg)",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+              }}
+            >
               <button
                 type="button"
                 className="button secondary small"
                 disabled={!folderBrowser.parentPath || folderBrowser.loading}
                 onClick={() => folderBrowser.parentPath && loadFolders(folderBrowser.parentPath)}
                 title="Go up to parent folder"
-                style={{ padding: "4px 8px" }}
+                style={{ padding: "2px 6px" }}
               >
-                <ChevronUp size={14} />
+                <ChevronUp size={13} />
                 <span>Up</span>
               </button>
-              <code style={{ fontSize: 12, flex: 1, wordBreak: "break-all", color: "var(--ink)" }}>
-                {folderBrowser.currentPath}
-              </code>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", flex: 1, fontSize: 12 }}>
+                {breadcrumbSegments.map((crumb, idx) => {
+                  const isLast = idx === breadcrumbSegments.length - 1;
+                  return (
+                    <Fragment key={crumb.path}>
+                      {idx > 0 && <ChevronRight size={11} style={{ color: "var(--muted)", opacity: 0.6 }} />}
+                      {isLast ? (
+                        <span style={{ fontWeight: 600, color: "var(--ink)" }}>{crumb.label}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => loadFolders(crumb.path)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            padding: "1px 4px",
+                            cursor: "pointer",
+                            color: "var(--accent)",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            textDecoration: "underline",
+                            fontFamily: "inherit",
+                          }}
+                          title={`Navigate to ${crumb.path}`}
+                        >
+                          {crumb.label}
+                        </button>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Direct Path Input Address Bar */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Type or paste path (e.g. /Volumes/Hub/Applications)…"
+                value={folderBrowser.addressInput}
+                onChange={(e) => setFolderBrowser((prev) => ({ ...prev, addressInput: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (folderBrowser.addressInput.trim()) {
+                      void loadFolders(folderBrowser.addressInput.trim());
+                    }
+                  }
+                }}
+                style={{ flex: 1, height: 32, fontSize: 12, fontFamily: "monospace" }}
+              />
+              <button
+                type="button"
+                className="button secondary small"
+                style={{ padding: "4px 12px", height: 32 }}
+                disabled={!folderBrowser.addressInput.trim() || folderBrowser.loading}
+                onClick={() => {
+                  if (folderBrowser.addressInput.trim()) {
+                    void loadFolders(folderBrowser.addressInput.trim());
+                  }
+                }}
+              >
+                Go
+              </button>
             </div>
 
             {folderBrowser.error && (
@@ -7572,36 +7769,48 @@ function SettingsPage({
                   No subdirectories found in this folder.
                 </div>
               ) : (
-                folderBrowser.folders.map((f) => (
-                  <button
-                    key={f.path}
-                    type="button"
-                    onClick={() => loadFolders(f.path)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      padding: "8px 14px",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: "1px solid var(--line)",
-                      color: "var(--ink)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      fontSize: 12.5,
-                      fontFamily: "inherit",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-hover)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Folder size={15} style={{ color: "var(--accent)" }} />
-                      <span>{f.name}</span>
-                    </div>
-                    <ChevronRight size={14} style={{ color: "var(--muted)" }} />
-                  </button>
-                ))
+                folderBrowser.folders.map((f) => {
+                  const isVol = folderBrowser.currentPath === "/Volumes" || folderBrowser.volumes.some((v) => v.path === f.path);
+                  return (
+                    <button
+                      key={f.path}
+                      type="button"
+                      onClick={() => loadFolders(f.path)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        padding: "8px 14px",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid var(--line)",
+                        color: "var(--ink)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontSize: 12.5,
+                        fontFamily: "inherit",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {isVol ? (
+                          <HardDrive size={15} style={{ color: "var(--accent)" }} />
+                        ) : (
+                          <Folder size={15} style={{ color: "var(--accent)" }} />
+                        )}
+                        <span style={{ fontWeight: isVol ? 600 : 400 }}>{f.name}</span>
+                        {isVol && (
+                          <span style={{ fontSize: 10, background: "var(--panel-soft)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 4, color: "var(--muted)" }}>
+                            Volume
+                          </span>
+                        )}
+                      </div>
+                      <ChevronRight size={14} style={{ color: "var(--muted)" }} />
+                    </button>
+                  );
+                })
               )}
             </div>
 

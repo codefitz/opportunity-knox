@@ -278,6 +278,17 @@ class LauncherTests(unittest.TestCase):
         launcher.atomic_json(self.state/'pending-sources.json',{'roots':[{'id':'bad','name':'bad','hostPath':str(self.root)}]})
         with self.assertRaises(launcher.LauncherError):launcher.make_config(self.args(),self.state)
 
+    def test_external_volumes_mounted_when_available(self):
+        config, _ = launcher.make_config(self.args(), self.state)
+        orig_isdir = launcher.os.path.isdir
+        with patch.object(launcher.os.path, "isdir", side_effect=lambda p: True if p == "/Volumes" else orig_isdir(p)):
+            override = launcher.compose_override(config, self.state, "test-token")
+        volumes_mount = next((m for m in override["services"]["board"]["volumes"] if m.get("target") == "/Volumes"), None)
+        self.assertIsNotNone(volumes_mount)
+        self.assertEqual(volumes_mount["source"], "/Volumes")
+        self.assertFalse(volumes_mount["read_only"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

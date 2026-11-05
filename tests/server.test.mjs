@@ -5521,7 +5521,13 @@ test("full-disk application exports folder configuration, browsing, validation, 
   assert.equal(folderList.status, 200);
   assert.ok(typeof folderList.data.currentPath === "string");
   assert.ok(Array.isArray(folderList.data.presets));
+  assert.ok(Array.isArray(folderList.data.volumes));
   assert.ok(folderList.data.presets.some((p) => p.label === "Home" || p.label === "Document workspace"));
+
+  // 1b. Test browsing with a nonexistent path sets notFound: true and falls back to home
+  const notFoundRes = await f.request("/api/system/folders?path=/nonexistent-test-folder-" + Date.now());
+  assert.equal(notFoundRes.status, 200);
+  assert.equal(notFoundRes.data.notFound, true);
 
   // 2. Reject relative path for exportsPath with clear error
   const rejectRel = await f.request("/api/settings", {
