@@ -9,7 +9,7 @@ const OPKNOX_API_KEY = process.env.OPKNOX_API_KEY || "";
 
 const server = new McpServer({
   name: "opportunity-knox",
-  version: "0.4.8",
+  version: "0.4.9",
 });
 
 function formatError(prefix, error) {

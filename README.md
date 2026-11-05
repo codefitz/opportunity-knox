@@ -1,6 +1,6 @@
 # Opportunity Knox
 
-[Latest stable release: v0.4.8](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current development version: v0.4.9-dev.0** (`main`)
+[Latest stable release: v0.4.9](https://github.com/codefitz/opportunity-knox/releases/latest) · **Current version: v0.4.9**
 
 A private career workspace, from a saved job description to the final hiring decision. One service keeps opportunities, tasks, career evidence, and preferences available across your devices. Docker runs behind a small launcher.
 
@@ -8,7 +8,7 @@ A private career workspace, from a saved job description to the final hiring dec
 
 ## Releases and development
 
-Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release; it can contain changes beyond v0.4.8.
+Use the [latest release](https://github.com/codefitz/opportunity-knox/releases/latest) for the stable version. The `main` branch is the development version for the next release.
 
 The sidebar and Settings show the installed version, development/release label, and short Git commit linked to GitHub. Builds made with uncommitted changes also show **+ local changes**, because the commit alone does not describe their complete source. The **Latest release** link always opens GitHub's latest published release. Build labels describe the running app, not newer code waiting on the host.
 
@@ -81,20 +81,26 @@ Open an opportunity to **Delete opportunity**, or use **Clear all opportunities*
 
 The initial manual workflow covers opportunity capture, dated stage history and corrections, notes, repeatable interviews and communications, document uploads/downloads, reference material, and configurable storage. The app tracks the documents used for an application; recording submission does not send anything to an employer.
 
-- **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes, tasks, and interview/action queues. Charts and records update after changes and periodic refreshes.
-- **Opportunities:** searchable list for detailed application tracking.
-- **Kanban board:** full-page eight-stage drag-and-drop board with a compact search/filter/Add opportunity bar. Stage headings stay visible while long columns scroll independently; scroll sideways to reach every stage. The back arrow returns to the opportunity list, and the actions menu retains clear-all. The sidebar remains visible; its hide/show control slides navigation out of view and lets the board expand. The same control works across workspace pages and with the bottom navigation on phones.
+- **Dashboard:** statistics derived from saved opportunities and dated history, application activity, outcomes (including "Gone cold"), daily application targets with streak tracking, and interview/action queues. Charts and records update after changes and periodic refreshes.
+- **Opportunities:** searchable table with customizable column visibility, sortable headers, and an expandable "Group by company" view with rollup counts.
+- **Kanban board:** full-page eight-stage drag-and-drop board with a compact search/filter/Add opportunity bar and smooth, unclipped card drag feedback. Stage headings stay visible while long columns scroll independently; scroll sideways to reach every stage. The back arrow returns to the opportunity list, and the actions menu retains clear-all. The sidebar hide/show control slides navigation out of view and lets the board expand.
+- **Bulk actions:** floating multi-select toolbar across board and table views for batch stage transitions, mass outcome assignments, tag additions/removals, and safe batch deletion.
+- **Fit assessment & alignment:** conventional ML engine using TF-IDF token matching, target role similarity, and seniority classification to calculate transparent match percentages (Strong, Moderate, Reach, Mismatch) with visible matched and missing competencies.
+- **Negative exclusion keywords:** user-defined exclusion terms (e.g. `DV clearance`, `Inside IR35`) with card warning badges, filter toggles, and 1-click batch archival.
+- **Duplicate detection & merge:** automatically flags duplicate opportunities matching by URL or employer/title, offering 1-click consolidation that merges documents, activities, and audit history.
+- **Target companies & roles wishlist:** dedicated tracking for prospective employers and dream roles with 1-click conversion into active opportunities.
+- **Workflow automation:** milestone-driven stage auto-advancement with 1-click Undo, automated next actions, and linked to-do task scheduling upon stage transitions.
+- **Dedicated managed folders (`Company > Role`):** automatically organizes opportunity files on disk into `<Company>/<Role>` folders, migrating documents seamlessly if an employer or title is edited.
 - **To-do list:** add, edit, complete, and reopen tasks; sort open tasks by due date with undated work last. Link tasks to opportunities.
 - **Career Hub & STAR stories:** store CVs, previous JDs, certificates, project notes, achievements, and STAR stories. Promote chat attachments or structured STAR stories directly into your library with one click. Read Google Workspace shortcut files (`.gdoc`, `.gsheet`, `.gslides`) with live Google Drive export, public export fallback, or metadata indexing, and open originals directly.
-- **Human-readable managed folders:** automatically organizes opportunity files on disk into `<stable-id>-<company>-<role>/` directories with dedicated stage subfolders (`job-description/`, `drafts/`, `approved/`, `submitted/`, `interviews/`, `correspondence/`). Existing folders can be migrated anytime via **Organize folders** in Settings or Opportunity documents.
-- **Smarter job intake:** supports public URLs (HTML/PDF), pasted job text, and document uploads (PDF/DOCX/TXT/MD). Features bounded local English PDF OCR, original source snapshots, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
+- **Smarter job intake:** automatic tracking parameter cleaning (UTM, LinkedIn `trk`, Indeed tokens, Greenhouse `gh_src`), instant fetch on paste, and direct external job link buttons. Supports public URLs (HTML/PDF), pasted job text, document uploads (PDF/DOCX/TXT/MD), bounded local English PDF OCR, and automatic headless browser rendering for JavaScript-rendered SPA job boards.
 - **Calendar export (RFC 5545 ICS):** export single interview events, an opportunity-specific `.ics` calendar, or subscribe to a global live interview feed across all opportunities.
 - **Document Studio:** dedicated document library and authoring workspace. Manage master CVs and templates by category, view multi-page rendered previews, derive OpenXML templates with placeholder neutralisation, perform contextual chat revisions, sync/export with Obsidian vaults, and import Google Docs/Word/PDF documents with non-destructive conflict handling.
 - **High-Fidelity AI Document Generation:** tailor complete CVs from a visual reference Word (.docx) document using local Codex CLI without flattening structure into Markdown. Preserves sidebars, multi-column tables, margins, and typography while grounding content strictly in verified candidate evidence.
 - **Model Context Protocol (MCP) Server:** connect Claude Desktop over local stdio (`server/mcp-server.mjs`) to search opportunities, retrieve relevant career evidence, and save candidate fit assessments (strengths and gaps) directly from your chat client. Protected by bearer token authentication, revision conflict handling, and idempotent retries.
-- **Career Buddy (optional AI):** choose OpenAI, Claude, Gemini, Ollama, Codex, or custom OpenAI-compatible endpoints. Extract job details with quote-backed evidence, review fit/salary/skills against career evidence, and generate reviewable Word drafts without modifying original files. Keep AI off whenever preferred.
+- **Career Buddy (optional AI):** overhauled friendly chat workspace with pinned bottom composer, clean drag-and-drop source dropzone, resilient opportunity extraction accepting blank fields, and 1-click opportunity creation. Choose OpenAI, Claude, Gemini, Ollama, Codex, or custom OpenAI-compatible endpoints.
 - **AI Task Scheduler & Activity:** background task queuing with persistent SQLite tracking, cooperative cancellation, restart recovery, token usage reporting, and exportable activity logs.
-- **Settings & Themes:** customizable profiles, themes (Forest, Cappuccino, Ocean, Midnight) with light/dark contrast and custom accents, storage location migration, verified backups/restores, and update checking.
+- **Settings & Extended Themes:** customizable profiles, 8 themes with light/dark contrast (Forest, Cappuccino, Ocean, Midnight, Alpine Mint, Sandstone & Slate, Nordic Frost, Solar Dark) with custom accents, storage location migration, verified backups/restores, and update checking.
 
 ## Look up a job link
 
