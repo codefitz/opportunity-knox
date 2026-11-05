@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { formatDate } from "../api";
 import type { Opportunity } from "../types";
+import { parseMarkdownBlocks } from "./MarkdownViewer";
 
 function countWords(text?: string): number {
   if (!text || !text.trim()) return 0;
@@ -179,9 +180,9 @@ export default function OpportunityAISummary({
   return (
     <section className="workflow-section ai-summary-container" aria-label="AI Summary">
       <div className="section-intro">
-        <h3>100-word job summary</h3>
+        <h3>Role summary &amp; breakdown</h3>
         <p>
-          A concise executive summary of the job description highlighting core purpose, key responsibilities, and essential requirements.
+          A concise 100-word executive summary of the job description, plus top 5 skills and 5 key responsibilities.
         </p>
       </div>
 
@@ -230,7 +231,7 @@ export default function OpportunityAISummary({
               Job description contains {descWordCount} words.
             </p>
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-              Click below to generate a focused 100-word executive summary using your configured AI model.
+              Click below to generate a focused 100-word executive summary with top 5 skills and 5 key responsibilities using your configured AI model.
             </p>
           </div>
           <button
@@ -248,7 +249,7 @@ export default function OpportunityAISummary({
             ) : (
               <>
                 <Sparkles size={15} />
-                Generate 100-word summary
+                Generate summary
               </>
             )}
           </button>
@@ -288,7 +289,7 @@ export default function OpportunityAISummary({
                 className="button secondary small"
                 disabled={generating || busy}
                 onClick={() => void handleGenerate()}
-                title="Regenerate 100-word summary from job description"
+                title="Regenerate summary, skills, and responsibilities from job description"
               >
                 <RefreshCw size={13} className={generating ? "spin" : ""} />
                 {generating ? "Regenerating…" : "Regenerate"}
@@ -300,7 +301,7 @@ export default function OpportunityAISummary({
             <div>
               <textarea
                 className="ai-summary-edit-textarea"
-                rows={6}
+                rows={12}
                 value={editText}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -308,7 +309,7 @@ export default function OpportunityAISummary({
                   scheduleSaveEdit(val, 600);
                 }}
                 onBlur={handleBlur}
-                placeholder="Enter or refine the summary…"
+                placeholder="Enter or refine the summary, skills, and responsibilities…"
               />
               <div className="auto-save-bar" style={{ marginTop: 8 }}>
                 <div className="auto-save-status" role="status" aria-live="polite">
@@ -350,7 +351,9 @@ export default function OpportunityAISummary({
               </div>
             </div>
           ) : (
-            <p className="ai-summary-text">{o.aiSummary}</p>
+            <div className="markdown-rendered-body ai-summary-rendered">
+              {parseMarkdownBlocks(o.aiSummary || "")}
+            </div>
           )}
 
           {o.description && (

@@ -5368,7 +5368,7 @@ test("opportunity AI description summary generates ~100-word summary, checks pre
       return buddyResponse(
         buddyReply({
           reply:
-            "Lead systems architect responsible for end-to-end cloud infrastructure, microservices migration, and technical governance. Coordinates senior engineers and aligns delivery with business stakeholders. Requires 7+ years distributed systems, Go, Kubernetes, and AWS experience.",
+            "Lead systems architect responsible for end-to-end cloud infrastructure, microservices migration, and technical governance. Coordinates senior engineers and aligns delivery with business stakeholders. Requires 7+ years distributed systems, Go, Kubernetes, and AWS experience.\n\n### Top 5 Skills\n- Distributed systems architecture\n- Go and Python backend engineering\n- Kubernetes container orchestration\n- AWS cloud platforms and Terraform\n- Technical governance and architecture standards\n\n### Key Responsibilities\n- Lead cloud infrastructure modernization\n- Architect scalable microservices\n- Establish engineering standards and code quality benchmarks\n- Mentor senior engineers and conduct architecture reviews\n- Partner with business stakeholders to align delivery",
         }),
       );
     },
@@ -5422,8 +5422,12 @@ test("opportunity AI description summary generates ~100-word summary, checks pre
   assert.equal(genRes.status, 200);
   assert.ok(genRes.data.aiSummary);
   assert.match(genRes.data.aiSummary, /cloud infrastructure/i);
+  assert.match(genRes.data.aiSummary, /Top 5 Skills/i);
+  assert.match(genRes.data.aiSummary, /Key Responsibilities/i);
   assert.ok(genRes.data.aiSummaryGeneratedAt);
   assert.ok(promptSeen.includes("Acme Cloud is hiring a Principal Architect"));
+  assert.ok(promptSeen.includes("Top 5 Skills"));
+  assert.ok(promptSeen.includes("Key Responsibilities"));
 
   // 4. Edits to aiSummary persist via PATCH /api/opportunities/:id
   const patchRes = await f.request(`/api/opportunities/${updated.id}`, {

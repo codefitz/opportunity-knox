@@ -61,7 +61,7 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
-function parseMarkdownBlocks(text: string): ReactNode[] {
+export function parseMarkdownBlocks(text: string): ReactNode[] {
   const lines = text.split(/\r?\n/);
   const elements: ReactNode[] = [];
   let i = 0;
@@ -72,7 +72,7 @@ function parseMarkdownBlocks(text: string): ReactNode[] {
     if (/^(---|___|\*\*\*)\s*$/.test(l.trim())) return true;
     if (/^(#{1,6})\s+/.test(l)) return true;
     if (l.startsWith(">")) return true;
-    if (/^\s*[-*]\s+/.test(l)) return true;
+    if (/^\s*[-*•]\s+/.test(l)) return true;
     if (/^\s*\d+\.\s+/.test(l)) return true;
     if (l.includes("|") && nextL && /^\s*\|?[-:| ]+\|?\s*$/.test(nextL)) return true;
     return false;
@@ -216,10 +216,10 @@ function parseMarkdownBlocks(text: string): ReactNode[] {
     }
 
     // Bulleted List
-    if (/^\s*[-*]\s+/.test(line)) {
+    if (/^\s*[-*•]\s+/.test(line)) {
       const listItems: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]) && !/^\s*[-*]\s+\[[ xX]\]/.test(lines[i])) {
-        listItems.push(lines[i].replace(/^\s*[-*]\s+/, ""));
+      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i]) && !/^\s*[-*]\s+\[[ xX]\]/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^\s*[-*•]\s+/, ""));
         i++;
       }
       elements.push(

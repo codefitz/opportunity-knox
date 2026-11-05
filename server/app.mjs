@@ -1985,16 +1985,33 @@ export function createApp(options = {}) {
           }
           assertConfigured(c);
 
-          const systemPrompt = `You are an expert executive career summarizer. Summarize the following job description in approximately 100 words (between 80 and 120 words).
-Focus on:
-1. Core purpose and seniority of the role.
-2. 3-4 primary responsibilities.
-3. Key technical skills, domain expertise, and qualifications required.
-Tone: Direct, factual, professional.
+          const systemPrompt = `You are an expert executive career summarizer. Analyze the provided job description and produce a structured role briefing formatted in Markdown with three distinct sections:
+
+1. **Executive Summary**: A concise summary of approximately 100 words (80–120 words) detailing the core purpose, seniority/level, and organisational context of the position.
+2. **Top 5 Skills**: Exactly 5 bullet points (- ...) highlighting the most critical technical capabilities, domain expertise, tools, or qualifications required.
+3. **Key Responsibilities**: Exactly 5 bullet points (- ...) highlighting the top 5 primary duties, deliverables, and operational responsibilities.
+
+Format:
+[100-word executive summary paragraph]
+
+### Top 5 Skills
+- [Skill 1]
+- [Skill 2]
+- [Skill 3]
+- [Skill 4]
+- [Skill 5]
+
+### Key Responsibilities
+- [Responsibility 1]
+- [Responsibility 2]
+- [Responsibility 3]
+- [Responsibility 4]
+- [Responsibility 5]
+
 Strict constraints:
-- Do not invent facts, benefits, or requirements not present in the source text.
-- Do not include conversational filler, preamble, greetings, or meta-commentary (never say "Here is a summary", "In summary", "This job is", etc.).
-- Output ONLY the summary text or JSON matching ${JSON.stringify(BUDDY_SCHEMA)} with changes:[], draft:{kind:"none",title:"",content:""}, sourceIds:[], and reply containing the summary.`;
+- Ground all skills and responsibilities strictly in the source text; never invent or extrapolate unmentioned skills, tools, or requirements.
+- Do not include conversational filler, greetings, preamble, or meta-commentary (do NOT say "Here is the summary", "Summary:", etc.).
+- Output ONLY the markdown text or JSON matching ${JSON.stringify(BUDDY_SCHEMA)} with changes:[], draft:{kind:"none",title:"",content:""}, sourceIds:[], and reply containing the markdown.`;
 
           const userPrompt = `Role: ${record.role}\nCompany: ${record.company}\n\nJob Description:\n${record.description.slice(0, 30000)}`;
 

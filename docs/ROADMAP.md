@@ -1,13 +1,17 @@
 # Implementation roadmap
 
-## AI Summary Tab for Opportunities — 5 November 2026
+## AI Summary Tab for Opportunities (with Top 5 Skills & Key Responsibilities) — 5 November 2026
 
 - Introduced a dedicated **"AI Summary"** tab in the Opportunity detail modal situated directly between "Overview" and "Fit assessment":
-  - **Manual 100-Word Summary Generation:**
-    - Features a manual "Generate 100-word summary" action powered by the user's configured Career Buddy AI provider (`POST /api/opportunities/:id/description-summary`).
-    - Focuses strictly on core role purpose/seniority, key responsibilities, and required technical skills/qualifications (constrained between 80 and 120 words).
+  - **Manual Role Summary & Breakdown Generation:**
+    - Features a manual "Generate summary" action powered by the user's configured Career Buddy AI provider (`POST /api/opportunities/:id/description-summary`).
+    - Produces a structured Markdown role briefing containing:
+      1. A concise ~100-word (80–120 words) executive summary capturing core purpose, seniority, and organisational context.
+      2. **Top 5 Skills**: Exactly 5 bullet points highlighting critical technical capabilities, domain expertise, and qualifications strictly grounded in the description.
+      3. **Key Responsibilities**: Exactly 5 bullet points highlighting primary duties, deliverables, and operational expectations.
     - Preserves uninvented factual integrity without conversational filler, greetings, or fabrications.
-  - **Editable with Auto-Save & Multi-Step Undo:**
+  - **Rich Markdown Rendering & Editable with Auto-Save & Multi-Step Undo:**
+    - Renders structured Markdown with headers and styled bullet points via `parseMarkdownBlocks` supporting standard dashes, asterisks, and unicode bullets (`•`).
     - Provides instant copy-to-clipboard and re-generate actions.
     - Allows inline editing with 600ms debounced auto-save, blur flushes, and full undo stack support (`Cmd+Z` / `Ctrl+Z` / "Undo last change" button).
   - **Clear States & Contextual Navigation:**
