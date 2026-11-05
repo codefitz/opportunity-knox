@@ -164,7 +164,7 @@ test("Bulk Actions: batch stage change, outcome, tag management and delete", asy
   assert.ok(opp1Tags.includes("High Priority"));
   assert.ok(!opp2Tags.includes("High Priority"));
 
-  // 5. Batch Outcome: Mark opp3 as outcome "rejected"
+  // 5. Batch Outcome: Mark opp3 as outcome "rejected" and opp2 as outcome "gone-cold"
   const outcomeRes = await f.request("/api/opportunities/batch", {
     method: "POST",
     body: {
@@ -176,10 +176,24 @@ test("Bulk Actions: batch stage change, outcome, tag management and delete", asy
   assert.equal(outcomeRes.status, 200);
   assert.equal(outcomeRes.data.count, 1);
 
+  const coldRes = await f.request("/api/opportunities/batch", {
+    method: "POST",
+    body: {
+      action: "outcome",
+      outcome: "gone-cold",
+      ids: [opp2.data.id],
+    },
+  });
+  assert.equal(coldRes.status, 200);
+  assert.equal(coldRes.data.count, 1);
+
   const boardAfterOutcome = await f.request("/api/board");
   const opp3Outcome = boardAfterOutcome.data.opportunities.find((o) => o.id === opp3.data.id);
+  const opp2Outcome = boardAfterOutcome.data.opportunities.find((o) => o.id === opp2.data.id);
   assert.equal(opp3Outcome.stage, "outcome");
   assert.equal(opp3Outcome.outcome, "rejected");
+  assert.equal(opp2Outcome.stage, "outcome");
+  assert.equal(opp2Outcome.outcome, "gone-cold");
 
   // 6. Batch Delete: Delete opp2 and opp3
   const deleteRes = await f.request("/api/opportunities/batch", {

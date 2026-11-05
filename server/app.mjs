@@ -95,7 +95,14 @@ export const stages = [
   ["outcome", "Outcome"],
 ].map(([id, label]) => ({ id, label }));
 const stageIds = stages.map((s) => s.id);
-const outcomes = ["hired", "rejected", "ignored", "withdrawn", "closed"];
+const outcomes = [
+  "hired",
+  "rejected",
+  "ignored",
+  "withdrawn",
+  "closed",
+  "gone-cold",
+];
 const textFields = [
   "company",
   "role",

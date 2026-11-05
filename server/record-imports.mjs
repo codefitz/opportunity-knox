@@ -12,7 +12,15 @@ const stages = [
   "final-interview",
   "outcome",
 ];
-const outcomes = ["", "hired", "rejected", "ignored", "withdrawn", "closed"];
+const outcomes = [
+  "",
+  "hired",
+  "rejected",
+  "ignored",
+  "withdrawn",
+  "closed",
+  "gone-cold",
+];
 export const importFields = [
   "company",
   "role",

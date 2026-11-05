@@ -208,21 +208,26 @@ test("pipeline and outcome totals reconcile and hire share uses hired/rejected o
       "ignored",
       "withdrawn",
       "closed",
+      "gone-cold",
     ].map((outcome, i) =>
       opportunity(String(i), { outcome, stage: "outcome" }),
     ),
   ];
   const metrics = dashboardMetrics(records, [], "Europe/London", now);
   assert.equal(metrics.active, 1);
-  assert.equal(metrics.closed, 7);
+  assert.equal(metrics.closed, 8);
   assert.equal(metrics.hireShare, 0.25);
   assert.equal(
     metrics.pipeline.reduce((n, row) => n + row.count, 0),
-    8,
+    9,
   );
   assert.equal(
     metrics.outcomes.reduce((n, row) => n + row.count, 0),
-    7,
+    8,
+  );
+  assert.equal(
+    metrics.outcomes.find((o) => o.id === "gone-cold")?.count,
+    1,
   );
 });
 

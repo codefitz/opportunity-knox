@@ -1,5 +1,22 @@
 # Implementation roadmap
 
+## Gone Cold Outcome Stage — 5 November 2026
+
+- Introduced a new **"Gone cold"** (`gone-cold`) outcome stage to track opportunities where communication or progress has stalled without a formal rejection or withdrawal:
+  - **Data Model & Backend Validation:**
+    - Added `"gone-cold"` to valid outcomes in `server/app.mjs`, `server/career-buddy.mjs`, and `server/record-imports.mjs`.
+    - Supported across opportunity updates (`PATCH /api/opportunities/:id`), bulk actions (`POST /api/opportunities/batch`), and Career Buddy change proposals.
+    - Updated contract documentation in `docs/CONTRACT.md`.
+  - **Frontend Integration:**
+    - Added `{ id: "gone-cold", label: "Gone cold" }` to `OUTCOMES` in `src/types.ts` and `OUTCOME_LABELS` in `src/lib/dashboard.ts`.
+    - Integrated with filters (`OpportunityFilters.tsx`), bulk actions (`BulkActionsBar.tsx`), card badges, and opportunity detail dropdowns (`src/App.tsx`).
+    - Added palette color (`var(--blue)`) to `outcomeColors` in `src/components/Dashboard.tsx` for metrics donut visualizer and legend.
+  - **Reconciliation & Tests:**
+    - Updated `tests/dashboard.test.mjs` metrics reconciliation test to cover `"gone-cold"` count.
+    - Added server API tests in `tests/server.test.mjs` and batch tests in `tests/bulk-actions.test.mjs` verifying `"gone-cold"` updates, stage auto-transitions, and reactivation.
+    - Added Career Buddy schema validation tests in `tests/buddy.test.mjs`.
+    - Verified all 354 Node tests and 46 Python launcher tests passing (`npm run check`).
+
 ## Career Buddy Chat Overhaul & Opportunity Intake Resilience — 5 November 2026
 
 - Delivered a comprehensive UX and architecture overhaul of the Career Buddy chat experience (`src/components/BuddyWorkspace.tsx`, `src/styles.css`, `server/standalone-buddy.mjs`, `server/app.mjs`):
@@ -81,7 +98,7 @@
 - Delivered comprehensive multi-select and bulk action workflows across Table and Kanban views:
   - **Batch Backend API (`POST /api/opportunities/batch` in `server/app.mjs`):**
     - `action: "stage"`: Batch stage updates with audit trail provenance notes (`"Stage updated via bulk action"`), updated stage entry timestamps, outcome clearance, and automated next action / linked task synchronization.
-    - `action: "outcome"`: Batch outcome assignments (`hired`, `rejected`, `ignored`, `withdrawn`, `closed`) and clearing/reactivation with stage event notes.
+    - `action: "outcome"`: Batch outcome assignments (`hired`, `rejected`, `ignored`, `withdrawn`, `closed`, `gone-cold`) and clearing/reactivation with stage event notes.
     - `action: "add-tag"` / `action: "remove-tag"`: Batch tag tagging and untagging across opportunities.
     - `action: "delete"`: Atomic batch deletion of opportunities, unlinking associated documents, and cleaning linked tasks and decision records.
   - **Floating Bulk Actions Toolbar (`src/components/BulkActionsBar.tsx`):**

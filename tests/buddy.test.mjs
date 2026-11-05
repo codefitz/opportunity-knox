@@ -372,6 +372,18 @@ test("structured answers filter invented source IDs and fail closed on invalid r
     () => validateChanges([change({ kind: "delete" })]),
     /unsupported/,
   );
+  assert.doesNotThrow(() =>
+    validateChanges([
+      change({ kind: "update", field: "outcome", value: "gone-cold" }),
+    ]),
+  );
+  assert.throws(
+    () =>
+      validateChanges([
+        change({ kind: "update", field: "outcome", value: "invalid-outcome" }),
+      ]),
+    /outcome/,
+  );
 });
 test("reviewed changes append dated feedback and preserve all prior history without mutating the source", () => {
   const record = {

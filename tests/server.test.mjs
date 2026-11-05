@@ -240,9 +240,15 @@ test("stage transitions, corrected dates, repeat visits, and stale revision surv
     body: { revision: saved.data.revision, outcome: "ignored" },
   });
   assert.equal(closed.data.stage, "outcome");
+  const goneCold = await f.request(`/api/opportunities/${id}`, {
+    method: "PATCH",
+    body: { revision: closed.data.revision, outcome: "gone-cold" },
+  });
+  assert.equal(goneCold.data.stage, "outcome");
+  assert.equal(goneCold.data.outcome, "gone-cold");
   const reopened = await f.request(`/api/opportunities/${id}`, {
     method: "PATCH",
-    body: { revision: closed.data.revision, stage: "review" },
+    body: { revision: goneCold.data.revision, stage: "review" },
   });
   assert.equal(reopened.data.outcome, "");
 });

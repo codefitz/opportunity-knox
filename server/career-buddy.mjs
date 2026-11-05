@@ -78,7 +78,15 @@ const stages = [
   "final-interview",
   "outcome",
 ];
-const outcomes = ["", "hired", "rejected", "ignored", "withdrawn", "closed"];
+const outcomes = [
+  "",
+  "hired",
+  "rejected",
+  "ignored",
+  "withdrawn",
+  "closed",
+  "gone-cold",
+];
 export function validateChanges(input) {
   if (!Array.isArray(input) || input.length > 10)
     throw buddyError(
@@ -269,7 +277,7 @@ export function systemPrompt(timezone, today, action) {
       updateFields.join(", ") +
       ". Stages: " +
       stages.join(", ") +
-      ". Outcomes: hired, rejected, ignored, withdrawn, closed, or empty. Never create tasks or edit previous submitted documents.",
+      ". Outcomes: hired, rejected, ignored, withdrawn, closed, gone-cold, or empty. Never create tasks or edit previous submitted documents.",
     "Changes are proposals until the human applies them. Say proposed, not recorded or saved. Use kind note for dated notes; interview/communication for activities; update for individual opportunity fields. Dates YYYY-MM-DD. Types text, phone, video, in-person, assessment, email, other. Status planned, completed, cancelled. Unused string fields must be empty; isFinal false unless explicitly final.",
     "Ground advice and drafts in the supplied candidate evidence. Previous JDs and job requirements are not proof of candidate experience. Do not invent employers, dates, certifications, skills, qualifications, metrics or achievements. Explicitly flag gaps and ask for evidence. In replies cite supplied source names/IDs; return sourceIds only from the supplied context. Explain missing or partial source coverage. Never claim a draft was approved.",
     "For salary: label suggestions as estimates from saved information, not verified market ranges. State currency, base versus total/contract terms and location assumptions; ask if missing. Never invent a salary source or current benchmark.",

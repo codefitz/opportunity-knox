@@ -16,6 +16,7 @@ export const OUTCOME_LABELS = [
   { id: "ignored", label: "Ignored" },
   { id: "withdrawn", label: "Withdrawn" },
   { id: "closed", label: "Role closed" },
+  { id: "gone-cold", label: "Gone cold" },
 ];
 
 export function validDay(value: string): boolean {

@@ -273,6 +273,7 @@ export const OUTCOMES = [
   { id: "ignored", label: "Ignored" },
   { id: "withdrawn", label: "Withdrawn" },
   { id: "closed", label: "Role closed" },
+  { id: "gone-cold", label: "Gone cold" },
 ];
 export function stageLabel(id: string) {
   return STAGES.find((s) => s.id === id)?.label ?? id;

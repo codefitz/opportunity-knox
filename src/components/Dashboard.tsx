@@ -51,6 +51,7 @@ const outcomeColors = [
   "var(--muted)",
   "var(--amber)",
   "color-mix(in srgb, var(--green) 40%, var(--muted))",
+  "var(--blue)",
 ];
 
 function activate(
