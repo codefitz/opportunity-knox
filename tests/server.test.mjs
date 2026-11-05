@@ -247,6 +247,38 @@ test("stage transitions, corrected dates, repeat visits, and stale revision surv
   assert.equal(reopened.data.outcome, "");
 });
 
+test("opportunities allow blanks in almost every field and non-date deadlines like LNAA gracefully succeed without error", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+  const created = await f.request("/api/opportunities", {
+    method: "POST",
+    body: {
+      company: "LNAA",
+      role: "Flight Paramedic",
+      deadline: "LNAA",
+      nextActionDate: "Rolling",
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.company, "LNAA");
+  assert.equal(created.data.role, "Flight Paramedic");
+  assert.equal(created.data.deadline, "");
+  assert.ok(created.data.nextActionDate);
+  assert.ok(created.data.description.includes("Deadline: LNAA"));
+  assert.ok(created.data.description.includes("Next action date: Rolling"));
+
+  // Check patch with blank deadline
+  const patched = await f.request(`/api/opportunities/${created.data.id}`, {
+    method: "PATCH",
+    body: {
+      revision: created.data.revision,
+      deadline: "",
+    },
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.data.deadline, "");
+});
+
 test("concurrent edits reject stale records and concurrent notes do not overwrite each other", async (t) => {
   const f = await fixture(t);
   await f.setup();
@@ -3145,9 +3177,12 @@ test('standalone Buddy coaches, builds reviewed STAR evidence, imports recruiter
  assert.equal((await f.request(route+'/'+starMessage.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);
  assert.equal((await f.request(route+'/'+starMessage.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);
  assert.equal((await f.request('/api/documents')).data.documents.length,1);
- output=envelope({opportunity:{company:'Fictional recruiter employer',role:'Fictional analyst',description:'Pasted fictional recruiter notes.',location:'',salary:'',url:''},tasks:[{title:'Clarify salary',dueDate:'',notes:'Ask recruiter.'}]});
+ output=envelope({opportunity:{company:'Fictional recruiter employer',role:'Fictional analyst',description:'Pasted fictional recruiter notes.',location:'',salary:'',url:'',deadline:'LNAA'},tasks:[{title:'Clarify salary',dueDate:'LNAA',notes:'Ask recruiter.'}]});
  const intake=await send('recruiter');assert.equal(intake.status,200);const proposed=intake.data.messages.at(-1);assert.equal((await f.request('/api/board')).data.opportunities.length,1);
  const created=await f.request(route+'/'+proposed.id+'/apply',{method:'POST',body:{confirm:true}});assert.equal(created.status,200);assert.equal((await f.request('/api/tasks')).data.tasks[0].opportunityId,created.data.result.opportunityId);
+ const createdOp=(await f.request('/api/opportunities/'+created.data.result.opportunityId)).data;
+ assert.equal(createdOp.deadline,'');
+ assert.ok(createdOp.description.includes('Deadline: LNAA'));
  output=envelope({},[buddyChange({kind:'update',field:'outcome',value:'rejected'})]);const update=await send('update',{targetId:op.id});assert.equal(update.status,200);const proposal=update.data.messages.at(-1);
  assert.equal((await f.request('/api/opportunities/'+op.id)).data.outcome,'');
  assert.equal((await f.request(route+'/'+proposal.id+'/apply',{method:'POST',body:{confirm:true}})).status,200);assert.equal((await f.request('/api/opportunities/'+op.id)).data.outcome,'rejected');

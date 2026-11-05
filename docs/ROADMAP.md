@@ -1,5 +1,32 @@
 # Implementation roadmap
 
+## Career Buddy Chat Overhaul & Opportunity Intake Resilience — 5 November 2026
+
+- Delivered a comprehensive UX and architecture overhaul of the Career Buddy chat experience (`src/components/BuddyWorkspace.tsx`, `src/styles.css`, `server/standalone-buddy.mjs`, `server/app.mjs`):
+  - **Fixed Viewport Chat Layout (No Scrolling Needed):**
+    - Pinned the chat composer at the bottom of the conversation panel (`flex-shrink: 0`) within a fixed-height layout (`height: calc(100vh - 75px)`).
+    - Messages flow inside an independently scrollable area with automatic smooth scrolling to the latest message.
+    - Keyboard shortcut: `Enter` sends immediately; `Shift+Enter` inserts newlines.
+  - **Single Upload / Drag & Drop Source Option:**
+    - Replaced cluttered multi-step configurations (related opportunity dropdown, Career Hub checkboxes, template selector, native file input, and explanatory text) with a single, sleek Drag & Drop banner and click-to-upload target.
+    - Attached files display as neat, removable pills (`[FileText icon] filename [X]`) with instant exclusion capability.
+    - Career Library excerpts are automatically selected and included seamlessly via semantic search without manual toggling.
+  - **Friendly, Supportive Buddy Persona:**
+    - Upgraded Career Buddy system prompt to be warm, approachable, empathetic, and enthusiastic—sounding like a trusted partner who has the candidate's back, while maintaining candid, uninvented evidence boundaries.
+  - **Resilient Opportunity Creation & Blank Field Allowance:**
+    - Fixed deadline validation failure when extracting opportunities with non-date terms (e.g. `"LNAA"`, `"rolling"`, `"ASAP"`, `"open"`):
+      - Opportunities allow blanks across almost all fields; only company and role are required.
+      - Non-date text in `deadline` or `nextActionDate` is automatically kept in `description` (e.g. `Deadline: LNAA`) while the date fields cleanly remain blank `""`.
+      - Prevents `Deadline must be a valid date.` from blocking opportunity creation from chat.
+  - **Immediately Visible "Create Opportunity" Button:**
+    - Placed a dedicated "Create opportunity" button right next to the "Send" button in the pinned composer.
+    - When Buddy proposes an opportunity, the button promotes to a primary action to confirm and create the opportunity on the board with one click.
+    - When typing or attaching material, clicking "Create opportunity" directs Buddy to extract the job details and create action items.
+    - Opportunity proposals inside the chat stream are rendered openly as styled cards (with role, company, location, salary, work mode, and action items), eliminating collapsed `<details>` folds.
+  - **Verification:**
+    - Added unit test in `tests/server.test.mjs` confirming opportunities allow blanks and non-date deadlines like `"LNAA"` succeed without error.
+    - Verified full test suite (`npm run check`) passing 354 Node tests and 46 Python launcher tests.
+
 ## Dedicated Opportunity Output Folders (Company > Role) — 5 November 2026
 
 - Replaced stage subfolder fragmentation (`job-description/`, `drafts/`, `submitted/`, etc.) with a clean, dedicated 2-level directory structure on disk: `<documentsSubdir>/<Company>/<Role>`:

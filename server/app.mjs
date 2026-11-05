@@ -143,6 +143,29 @@ const dateOnly = (value, name) => {
     fail(400, `${name} must be a valid date.`);
   return value;
 };
+const cleanDateOnly = (value, onNonDateText = null) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    if (Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === trimmed) {
+      return trimmed;
+    }
+  }
+  const parsed = Date.parse(trimmed);
+  if (Number.isFinite(parsed)) {
+    try {
+      const iso = new Date(parsed).toISOString().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+    } catch {}
+  }
+  if (onNonDateText && typeof onNonDateText === "function") {
+    onNonDateText(trimmed);
+  }
+  return "";
+};
 const timestamp = (value, name) => {
   if (
     typeof value !== "string" ||
@@ -796,8 +819,26 @@ export function createApp(options = {}) {
     if (!record.role || !record.company)
       fail(400, "Employer and role are required.");
     record.url = safeURL(record.url);
-    dateOnly(record.deadline, "Deadline");
-    dateOnly(record.nextActionDate, "Next action date");
+    if (record.deadline) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(record.deadline)) {
+        dateOnly(record.deadline, "Deadline");
+      } else {
+        if (!record.description.includes(record.deadline)) {
+          record.description = (record.description ? record.description + "\n\n" : "") + `Deadline: ${record.deadline}`;
+        }
+        record.deadline = "";
+      }
+    }
+    if (record.nextActionDate) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(record.nextActionDate)) {
+        dateOnly(record.nextActionDate, "Next action date");
+      } else {
+        if (!record.description.includes(record.nextActionDate)) {
+          record.description = (record.description ? record.description + "\n\n" : "") + `Next action date: ${record.nextActionDate}`;
+        }
+        record.nextActionDate = "";
+      }
+    }
     choice(record.stage, stageIds, "stage");
     choice(record.priority, ["normal", "high", "low"], "priority");
     choice(record.outcome, ["", ...outcomes], "outcome");
@@ -1946,8 +1987,30 @@ export function createApp(options = {}) {
             if (!record.role || !record.company)
               fail(400, "Employer and role are required.");
             record.url = safeURL(record.url);
-            dateOnly(record.deadline, "Deadline");
-            dateOnly(record.nextActionDate, "Next action date");
+            if (body.deadline !== undefined) {
+              if (record.deadline) {
+                if (/^\d{4}-\d{2}-\d{2}$/.test(record.deadline)) {
+                  dateOnly(record.deadline, "Deadline");
+                } else {
+                  if (!record.description.includes(record.deadline)) {
+                    record.description = (record.description ? record.description + "\n\n" : "") + `Deadline: ${record.deadline}`;
+                  }
+                  record.deadline = "";
+                }
+              }
+            }
+            if (body.nextActionDate !== undefined) {
+              if (record.nextActionDate) {
+                if (/^\d{4}-\d{2}-\d{2}$/.test(record.nextActionDate)) {
+                  dateOnly(record.nextActionDate, "Next action date");
+                } else {
+                  if (!record.description.includes(record.nextActionDate)) {
+                    record.description = (record.description ? record.description + "\n\n" : "") + `Next action date: ${record.nextActionDate}`;
+                  }
+                  record.nextActionDate = "";
+                }
+              }
+            }
             if (body.priority !== undefined)
               record.priority = choice(
                 body.priority,
