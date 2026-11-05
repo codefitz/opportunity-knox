@@ -65,7 +65,11 @@ import {
   unlinkSync,
   rmSync,
   rmdirSync,
+  accessSync,
+  constants,
+  readdirSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import {
   resolve,
   dirname,
@@ -475,7 +479,16 @@ export function createApp(options = {}) {
       )
     : null;
   const documentPath = (doc) => {
-    if (allowedRoots && !allowedRoots.has(resolve(doc.storageRoot)))
+    const s = settings();
+    const activeExports =
+      s.exportsPath && isAbsolute(s.exportsPath)
+        ? resolve(s.exportsPath)
+        : null;
+    if (
+      allowedRoots &&
+      !allowedRoots.has(resolve(doc.storageRoot)) &&
+      (!activeExports || resolve(doc.storageRoot) !== activeExports)
+    )
       fail(
         404,
         "The original document location is not attached to this installation.",
@@ -599,9 +612,13 @@ export function createApp(options = {}) {
     db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
     try {
       const target = documentPath(doc);
-      if (inside(filesDir, target)) {
+      const root =
+        doc.storageRoot && inside(resolve(doc.storageRoot), resolve(target))
+          ? resolve(doc.storageRoot)
+          : filesDir;
+      if (inside(root, target)) {
         rmSync(target, { force: true });
-        pruneEmptyParents(dirname(target), join(filesDir, settings().documentsSubdir));
+        pruneEmptyParents(dirname(target), root);
       }
     } catch {
       /* Missing or read-only prior storage root; metadata is already removed. */
@@ -618,7 +635,10 @@ export function createApp(options = {}) {
     );
     const profile = candidateProfile || getCandidateProfile();
     const alignment = calculateAlignment(record, profile);
-    const outputFolder = `${s.documentsSubdir}/${opportunityFolderPath(record)}`;
+    const outputFolder =
+      s.exportsPath && isAbsolute(s.exportsPath)
+        ? `${resolve(s.exportsPath).replace(/\/+$/, "")}/${opportunityFolderPath(record)}`
+        : `${s.documentsSubdir || "opportunities"}/${opportunityFolderPath(record)}`;
     return {
       ...record,
       seniority,
@@ -645,6 +665,7 @@ export function createApp(options = {}) {
     themeAccent: "",
     themeBackground: "",
     documentsSubdir: "opportunities",
+    exportsPath: "",
     referenceSubdir: "references",
     backupSubdir: "backups",
     pendingHostPath: "",
@@ -667,13 +688,20 @@ export function createApp(options = {}) {
     } catch {
       /* No pending request. */
     }
+    const stored = getConfig("settings") || {};
+    const effectiveExports =
+      stored.exportsPath && isAbsolute(stored.exportsPath)
+        ? resolve(stored.exportsPath)
+        : resolve(hostFilesDir, stored.documentsSubdir || "opportunities");
     return {
       ...settingDefaults,
-      ...(getConfig("settings") || {}),
+      ...stored,
       aiEnabled: Boolean(getConfig("careerBuddy")?.enabled),
       pendingHostPath,
       hostDocumentsPath: hostFilesDir,
       storagePath: filesDir,
+      exportsPath: stored.exportsPath || "",
+      resolvedExportsPath: effectiveExports,
     };
   };
   const getCandidateProfile = () => {
@@ -936,33 +964,54 @@ export function createApp(options = {}) {
         .reduce((n, d) => Math.max(n, d.version), 0);
     const id = randomUUID();
     let relativePath;
+    let docStorageRoot = filesDir;
     if (opportunityId) {
       let opp = null;
       try {
         opp = getRecord(opportunityId);
       } catch {}
-      relativePath = buildOpportunityDocumentPath({
-        documentsSubdir: settings().documentsSubdir,
-        opportunity: opp,
-        documentId: id,
-        name,
-        kind,
-        status,
-        category: resolvedCategory,
-      });
-      const checkTarget = safePath(filesDir, relativePath);
-      if (existsSync(checkTarget)) {
-        const ext = extname(relativePath);
-        const base = relativePath.slice(0, relativePath.length - ext.length);
-        relativePath = `${base}-${id.slice(0, 8)}${ext}`;
+      const s = settings();
+      if (s.exportsPath && isAbsolute(s.exportsPath)) {
+        docStorageRoot = resolve(s.exportsPath);
+        try {
+          mkdirSync(docStorageRoot, { recursive: true, mode: 0o700 });
+        } catch {}
+        const folderPath = opp ? opportunityFolderPath(opp) : "unassigned";
+        const ext = (name ? extname(name) : "").replace(/[^.a-zA-Z0-9]/g, "");
+        const baseName = name
+          ? name.replace(/[/\\]/g, "-").replace(extname(name), "").trim()
+          : "";
+        const fileName = baseName ? `${baseName}${ext}` : `${id}${ext}`;
+        relativePath = `${folderPath}/${fileName}`;
+        const checkTarget = safePath(docStorageRoot, relativePath);
+        if (existsSync(checkTarget)) {
+          relativePath = `${folderPath}/${baseName || id}-${id.slice(0, 8)}${ext}`;
+        }
+        folder(docStorageRoot, dirname(relativePath));
+      } else {
+        relativePath = buildOpportunityDocumentPath({
+          documentsSubdir: s.documentsSubdir,
+          opportunity: opp,
+          documentId: id,
+          name,
+          kind,
+          status,
+          category: resolvedCategory,
+        });
+        const checkTarget = safePath(filesDir, relativePath);
+        if (existsSync(checkTarget)) {
+          const ext = extname(relativePath);
+          const base = relativePath.slice(0, relativePath.length - ext.length);
+          relativePath = `${base}-${id.slice(0, 8)}${ext}`;
+        }
+        folder(filesDir, dirname(relativePath));
       }
-      folder(filesDir, dirname(relativePath));
     } else {
       const baseSubdir = settings().referenceSubdir;
       folder(filesDir, baseSubdir);
       relativePath = `${baseSubdir}/${id}${extname(name).replace(/[^.a-zA-Z0-9]/g, "")}`;
     }
-    const target = safePath(filesDir, relativePath);
+    const target = safePath(docStorageRoot, relativePath);
     writeFileSync(target, content, { flag: "wx", mode: 0o600 });
     const resolvedTags =
       tags !== undefined
@@ -1037,7 +1086,7 @@ export function createApp(options = {}) {
       notes: notes,
       tags: resolvedTags,
       category:resolvedCategory,
-      storageRoot: filesDir,
+      storageRoot: docStorageRoot,
       relativePath,
       sha256: createHash("sha256").update(content).digest("hex"),
       revision: 1,
@@ -2180,35 +2229,49 @@ Strict constraints:
             }
             if (record.company !== oldCompany || record.role !== oldRole) {
               const s = settings();
+              const isCustomExport = Boolean(s.exportsPath && isAbsolute(s.exportsPath));
+              const exportRoot = isCustomExport ? resolve(s.exportsPath) : filesDir;
               try {
-                folder(filesDir, join(s.documentsSubdir, opportunityFolderPath(record)));
+                if (isCustomExport) {
+                  folder(exportRoot, opportunityFolderPath(record));
+                } else {
+                  folder(filesDir, join(s.documentsSubdir, opportunityFolderPath(record)));
+                }
               } catch {}
               try {
                 const oppDocs = getDocuments().filter((d) => d.opportunityId === record.id);
                 for (const doc of oppDocs) {
-                  let targetRelPath = buildOpportunityDocumentPath({
-                    documentsSubdir: s.documentsSubdir,
-                    opportunity: record,
-                    documentId: doc.id,
-                    name: doc.name,
-                    kind: doc.kind,
-                    status: doc.status,
-                    category: doc.category,
-                  });
+                  const root = doc.storageRoot && existsSync(doc.storageRoot) ? doc.storageRoot : exportRoot;
+                  const folderPath = opportunityFolderPath(record);
+                  const ext = (doc.name ? extname(doc.name) : "").replace(/[^.a-zA-Z0-9]/g, "");
+                  const baseName = doc.name ? doc.name.replace(/[/\\]/g, "-").replace(extname(doc.name), "").trim() : "";
+                  const fileName = baseName ? `${baseName}${ext}` : `${doc.id}${ext}`;
+                  let targetRelPath = root === filesDir
+                    ? buildOpportunityDocumentPath({
+                        documentsSubdir: s.documentsSubdir,
+                        opportunity: record,
+                        documentId: doc.id,
+                        name: doc.name,
+                        kind: doc.kind,
+                        status: doc.status,
+                        category: doc.category,
+                      })
+                    : `${folderPath}/${fileName}`;
                   if (doc.relativePath === targetRelPath) continue;
                   const source = documentPath(doc);
                   if (!existsSync(source)) continue;
-                  let target = safePath(filesDir, targetRelPath);
+                  let target = safePath(root, targetRelPath);
                   if (existsSync(target) && target !== source) {
-                    const ext = extname(targetRelPath);
-                    const base = targetRelPath.slice(0, targetRelPath.length - ext.length);
-                    targetRelPath = `${base}-${doc.id.slice(0, 8)}${ext}`;
-                    target = safePath(filesDir, targetRelPath);
+                    const disambiguated = baseName ? `${baseName}-${doc.id.slice(0, 8)}${ext}` : `${doc.id}${ext}`;
+                    targetRelPath = root === filesDir
+                      ? `${s.documentsSubdir}/${folderPath}/${disambiguated}`
+                      : `${folderPath}/${disambiguated}`;
+                    target = safePath(root, targetRelPath);
                   }
-                  folder(filesDir, dirname(targetRelPath));
+                  folder(root, dirname(targetRelPath));
                   copyFileSync(source, target);
                   unlinkSync(source);
-                  pruneEmptyParents(dirname(source), join(filesDir, s.documentsSubdir));
+                  pruneEmptyParents(dirname(source), root === filesDir ? join(filesDir, s.documentsSubdir) : root);
                   doc.relativePath = targetRelPath;
                   putDocument(doc);
                 }
@@ -2854,6 +2917,85 @@ Strict constraints:
           }
           fail(405, "Method not allowed.");
         }
+        if (path === "/api/system/folders" && method === "GET") {
+          const query = new URL(req.url, "http://board").searchParams;
+          const requestedPath = query.get("path");
+          const home = homedir();
+          let currentPath = requestedPath
+            ? resolve(requestedPath)
+            : (settings().exportsPath || home);
+          try {
+            if (!existsSync(currentPath) || !statSync(currentPath).isDirectory()) {
+              currentPath = home;
+            }
+          } catch {
+            currentPath = home;
+          }
+
+          let isWritable = false;
+          try {
+            accessSync(currentPath, constants.W_OK);
+            isWritable = true;
+          } catch {
+            isWritable = false;
+          }
+
+          let folders = [];
+          try {
+            const entries = readdirSync(currentPath, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory() && !entry.name.startsWith(".")) {
+                if (["node_modules", ".git", ".Trashes", "Library"].includes(entry.name)) continue;
+                folders.push({
+                  name: entry.name,
+                  path: join(currentPath, entry.name),
+                });
+              }
+            }
+            folders.sort((a, b) => a.name.localeCompare(b.name));
+          } catch {}
+
+          const presets = [
+            { label: "Home", path: home },
+            ...(existsSync(join(home, "Documents"))
+              ? [{ label: "Documents", path: join(home, "Documents") }]
+              : []),
+            ...(existsSync(join(home, "Desktop"))
+              ? [{ label: "Desktop", path: join(home, "Desktop") }]
+              : []),
+            ...(existsSync(join(home, "Downloads"))
+              ? [{ label: "Downloads", path: join(home, "Downloads") }]
+              : []),
+            ...(existsSync("/Volumes") ? [{ label: "Volumes", path: "/Volumes" }] : []),
+            {
+              label: "Document workspace",
+              path: join(filesDir, settings().documentsSubdir || "opportunities"),
+            },
+          ];
+
+          const parentPath =
+            currentPath === "/" || currentPath === dirname(currentPath)
+              ? null
+              : dirname(currentPath);
+
+          return json(res, {
+            currentPath,
+            parentPath,
+            folders,
+            presets,
+            writable: isWritable,
+          });
+        }
+        if (path === "/api/system/folders" && method === "POST") {
+          const body = await readBody(req);
+          const parent = cleanText(body.parentPath, "Parent folder", 4000);
+          const name = cleanText(body.name, "Folder name", 200).replace(/[/\\]/g, "");
+          if (!name || name.startsWith(".")) fail(400, "Enter a valid folder name.");
+          if (!isAbsolute(parent)) fail(400, "Parent folder must be an absolute path.");
+          const newPath = join(parent, name);
+          mkdirSync(newPath, { recursive: true, mode: 0o700 });
+          return json(res, { ok: true, path: newPath });
+        }
         if (path === "/api/settings" && method === "GET")
           return json(res, settings());
         if (path === "/api/settings" && method === "PATCH") {
@@ -2909,6 +3051,81 @@ Strict constraints:
             }
             updated.timezone = zone;
           }
+          const reqExports = body.exportsPath;
+          if (reqExports !== undefined) {
+            if (reqExports === "") {
+              const oldExportsRoot =
+                updated.exportsPath && isAbsolute(updated.exportsPath)
+                  ? resolve(updated.exportsPath)
+                  : null;
+              updated.exportsPath = "";
+              if (oldExportsRoot) {
+                const newSub = updated.documentsSubdir || "opportunities";
+                folder(filesDir, newSub);
+                const oppDocs = getDocuments().filter((d) => d.opportunityId);
+                for (const doc of oppDocs) {
+                  const source = documentPath(doc);
+                  const subRel = doc.relativePath;
+                  const newRel = `${newSub}/${subRel}`;
+                  const target = safePath(filesDir, newRel);
+                  folder(filesDir, dirname(newRel));
+                  if (existsSync(source)) {
+                    copyFileSync(source, target);
+                    unlinkSync(source);
+                    pruneEmptyParents(dirname(source), oldExportsRoot);
+                  }
+                  doc.storageRoot = filesDir;
+                  doc.relativePath = newRel;
+                  putDocument(doc);
+                }
+              }
+            } else {
+              const rawExports = cleanText(reqExports, "Application export folder", 4000).replace(/[\r\n\0]/g, "");
+              if (!isAbsolute(rawExports)) {
+                fail(
+                  400,
+                  "Application export folder must be an absolute full-disk path (e.g. /Users/... or /Volumes/...).",
+                );
+              }
+              const targetExports = resolve(rawExports);
+              if (targetExports === "/" || targetExports === "\\") {
+                fail(400, "Choose a specific folder for application exports.");
+              }
+              try {
+                mkdirSync(targetExports, { recursive: true, mode: 0o700 });
+              } catch (err) {
+                fail(400, `Could not create or access export folder: ${err.message}`);
+              }
+              const oldExportsRoot =
+                updated.exportsPath && isAbsolute(updated.exportsPath)
+                  ? resolve(updated.exportsPath)
+                  : safePath(filesDir, updated.documentsSubdir || "opportunities");
+              if (oldExportsRoot !== targetExports) {
+                const oppDocs = getDocuments().filter((d) => d.opportunityId);
+                for (const doc of oppDocs) {
+                  const source = documentPath(doc);
+                  let subRel = doc.relativePath;
+                  if (
+                    doc.storageRoot === filesDir &&
+                    doc.relativePath.startsWith(`${updated.documentsSubdir || "opportunities"}/`)
+                  ) {
+                    subRel = doc.relativePath.slice((updated.documentsSubdir || "opportunities").length + 1);
+                  }
+                  const target = safePath(targetExports, subRel);
+                  folder(targetExports, dirname(subRel));
+                  if (existsSync(source)) {
+                    copyFileSync(source, target);
+                    unlinkSync(source);
+                    pruneEmptyParents(dirname(source), oldExportsRoot);
+                  }
+                  doc.storageRoot = targetExports;
+                  doc.relativePath = subRel;
+                  putDocument(doc);
+                }
+              }
+              updated.exportsPath = targetExports;
+            }
+          }
           const reqDocSubdir = body.documentsSubdir ?? body.exportsSubdir;
           if (reqDocSubdir !== undefined) {
             const oldSub = updated.documentsSubdir || "opportunities";
@@ -2916,7 +3133,7 @@ Strict constraints:
             if (!newSub) fail(400, "Choose a named subfolder.");
             folder(filesDir, newSub);
             updated.documentsSubdir = newSub;
-            if (oldSub !== newSub) {
+            if (!updated.exportsPath && oldSub !== newSub) {
               const oppDocs = getDocuments().filter(
                 (d) => d.opportunityId && d.relativePath && d.relativePath.startsWith(`${oldSub}/`),
               );

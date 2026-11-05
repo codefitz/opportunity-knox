@@ -6960,12 +6960,96 @@ function SettingsPage({
   const lastSavedStorageRef = useRef(form);
   const storageTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  type FolderEntry = { name: string; path: string };
+  const [folderBrowser, setFolderBrowser] = useState<{
+    open: boolean;
+    loading: boolean;
+    currentPath: string;
+    parentPath: string | null;
+    folders: FolderEntry[];
+    presets: { label: string; path: string }[];
+    writable: boolean;
+    error: string | null;
+    newFolderName: string;
+    creating: boolean;
+  }>({
+    open: false,
+    loading: false,
+    currentPath: "",
+    parentPath: null,
+    folders: [],
+    presets: [],
+    writable: true,
+    error: null,
+    newFolderName: "",
+    creating: false,
+  });
+
+  const loadFolders = useCallback(async (targetPath?: string) => {
+    setFolderBrowser((prev) => ({ ...prev, open: true, loading: true, error: null }));
+    try {
+      const url = targetPath ? `/system/folders?path=${encodeURIComponent(targetPath)}` : "/system/folders";
+      const data = await api<{
+        currentPath: string;
+        parentPath: string | null;
+        folders: FolderEntry[];
+        presets: { label: string; path: string }[];
+        writable: boolean;
+      }>(url);
+      setFolderBrowser((prev) => ({
+        ...prev,
+        open: true,
+        loading: false,
+        currentPath: data.currentPath,
+        parentPath: data.parentPath,
+        folders: data.folders,
+        presets: data.presets,
+        writable: data.writable,
+        error: null,
+      }));
+    } catch (err: any) {
+      setFolderBrowser((prev) => ({
+        ...prev,
+        open: true,
+        loading: false,
+        error: err.message || "Could not read folders",
+      }));
+    }
+  }, []);
+
+  const handleSelectFolder = (selectedPath: string) => {
+    const updated = { ...formRef.current, exportsPath: selectedPath };
+    setForm(updated);
+    setFolderBrowser((prev) => ({ ...prev, open: false }));
+    void performStorageSave(updated);
+  };
+
+  const handleCreateSubfolder = async () => {
+    if (!folderBrowser.newFolderName.trim()) return;
+    setFolderBrowser((prev) => ({ ...prev, creating: true }));
+    try {
+      const res = await api<{ ok: boolean; path: string }>(
+        "/system/folders",
+        json({ parentPath: folderBrowser.currentPath, name: folderBrowser.newFolderName.trim() }),
+      );
+      setFolderBrowser((prev) => ({ ...prev, newFolderName: "", creating: false }));
+      await loadFolders(res.path);
+    } catch (err: any) {
+      setFolderBrowser((prev) => ({
+        ...prev,
+        creating: false,
+        error: err.message || "Could not create subfolder",
+      }));
+    }
+  };
+
   useEffect(() => {
     setForm(settings);
     lastSavedStorageRef.current = settings;
   }, [
     settings.timezone,
     settings.documentsSubdir,
+    settings.exportsPath,
     settings.referenceSubdir,
     settings.backupSubdir,
     settings.pendingHostPath,
@@ -6982,6 +7066,7 @@ function SettingsPage({
         !isUndo &&
         targetForm.timezone === prior.timezone &&
         targetForm.documentsSubdir === prior.documentsSubdir &&
+        targetForm.exportsPath === prior.exportsPath &&
         targetForm.referenceSubdir === prior.referenceSubdir &&
         targetForm.backupSubdir === prior.backupSubdir &&
         targetForm.pendingHostPath === prior.pendingHostPath
@@ -6997,6 +7082,7 @@ function SettingsPage({
             {
               timezone: targetForm.timezone,
               documentsSubdir: targetForm.documentsSubdir,
+              exportsPath: targetForm.exportsPath,
               referenceSubdir: targetForm.referenceSubdir,
               backupSubdir: targetForm.backupSubdir,
               pendingHostPath: targetForm.pendingHostPath,
@@ -7138,41 +7224,136 @@ function SettingsPage({
           </div>
 
           {/* Opportunity Applications & Exports Folder Global Setting */}
-          <div className="location-box" style={{ flexDirection: "column", alignItems: "stretch", gap: 10, margin: "14px 0" }}>
+          <div className="location-box" style={{ flexDirection: "column", alignItems: "stretch", gap: 12, margin: "14px 0" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Briefcase size={16} style={{ color: "var(--accent)" }} />
-                <strong style={{ fontSize: 13 }}>Opportunity exports &amp; applications folder</strong>
+                <strong style={{ fontSize: 13.5 }}>Opportunity applications &amp; exports folder</strong>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Badge kind="accent">Full disk</Badge>
                 <Badge kind="muted">Auto Company &gt; Role</Badge>
-                <Badge kind="green">Not ingested</Badge>
+                <Badge kind="green">Never ingested</Badge>
               </div>
             </div>
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-              Local directory where generated CVs, cover letters, and opportunity files are stored. Opportunity Knox automatically maintains the 2-level folder structure (<code>Company &gt; Role</code>). Files here are strictly for external applications and are <strong>never ingested</strong> into your Career Library or vector index.
+              Choose any folder on the hosting machine where generated CVs, cover letters, and opportunity files are stored. Opportunity Knox automatically maintains the 2-level folder structure (<code>Company &gt; Role</code>). Files here are strictly for external applications and are <strong>never ingested</strong> into your Career Library or vector index.
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, alignItems: "center" }}>
-              <Field
-                label="Application exports subfolder"
-                hint="Relative to your document root."
-              >
+
+            {/* Selectable location mode */}
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: "8px 12px", background: "var(--panel-soft)", borderRadius: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
                 <input
-                  required
-                  value={form.documentsSubdir}
-                  onChange={(e) => {
-                    const updated = { ...formRef.current, documentsSubdir: e.target.value };
+                  type="radio"
+                  name="exportLocationMode"
+                  checked={!form.exportsPath}
+                  onChange={() => {
+                    const updated = { ...formRef.current, exportsPath: "" };
                     setForm(updated);
-                    scheduleStorageSave(updated, 600);
+                    void performStorageSave(updated);
                   }}
-                  onBlur={handleStorageBlur}
-                  placeholder="opportunities"
                 />
+                <span>Default workspace (<code>{(settings.hostDocumentsPath || settings.storagePath).replace(/\/+$/, "")}/{form.documentsSubdir || "opportunities"}</code>)</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="exportLocationMode"
+                  checked={Boolean(form.exportsPath)}
+                  onChange={() => {
+                    if (!form.exportsPath) {
+                      loadFolders();
+                    }
+                  }}
+                />
+                <span>Custom full-disk folder</span>
+              </label>
+            </div>
+
+            {/* Full-disk path input & selector actions */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              <Field
+                label="Full disk folder path"
+                hint="Absolute path anywhere on disk (e.g. /Users/you/Documents/Applications, /Volumes/Hub/Applications)."
+              >
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    style={{ flex: 1, minWidth: 260 }}
+                    value={form.exportsPath || ""}
+                    onChange={(e) => {
+                      const updated = { ...formRef.current, exportsPath: e.target.value };
+                      setForm(updated);
+                      scheduleStorageSave(updated, 600);
+                    }}
+                    onBlur={handleStorageBlur}
+                    placeholder={(settings.hostDocumentsPath || settings.storagePath).replace(/\/+$/, "") + "/" + (form.documentsSubdir || "opportunities")}
+                  />
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => loadFolders(form.exportsPath || undefined)}
+                    title="Browse disk to select folder"
+                  >
+                    <FolderOpen size={14} />
+                    <span>Select folder…</span>
+                  </button>
+                  {form.exportsPath && (
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      onClick={() => {
+                        const updated = { ...formRef.current, exportsPath: "" };
+                        setForm(updated);
+                        void performStorageSave(updated);
+                      }}
+                      title="Reset to workspace default"
+                    >
+                      <RotateCcw size={13} />
+                      <span>Reset</span>
+                    </button>
+                  )}
+                </div>
               </Field>
             </div>
+
+            {/* Quick Presets */}
+            {folderBrowser.presets.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11.5 }}>
+                <span style={{ color: "var(--muted)" }}>Quick select:</span>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  style={{ padding: "2px 8px", fontSize: 11 }}
+                  onClick={() => {
+                    const updated = { ...formRef.current, exportsPath: "" };
+                    setForm(updated);
+                    void performStorageSave(updated);
+                  }}
+                >
+                  Workspace default
+                </button>
+                {folderBrowser.presets.slice(0, 4).map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="button secondary small"
+                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => {
+                      const target = `${preset.path.replace(/\/+$/, "")}/Applications`;
+                      const updated = { ...formRef.current, exportsPath: target };
+                      setForm(updated);
+                      void performStorageSave(updated);
+                    }}
+                  >
+                    {preset.label}/Applications
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <span>Resolved export path:</span>
-              <code>{(settings.hostDocumentsPath || settings.storagePath).replace(/\/+$/, "")}/{form.documentsSubdir || "opportunities"}/&lt;Company&gt;/&lt;Role&gt;/</code>
+              <code>{(form.exportsPath ? form.exportsPath : `${settings.hostDocumentsPath || settings.storagePath}/${form.documentsSubdir || "opportunities"}`).replace(/\/+$/, "")}/&lt;Company&gt;/&lt;Role&gt;/</code>
             </div>
           </div>
 
@@ -7297,6 +7478,192 @@ function SettingsPage({
           </div>
         </section>
       </form>
+
+      {folderBrowser.open && (
+        <div
+          className="modal-overlay"
+          onClick={() => setFolderBrowser((prev) => ({ ...prev, open: false }))}
+        >
+          <div
+            className="modal modal-wide"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 680, display: "flex", flexDirection: "column", gap: 16 }}
+          >
+            <div className="modal-heading" style={{ marginBottom: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <FolderOpen size={20} style={{ color: "var(--accent)" }} />
+                <div>
+                  <h2 style={{ fontSize: 18 }}>Select Application Export Folder</h2>
+                  <p>Browse full disk to select where your opportunity application materials and exports are saved.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setFolderBrowser((prev) => ({ ...prev, open: false }))}
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Quick jump presets */}
+            {folderBrowser.presets.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "6px 10px", background: "var(--panel-soft)", borderRadius: 8 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>Locations:</span>
+                {folderBrowser.presets.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    className="button secondary small"
+                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => loadFolders(p.path)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Current path and navigation */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--field-bg)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={!folderBrowser.parentPath || folderBrowser.loading}
+                onClick={() => folderBrowser.parentPath && loadFolders(folderBrowser.parentPath)}
+                title="Go up to parent folder"
+                style={{ padding: "4px 8px" }}
+              >
+                <ChevronUp size={14} />
+                <span>Up</span>
+              </button>
+              <code style={{ fontSize: 12, flex: 1, wordBreak: "break-all", color: "var(--ink)" }}>
+                {folderBrowser.currentPath}
+              </code>
+            </div>
+
+            {folderBrowser.error && (
+              <div className="alert error" style={{ margin: 0, padding: "8px 12px", fontSize: 12 }}>
+                {folderBrowser.error}
+              </div>
+            )}
+
+            {/* Folder list */}
+            <div
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                maxHeight: 280,
+                minHeight: 180,
+                overflowY: "auto",
+                background: "var(--field-bg)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {folderBrowser.loading ? (
+                <div style={{ padding: 30, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--muted)", fontSize: 12 }}>
+                  <LoaderCircle size={16} className="spin" />
+                  <span>Loading directories…</span>
+                </div>
+              ) : folderBrowser.folders.length === 0 ? (
+                <div style={{ padding: 30, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
+                  No subdirectories found in this folder.
+                </div>
+              ) : (
+                folderBrowser.folders.map((f) => (
+                  <button
+                    key={f.path}
+                    type="button"
+                    onClick={() => loadFolders(f.path)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: "8px 14px",
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: "1px solid var(--line)",
+                      color: "var(--ink)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 12.5,
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-hover)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Folder size={15} style={{ color: "var(--accent)" }} />
+                      <span>{f.name}</span>
+                    </div>
+                    <ChevronRight size={14} style={{ color: "var(--muted)" }} />
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Create subfolder input */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="New subfolder name…"
+                value={folderBrowser.newFolderName}
+                onChange={(e) => setFolderBrowser((prev) => ({ ...prev, newFolderName: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCreateSubfolder();
+                  }
+                }}
+                style={{ flex: 1, height: 34, fontSize: 12 }}
+              />
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={!folderBrowser.newFolderName.trim() || folderBrowser.creating}
+                onClick={handleCreateSubfolder}
+              >
+                <Plus size={13} />
+                <span>Create folder</span>
+              </button>
+            </div>
+
+            {/* Modal actions */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                {folderBrowser.writable ? (
+                  <span style={{ color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
+                    <Check size={13} /> Writable location
+                  </span>
+                ) : (
+                  <span style={{ color: "var(--danger)" }}>Read-only folder</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => setFolderBrowser((prev) => ({ ...prev, open: false }))}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={!folderBrowser.currentPath}
+                  onClick={() => handleSelectFolder(folderBrowser.currentPath)}
+                >
+                  <Check size={14} />
+                  <span>Select this folder</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
         </> },
         { id: "workflow", label: "AI workflow", content: <>

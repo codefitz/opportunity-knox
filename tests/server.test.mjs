@@ -5511,3 +5511,130 @@ test("global settings for applications & exports folder migrates opportunity doc
   assert.equal(downloaded.status, 200);
   assert.equal(downloaded.data, "DOCX-TEST-BYTES");
 });
+
+test("full-disk application exports folder configuration, browsing, validation, and document migration", async (t) => {
+  const f = await fixture(t);
+  await f.setup();
+
+  // 1. System folders browse endpoint returns current path, presets, and folders
+  const folderList = await f.request("/api/system/folders");
+  assert.equal(folderList.status, 200);
+  assert.ok(typeof folderList.data.currentPath === "string");
+  assert.ok(Array.isArray(folderList.data.presets));
+  assert.ok(folderList.data.presets.some((p) => p.label === "Home" || p.label === "Document workspace"));
+
+  // 2. Reject relative path for exportsPath with clear error
+  const rejectRel = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { exportsPath: "relative-path/not-allowed" },
+  });
+  assert.equal(rejectRel.status, 400);
+  assert.match(rejectRel.data.error, /absolute full-disk path/i);
+
+  // 3. Create a unique custom full-disk export root
+  const customRoot = (await import("node:path")).join(tmpdir(), "oppknox-custom-exports-" + Date.now());
+  const existsSync = (await import("node:fs")).existsSync;
+  const readFileSync = (await import("node:fs")).readFileSync;
+
+  // 4. Create opportunity and document while on default workspace
+  const op = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { company: "Acme Corp", role: "Principal Architect", status: "applied" },
+    })
+  ).data;
+  const doc = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        opportunityId: op.id,
+        name: "Acme-CV.docx",
+        kind: "cv",
+        contentBase64: Buffer.from("ACME-INITIAL-CV").toString("base64"),
+      },
+    })
+  ).data;
+
+  const getStoredDoc = (id) => JSON.parse(f.app.db.prepare("SELECT data FROM documents WHERE id=?").get(id).data);
+  const stored1 = getStoredDoc(doc.id);
+  assert.ok(stored1.relativePath.includes("acme-corp/principal-architect/"));
+
+  // 5. Update settings to point exportsPath to full disk folder
+  const patched = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { exportsPath: customRoot },
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.data.exportsPath, customRoot);
+  assert.equal(patched.data.resolvedExportsPath, customRoot);
+  assert.equal(existsSync(customRoot), true);
+
+  // Document migrated to full disk directory
+  const stored2 = getStoredDoc(doc.id);
+  assert.equal(stored2.storageRoot, customRoot);
+  const fileOnCustomDisk = (await import("node:path")).join(customRoot, stored2.relativePath);
+  assert.equal(existsSync(fileOnCustomDisk), true);
+  assert.equal(readFileSync(fileOnCustomDisk, "utf8"), "ACME-INITIAL-CV");
+
+  // Document download endpoint continues to serve from full-disk location
+  const downloaded = await f.request(doc.url);
+  assert.equal(downloaded.status, 200);
+  assert.equal(downloaded.data, "ACME-INITIAL-CV");
+
+  // Opportunity outputFolder displays the full disk path
+  const fullOpp = (await f.request(`/api/opportunities/${op.id}`)).data;
+  assert.ok(fullOpp.outputFolder.startsWith(customRoot));
+
+  // 6. Creating a new document while full-disk is active writes directly to full-disk folder
+  const doc2 = (
+    await f.request("/api/documents", {
+      method: "POST",
+      body: {
+        opportunityId: op.id,
+        name: "Cover-Letter.pdf",
+        kind: "cover",
+        contentBase64: Buffer.from("COVER-LETTER-FULLDISK").toString("base64"),
+      },
+    })
+  ).data;
+  const storedDoc2 = getStoredDoc(doc2.id);
+  assert.equal(storedDoc2.storageRoot, customRoot);
+  const doc2Disk = (await import("node:path")).join(customRoot, storedDoc2.relativePath);
+  assert.equal(existsSync(doc2Disk), true);
+  assert.equal(readFileSync(doc2Disk, "utf8"), "COVER-LETTER-FULLDISK");
+
+  // 7. Renaming company/role moves documents within full-disk folder
+  const currentOpp = (await f.request(`/api/opportunities/${op.id}`)).data;
+  const renamed = await f.request(`/api/opportunities/${op.id}`, {
+    method: "PATCH",
+    body: { revision: currentOpp.revision, role: "Chief Architect" },
+  });
+  assert.equal(renamed.status, 200);
+  const storedAfterRename = getStoredDoc(doc.id);
+  assert.ok(storedAfterRename.relativePath.includes("chief-architect"));
+  const renamedFileDisk = (await import("node:path")).join(customRoot, storedAfterRename.relativePath);
+  assert.equal(existsSync(renamedFileDisk), true);
+  assert.equal(readFileSync(renamedFileDisk, "utf8"), "ACME-INITIAL-CV");
+
+  // 8. System folders subfolder creation
+  const createdSub = await f.request("/api/system/folders", {
+    method: "POST",
+    body: { parentPath: customRoot, name: "SubTest" },
+  });
+  assert.equal(createdSub.status, 200);
+  assert.equal(existsSync((await import("node:path")).join(customRoot, "SubTest")), true);
+
+  // 9. Resetting exportsPath to "" moves documents back to workspace default
+  const resetSettings = await f.request("/api/settings", {
+    method: "PATCH",
+    body: { exportsPath: "" },
+  });
+  assert.equal(resetSettings.status, 200);
+  assert.equal(resetSettings.data.exportsPath, "");
+  const storedAfterReset = getStoredDoc(doc.id);
+  const realFilesDir = (await import("node:fs")).realpathSync(f.options.filesDir);
+  assert.equal(storedAfterReset.storageRoot, realFilesDir);
+  const backInWorkspace = (await import("node:path")).join(realFilesDir, storedAfterReset.relativePath);
+  assert.equal(existsSync(backInWorkspace), true);
+  assert.equal(readFileSync(backInWorkspace, "utf8"), "ACME-INITIAL-CV");
+});

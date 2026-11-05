@@ -221,6 +221,8 @@ export type Settings = {
   timezone: string;
   documentsSubdir: string;
   exportsSubdir?: string;
+  exportsPath?: string;
+  resolvedExportsPath?: string;
   referenceSubdir: string;
   backupSubdir: string;
   hostDocumentsPath: string;

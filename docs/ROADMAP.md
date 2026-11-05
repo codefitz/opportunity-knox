@@ -1,5 +1,32 @@
 # Implementation roadmap
 
+## Selectable Full-Disk Application Exports Folder — 5 November 2026
+
+- Upgraded the Opportunity Applications & Exports configuration from a relative workspace subfolder to a full-disk selectable destination:
+  - **Full-Disk Path Support & Persistence:**
+    - Opportunity application exports can now be set to any absolute path on the hosting machine (`exportsPath`, e.g. `/Users/...` or `/Volumes/...`), completely independent from the workspace document root.
+    - Validates absolute full-disk paths on the backend and rejects relative paths with informative feedback.
+    - Automatically creates target directories on disk with secure permissions (`0700`).
+    - Stored on `doc.storageRoot` in SQLite and dynamically resolved in `documentPath(doc)` ensuring all documents in the full-disk location can be viewed, downloaded, and moved seamlessly.
+    - Preserves strict privacy: files in this directory remain private application materials and are **never ingested** into the Career Library or vector index.
+  - **Live Migration & Auto-Organization:**
+    - Changing `exportsPath` automatically moves existing opportunity documents from the prior folder to the new destination on disk, updating document storage roots and relative paths in SQLite while pruning empty parent directories.
+    - Renaming an opportunity's company or role automatically moves documents inside the full-disk folder to match the new `<Company>/<Role>` hierarchy.
+    - Resetting `exportsPath` to default cleanly migrates documents back to the workspace document root (`<documentRoot>/opportunities`).
+  - **Full-Disk Directory Browser & Selectable UI:**
+    - Added an interactive **Folder Browser Modal** powered by `GET /api/system/folders` and `POST /api/system/folders`:
+      - Allows navigating up and down the filesystem across any drive or directory.
+      - Displays quick location jump pills (`Home`, `Documents`, `Desktop`, `Volumes`, and `Document workspace`).
+      - Shows folder writability indicators (`Writable location` vs `Read-only`).
+      - Supports creating new subfolders directly from the browser dialog.
+    - Added radio toggle in **Files & storage** settings to choose between "Default workspace" and "Custom full-disk folder".
+    - Added quick-preset chips for 1-click selection (`[Documents/Applications]`, `[Desktop/Applications]`, `[Workspace default]`).
+    - Full-disk path input with debounced auto-save, immediate blur sync, and multi-step undo.
+    - Live resolved path preview showing `<ResolvedPath>/<Company>/<Role>/` matching the opportunity cards.
+  - **Verification:**
+    - Added end-to-end server tests in `tests/server.test.mjs` verifying directory browsing, subfolder creation, relative path rejection, full-disk file creation, opportunity renaming, and bidirectional migration.
+    - Verified full test suite passing via `npm run check`.
+
 ## 4 New Contrasting Themes: Dark Background with Light Sidebar — 5 November 2026
 
 - Added 4 distinct, contrasting themes featuring dark workspace surfaces paired with high-clarity light sidebars:

@@ -261,7 +261,7 @@ export function createWorkspaceActions({
           putConfig(
             "settings",
             Object.fromEntries(
-              ["documentsSubdir", "referenceSubdir", "backupSubdir"].map(
+              ["documentsSubdir", "exportsPath", "referenceSubdir", "backupSubdir"].map(
                 (key) => [key, current[key]],
               ),
             ),
