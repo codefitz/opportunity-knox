@@ -1,5 +1,39 @@
 # Implementation roadmap
 
+## Auto-Save Everywhere & Undo Last Change — 5 November 2026
+
+- Eliminated manual "Save" / "Save changes" buttons across primary opportunity and settings editing workflows in favor of seamless, debounced auto-saving and full multi-step undo capabilities:
+  - **Auto-Save Architecture & Focus Preservation (`src/App.tsx`, `src/components/OpportunityWorkflow.tsx`):**
+    - Removed `revision` from component keys (`key={o.id}` instead of `key={`${o.id}-${o.revision}`}`), eliminating component remounting during saves and guaranteeing unbroken typing focus and cursor stability.
+    - Attached a mutable latest-opportunity reference (`latestOpportunityRef.current`) in parent mutation handlers so debounced saves always send the freshest record revision, avoiding 409 conflict errors.
+    - Implemented a 600ms debounce on text inputs and textareas with immediate auto-flush on `blur`, unmount, or `Enter` submission so no changes are lost when closing modals or navigating.
+    - Implemented immediate (0ms delay) auto-save on discrete choices: dropdown selects (`stage`, `outcome`, `priority`, `seniority`), switches, checkboxes, tag add/remove, and external link lookups.
+  - **"Undo Last Change" Feature & Keyboard Shortcuts:**
+    - Maintained an in-memory undo stack (up to 20 snapshots) across all auto-saving forms.
+    - Each committed auto-save pushes the prior snapshot to the undo stack.
+    - Added `<button type="button" className="button secondary small undo-button"><RotateCcw size={13} /> Undo last change</button>` disabled when the stack is empty.
+    - Clicking "Undo last change" pops the top snapshot, applies it to the active form, immediately saves the reverted state to the server API, and displays `"Undid last change"`.
+    - Added `Cmd+Z` / `Ctrl+Z` keyboard shortcut support.
+  - **Sleek Live Status Indicators (`src/styles.css`):**
+    - Added styled `.auto-save-bar` and `.auto-save-status` elements displaying live state:
+      - `Saving…` with animated `<LoaderCircle size={14} className="spin" />`
+      - `✓ All changes saved` / `✓ Review saved` / `✓ Settings saved` with green `<Check size={14} />`
+      - `Undid last change` with `<RotateCcw size={14} />`
+      - `Could not save changes` with `<AlertCircle size={14} />`
+    - Displayed dual auto-save bars (both in top header row and bottom footer row) on long forms like `Overview` and `OpportunityReviewForm` so users never need to scroll down to check save status or undo.
+  - **Covered Editing Workflows:**
+    - **Opportunity Overview (`Overview` in `src/App.tsx`):** Role, company, salary, location, description, tags, priority, seniority, dates, stage, outcome, and job link lookup.
+    - **Opportunity Fit Assessment (`OpportunityReviewForm` in `src/components/OpportunityWorkflow.tsx`):** Strengths, gaps, decision, reason, review date, and stage transition options.
+    - **Alignment & Exclusion Filters (`AlignmentSettings.tsx`):** Exclusion keywords, target roles, target skills, auto-advance stages, auto-generate tasks, follow-up days, and daily targets.
+    - **AI Workflow Settings (`AIWorkflowSettings.tsx`):** On-demand task switches and automatic assessment toggles.
+    - **User Profile (`ProfileSettings.tsx`):** Display name, photo upload, and avatar removal.
+    - **Files & Storage Settings (`src/App.tsx`):** Document subfolder paths, reference subfolder, backup folder, and display timezone.
+    - **Decision Criteria (`DecisionReview.tsx`):** Structured preferences, criteria evaluation items, and importance levels.
+    - **Automatic Backups (`ReliabilitySettings.tsx`):** Automatic backup schedule and frequency settings.
+  - **Verification:**
+    - Tested persistence, debounced writes, blur flushes, and undo reversion.
+    - Full test suite verified via `npm run check` (all 354 Node tests and 46 Python launcher tests passing).
+
 ## Gone Cold Outcome Stage — 5 November 2026
 
 - Introduced a new **"Gone cold"** (`gone-cold`) outcome stage to track opportunities where communication or progress has stalled without a formal rejection or withdrawal:

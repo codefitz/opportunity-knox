@@ -27,12 +27,14 @@ import {
   useMemo,
   useEffect,
   useRef,
+  useCallback,
   Fragment,
   type ReactNode,
   type FormEvent,
   type DragEvent,
 } from "react";
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowDownToLine,
   ArrowRight,
@@ -65,6 +67,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  RotateCcw,
   RotateCw,
   Search,
   Settings2,
@@ -2818,11 +2821,14 @@ function OpportunityDetail({
   const [tab, setTab] = useState(initialTab),
     [busy, setBusy] = useState(false),
     [localError, setLocalError] = useState("");
+  const latestOpportunityRef = useRef(o);
+  latestOpportunityRef.current = o;
   async function mutate(path: string, body: unknown, method = "POST") {
     setBusy(true);
     setLocalError("");
     try {
       const next = await api<Opportunity>(path, json(body, method));
+      latestOpportunityRef.current = next;
       onUpdate(next);
       return true;
     } catch (e) {
@@ -2969,14 +2975,14 @@ function OpportunityDetail({
       <div className="detail-body">
         {tab === "overview" && (
           <Overview
-            key={`${o.id}-${o.revision}`}
+            key={o.id}
             o={o}
             busy={busy}
             onAuthError={onError}
             save={(body) =>
               mutate(
-                `/opportunities/${o.id}`,
-                { ...body, revision: o.revision },
+                `/opportunities/${latestOpportunityRef.current.id}`,
+                { ...body, revision: latestOpportunityRef.current.revision },
                 "PATCH",
               )
             }
@@ -2984,7 +2990,7 @@ function OpportunityDetail({
         )}{" "}
         {tab === "decision" && (
           <OpportunityReviewForm
-            key={`${o.id}-${o.revision}`}
+            key={o.id}
             opportunity={o}
             timezone={timezone}
             busy={busy}
@@ -3067,6 +3073,47 @@ function OpportunityDetail({
     </Modal>
   );
 }
+function getInitialOverviewForm(o: Opportunity): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      [
+        "company",
+        "role",
+        "url",
+        "jobReference",
+        "applicationRoute",
+        "location",
+        "workMode",
+        "salary",
+        "employmentType",
+        "contact",
+        "deadline",
+        "datePosted",
+        "applicantCount",
+        "description",
+        "priority",
+        "nextAction",
+        "nextActionDate",
+        "stage",
+        "outcome",
+        "seniority",
+      ].map((k) => [k, String(o[k as keyof Opportunity] || "")]),
+    ),
+    tags: (o.tags || []).join(", "),
+    effectiveAt: "",
+    note: "",
+  };
+}
+
+function areOverviewFormsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
 function Overview({
   o,
   busy,
@@ -3078,36 +3125,127 @@ function Overview({
   onAuthError: (error: unknown) => void;
   save: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
-  const [form, setForm] = useState<Record<string, string>>({
-      ...Object.fromEntries(
-        [
-          "company",
-          "role",
-          "url",
-          "jobReference",
-          "applicationRoute",
-          "location",
-          "workMode",
-          "salary",
-          "employmentType",
-          "contact",
-          "deadline",
-          "datePosted",
-          "applicantCount",
-          "description",
-          "priority",
-          "nextAction",
-          "nextActionDate",
-          "stage",
-          "outcome",
-          "seniority",
-        ].map((k) => [k, String(o[k as keyof Opportunity] || "")]),
-      ),
-      tags: (o.tags || []).join(", "),
-      effectiveAt: "",
-      note: "",
-    }),
-    [saved, setSaved] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>(() => getInitialOverviewForm(o));
+  const [undoStack, setUndoStack] = useState<Record<string, string>[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const formRef = useRef(form);
+  formRef.current = form;
+  const lastSavedRef = useRef<Record<string, string>>(form);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+
+  const performSave = useCallback(
+    async (targetForm: Record<string, string>, isUndo = false) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!isUndo && areOverviewFormsEqual(targetForm, lastSavedRef.current)) {
+        return true;
+      }
+      if (isSavingRef.current) {
+        pendingSaveRef.current = true;
+        return false;
+      }
+      isSavingRef.current = true;
+      setSaveStatus("saving");
+
+      const priorSnapshot = lastSavedRef.current;
+      const body: Record<string, unknown> = {
+        ...targetForm,
+        tags: targetForm.tags
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        effectiveAt: iso(targetForm.effectiveAt),
+        seniority: targetForm.seniority || undefined,
+      };
+      if (targetForm.outcome) body.stage = "outcome";
+
+      try {
+        const ok = await save(body);
+        if (ok) {
+          if (!isUndo) {
+            setUndoStack((prev) => [...prev.slice(-19), priorSnapshot]);
+            setSaveStatus("saved");
+            setStatusMessage("All changes saved");
+          } else {
+            setSaveStatus("undone");
+            setStatusMessage("Undid last change");
+          }
+          lastSavedRef.current = { ...targetForm, effectiveAt: "", note: "" };
+        } else {
+          setSaveStatus("error");
+          setStatusMessage("Could not save changes");
+        }
+        return ok;
+      } catch {
+        setSaveStatus("error");
+        setStatusMessage("Could not save changes");
+        return false;
+      } finally {
+        isSavingRef.current = false;
+        if (pendingSaveRef.current) {
+          pendingSaveRef.current = false;
+          void performSave(formRef.current);
+        }
+      }
+    },
+    [save],
+  );
+
+  const scheduleSave = useCallback(
+    (updatedForm: Record<string, string>, delay = 600) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      setSaveStatus("saving");
+      if (delay === 0) {
+        saveTimerRef.current = null;
+        void performSave(updatedForm);
+      } else {
+        saveTimerRef.current = setTimeout(() => {
+          saveTimerRef.current = null;
+          void performSave(updatedForm);
+        }, delay);
+      }
+    },
+    [performSave],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void performSave(formRef.current);
+    }
+  }, [performSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(formRef.current);
+      }
+    };
+  }, [performSave]);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || isSavingRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setForm(previous);
+    await performSave(previous, true);
+  }, [undoStack, performSave]);
+
   const set =
     (key: string) =>
     (
@@ -3115,25 +3253,67 @@ function Overview({
         HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
       >,
     ) => {
-      setForm({ ...form, [key]: e.target.value });
-      setSaved(false);
+      const updated = { ...formRef.current, [key]: e.target.value };
+      setForm(updated);
+      scheduleSave(updated, 600);
     };
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const body: Record<string, unknown> = {
-      ...form,
-      tags: form.tags
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean),
-      effectiveAt: iso(form.effectiveAt),
-      seniority: form.seniority || undefined,
-    };
-    if (form.outcome) body.stage = "outcome";
-    if (await save(body)) setSaved(true);
-  }
+
+  const renderAutoSaveBar = (isTop = false) => (
+    <div className={`auto-save-bar ${isTop ? "auto-save-bar-top" : ""}`}>
+      <div className="auto-save-status" role="status" aria-live="polite">
+        {saveStatus === "saving" && (
+          <span className="status-saving">
+            <LoaderCircle size={14} className="spin" />
+            <span>Saving…</span>
+          </span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="status-saved">
+            <Check size={14} />
+            <span>{statusMessage || "All changes saved"}</span>
+          </span>
+        )}
+        {saveStatus === "undone" && (
+          <span className="status-undone">
+            <RotateCcw size={14} />
+            <span>{statusMessage || "Undid last change"}</span>
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="status-error">
+            <AlertCircle size={14} />
+            <span>{statusMessage || "Could not save changes"}</span>
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        className="button secondary small undo-button"
+        disabled={undoStack.length === 0 || saveStatus === "saving" || busy}
+        onClick={() => void handleUndo()}
+        title="Undo last change (Cmd+Z or Ctrl+Z)"
+      >
+        <RotateCcw size={13} />
+        Undo last change
+      </button>
+    </div>
+  );
+
   return (
-    <form onSubmit={submit}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void performSave(formRef.current);
+      }}
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+          if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+            e.preventDefault();
+            void handleUndo();
+          }
+        }
+      }}
+    >
       {(o.alignmentScore != null || (o.matchedSkills && o.matchedSkills.length > 0)) && (
         <div className="alignment-overview-card" style={{ marginBottom: 16 }}>
           <div className="alignment-overview-header">
@@ -3188,28 +3368,33 @@ function Overview({
       <div className="section-intro">
         <h3>Keep the details in one place.</h3>
         <p>
-          Save changes to update this opportunity. Stage changes are dated
+          Changes are saved automatically. Stage changes are dated
           automatically.
         </p>
       </div>
+      {renderAutoSaveBar(true)}
       <div className="form-grid">
         <Field label="Company">
-          <input required value={form.company} onChange={set("company")} />
+          <input required value={form.company} onChange={set("company")} onBlur={handleBlur} />
         </Field>
         <Field label="Role">
-          <input required value={form.role} onChange={set("role")} />
+          <input required value={form.role} onChange={set("role")} onBlur={handleBlur} />
         </Field>
         <Field label="Stage">
           <select
             value={form.stage}
             onChange={(e) => {
-              setForm({
-                ...form,
-                stage: e.target.value,
-                outcome: e.target.value === "outcome" ? form.outcome : "",
+              const nextStage = e.target.value;
+              const nextOutcome = nextStage === "outcome" ? formRef.current.outcome : "";
+              const updated = {
+                ...formRef.current,
+                stage: nextStage,
+                outcome: nextOutcome,
                 effectiveAt: "",
                 note: "",
-              });
+              };
+              setForm(updated);
+              scheduleSave(updated, 800);
             }}
           >
             {STAGES.map((s) => (
@@ -3223,17 +3408,21 @@ function Overview({
           <select
             value={form.outcome}
             required={form.stage === "outcome"}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                outcome: e.target.value,
-                stage: e.target.value
-                  ? "outcome"
-                  : form.stage === "outcome"
-                    ? "review"
-                    : form.stage,
-              })
-            }
+            onChange={(e) => {
+              const nextOutcome = e.target.value;
+              const nextStage = nextOutcome
+                ? "outcome"
+                : formRef.current.stage === "outcome"
+                  ? "review"
+                  : formRef.current.stage;
+              const updated = {
+                ...formRef.current,
+                outcome: nextOutcome,
+                stage: nextStage,
+              };
+              setForm(updated);
+              scheduleSave(updated, 800);
+            }}
           >
             <option value="">Still active</option>
             {OUTCOMES.map((x) => (
@@ -3253,26 +3442,42 @@ function Overview({
                 type="datetime-local"
                 value={form.effectiveAt}
                 onChange={set("effectiveAt")}
+                onBlur={handleBlur}
               />
             </Field>
             <Field label="Stage note (optional)">
               <input
                 value={form.note}
                 onChange={set("note")}
+                onBlur={handleBlur}
                 placeholder="Decision, feedback, or context"
               />
             </Field>
           </>
         )}
         <Field label="Priority">
-          <select value={form.priority || "normal"} onChange={set("priority")}>
+          <select
+            value={form.priority || "normal"}
+            onChange={(e) => {
+              const updated = { ...formRef.current, priority: e.target.value };
+              setForm(updated);
+              scheduleSave(updated, 0);
+            }}
+          >
             <option value="normal">Normal</option>
             <option value="high">High</option>
             <option value="low">Low</option>
           </select>
         </Field>
         <Field label="Seniority level" hint="Auto-classified from listing; override if needed.">
-          <select value={form.seniority} onChange={set("seniority")}>
+          <select
+            value={form.seniority}
+            onChange={(e) => {
+              const updated = { ...formRef.current, seniority: e.target.value };
+              setForm(updated);
+              scheduleSave(updated, 0);
+            }}
+          >
             <option value="">Auto-classified ({o.seniority ? (SENIORITY_LABELS[o.seniority] || o.seniority) : "None"})</option>
             {Object.entries(SENIORITY_LABELS).map(([k, label]) => (
               <option key={k} value={k}>
@@ -3282,12 +3487,13 @@ function Overview({
           </select>
         </Field>
         <Field label="Closing date">
-          <input type="date" value={form.deadline} onChange={set("deadline")} />
+          <input type="date" value={form.deadline} onChange={set("deadline")} onBlur={handleBlur} />
         </Field>
         <Field label="Next action">
           <input
             value={form.nextAction}
             onChange={set("nextAction")}
+            onBlur={handleBlur}
             placeholder="What happens next?"
           />
         </Field>
@@ -3296,12 +3502,14 @@ function Overview({
             type="date"
             value={form.nextActionDate}
             onChange={set("nextActionDate")}
+            onBlur={handleBlur}
           />
         </Field>
         <Field label="Location">
           <input
             value={form.location}
             onChange={set("location")}
+            onBlur={handleBlur}
             placeholder="City or region"
           />
         </Field>
@@ -3309,6 +3517,7 @@ function Overview({
           <input
             value={form.workMode}
             onChange={set("workMode")}
+            onBlur={handleBlur}
             placeholder="Remote, hybrid, on-site…"
           />
         </Field>
@@ -3316,6 +3525,7 @@ function Overview({
           <input
             value={form.salary}
             onChange={set("salary")}
+            onBlur={handleBlur}
             placeholder="Include amount, currency, and period"
           />
         </Field>
@@ -3323,11 +3533,12 @@ function Overview({
           <input
             value={form.employmentType}
             onChange={set("employmentType")}
+            onBlur={handleBlur}
             placeholder="Permanent, contract…"
           />
         </Field>
         <Field label="Contact">
-          <input value={form.contact} onChange={set("contact")} />
+          <input value={form.contact} onChange={set("contact")} onBlur={handleBlur} />
         </Field>
         <Field
           label="Application route"
@@ -3337,43 +3548,51 @@ function Overview({
             maxLength={10000}
             value={form.applicationRoute}
             onChange={set("applicationRoute")}
+            onBlur={handleBlur}
             placeholder="Employer portal, recruiter, email…"
           />
         </Field>
         {form.datePosted && (
           <Field label="Date posted">
-            <input value={form.datePosted} onChange={set("datePosted")} />
+            <input value={form.datePosted} onChange={set("datePosted")} onBlur={handleBlur} />
           </Field>
         )}
         {form.applicantCount && (
           <Field label="Applicants">
-            <input value={form.applicantCount} onChange={set("applicantCount")} />
+            <input value={form.applicantCount} onChange={set("applicantCount")} onBlur={handleBlur} />
           </Field>
         )}
         <Field label="Job reference">
-          <input value={form.jobReference} onChange={set("jobReference")} />
+          <input value={form.jobReference} onChange={set("jobReference")} onBlur={handleBlur} />
         </Field>
         <div className="wide">
           <JobLookup
             url={form.url}
-            onUrlChange={(url) => setForm((current) => ({ ...current, url }))}
+            onUrlChange={(url) => {
+              const updated = { ...formRef.current, url };
+              setForm(updated);
+              scheduleSave(updated, 600);
+            }}
             onAuthError={onAuthError}
             preview
             onResult={(result) => {
-              setForm((current) => {
-                const next = { ...current };
-                for (const key of JOB_FIELDS) {
-                  const value = result.fields[key];
-                  if (
-                    typeof value === "string" &&
-                    value &&
-                    !current[key]?.trim()
-                  )
-                    next[key] = value;
+              const next = { ...formRef.current };
+              let changed = false;
+              for (const key of JOB_FIELDS) {
+                const value = result.fields[key];
+                if (
+                  typeof value === "string" &&
+                  value &&
+                  !formRef.current[key]?.trim()
+                ) {
+                  next[key] = value;
+                  changed = true;
                 }
-                return next;
-              });
-              setSaved(false);
+              }
+              if (changed) {
+                setForm(next);
+                scheduleSave(next, 0);
+              }
             }}
           />
         </div>
@@ -3381,6 +3600,7 @@ function Overview({
           <input
             value={form.tags}
             onChange={set("tags")}
+            onBlur={handleBlur}
             placeholder="AI, leadership, consulting…"
           />
         </Field>
@@ -3389,27 +3609,11 @@ function Overview({
             rows={7}
             value={form.description}
             onChange={set("description")}
+            onBlur={handleBlur}
           />
         </Field>
       </div>
-      <div className="form-actions">
-        {saved && (
-          <span className="saved">
-            <Check size={15} />
-            Saved
-          </span>
-        )}
-        <button className="button primary" disabled={busy}>
-          {busy ? (
-            <Busy text="Saving…" />
-          ) : (
-            <>
-              <Check size={16} />
-              Save changes
-            </>
-          )}
-        </button>
-      </div>
+      {renderAutoSaveBar(false)}
     </form>
   );
 }
@@ -6733,8 +6937,17 @@ function SettingsPage({
     [restoreResult, setRestoreResult] = useState<{destination:string;documentsRestored:number} | null>(null),
     [backupList, setBackupList] = useState<{name:string}[] | null>(null),
     [backupInspection, setBackupInspection] = useState<{name:string;createdAt:string;counts:Record<string,number>;checked:number;issues:string[];valid:boolean} | null>(null);
+  const [storageUndoStack, setStorageUndoStack] = useState<typeof form[]>([]);
+  const [storageStatus, setStorageStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [storageNotice, setStorageNotice] = useState("");
+  const formRef = useRef(form);
+  formRef.current = form;
+  const lastSavedStorageRef = useRef(form);
+  const storageTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     setForm(settings);
+    lastSavedStorageRef.current = settings;
   }, [
     settings.timezone,
     settings.documentsSubdir,
@@ -6742,36 +6955,106 @@ function SettingsPage({
     settings.backupSubdir,
     settings.pendingHostPath,
   ]);
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const s = await api<Settings>(
-        "/settings",
-        json(
-          {
-            timezone: form.timezone,
-            documentsSubdir: form.documentsSubdir,
-            referenceSubdir: form.referenceSubdir,
-            backupSubdir: form.backupSubdir,
-            pendingHostPath: form.pendingHostPath,
-          },
-          "PATCH",
-        ),
-      );
-      onSaved(s);
-      setForm(s);
-      onNotice(
-        s.pendingHostPath
-          ? "Settings saved. Use Update & restart board below (or run ./board restart on the host) to apply the new folder."
-          : "Settings saved.",
-      );
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
+
+  const performStorageSave = useCallback(
+    async (targetForm: typeof form, isUndo = false) => {
+      if (storageTimerRef.current) {
+        clearTimeout(storageTimerRef.current);
+        storageTimerRef.current = null;
+      }
+      const prior = lastSavedStorageRef.current;
+      if (
+        !isUndo &&
+        targetForm.timezone === prior.timezone &&
+        targetForm.documentsSubdir === prior.documentsSubdir &&
+        targetForm.referenceSubdir === prior.referenceSubdir &&
+        targetForm.backupSubdir === prior.backupSubdir &&
+        targetForm.pendingHostPath === prior.pendingHostPath
+      ) {
+        return;
+      }
+      setStorageStatus("saving");
+      setBusy(true);
+      try {
+        const s = await api<Settings>(
+          "/settings",
+          json(
+            {
+              timezone: targetForm.timezone,
+              documentsSubdir: targetForm.documentsSubdir,
+              referenceSubdir: targetForm.referenceSubdir,
+              backupSubdir: targetForm.backupSubdir,
+              pendingHostPath: targetForm.pendingHostPath,
+            },
+            "PATCH",
+          ),
+        );
+        onSaved(s);
+        setForm(s);
+        lastSavedStorageRef.current = s;
+        if (!isUndo) {
+          setStorageUndoStack((prev) => [...prev.slice(-19), prior]);
+          setStorageStatus("saved");
+          setStorageNotice(
+            s.pendingHostPath
+              ? "Settings saved. Use Update & restart board below to apply the new folder."
+              : "All changes saved",
+          );
+        } else {
+          setStorageStatus("undone");
+          setStorageNotice("Undid last change");
+        }
+      } catch (e) {
+        setStorageStatus("error");
+        onError(e);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onSaved, onError],
+  );
+
+  const scheduleStorageSave = useCallback(
+    (updatedForm: typeof form, delay = 600) => {
+      if (storageTimerRef.current) clearTimeout(storageTimerRef.current);
+      setStorageStatus("saving");
+      storageTimerRef.current = setTimeout(() => {
+        storageTimerRef.current = null;
+        void performStorageSave(updatedForm);
+      }, delay);
+    },
+    [performStorageSave],
+  );
+
+  const handleStorageBlur = useCallback(() => {
+    if (storageTimerRef.current) {
+      clearTimeout(storageTimerRef.current);
+      storageTimerRef.current = null;
+      void performStorageSave(formRef.current);
     }
-  }
+  }, [performStorageSave]);
+
+  const handleStorageUndo = useCallback(async () => {
+    if (storageUndoStack.length === 0 || busy) return;
+    if (storageTimerRef.current) {
+      clearTimeout(storageTimerRef.current);
+      storageTimerRef.current = null;
+    }
+    const previous = storageUndoStack[storageUndoStack.length - 1];
+    setStorageUndoStack((prev) => prev.slice(0, -1));
+    setForm(previous);
+    await performStorageSave(previous, true);
+  }, [storageUndoStack, busy, performStorageSave]);
+
+  useEffect(() => {
+    return () => {
+      if (storageTimerRef.current) {
+        clearTimeout(storageTimerRef.current);
+        storageTimerRef.current = null;
+        void performStorageSave(formRef.current);
+      }
+    };
+  }, [performStorageSave]);
   return (
     <main className="content-page settings-page">
       <div className="page-heading">
@@ -6818,7 +7101,7 @@ function SettingsPage({
 
         </> },
         { id: "storage", label: "Files & storage", content: <>
-      <form onSubmit={save}>
+      <form onSubmit={(e) => { e.preventDefault(); void performStorageSave(formRef.current); }}>
         <section className="settings-section">
           <div className="settings-section-heading">
             <FolderOpen size={21} />
@@ -6826,7 +7109,7 @@ function SettingsPage({
               <h2>Files & storage</h2>
               <p>
                 These locations are on the hosting machine, shared by all your
-                devices.
+                devices. Changes are saved automatically.
               </p>
             </div>
           </div>
@@ -6846,18 +7129,24 @@ function SettingsPage({
               <input
                 required
                 value={form.documentsSubdir}
-                onChange={(e) =>
-                  setForm({ ...form, documentsSubdir: e.target.value })
-                }
+                onChange={(e) => {
+                  const updated = { ...formRef.current, documentsSubdir: e.target.value };
+                  setForm(updated);
+                  scheduleStorageSave(updated, 600);
+                }}
+                onBlur={handleStorageBlur}
               />
             </Field>
             <Field label="Reference library subfolder">
               <input
                 required
                 value={form.referenceSubdir}
-                onChange={(e) =>
-                  setForm({ ...form, referenceSubdir: e.target.value })
-                }
+                onChange={(e) => {
+                  const updated = { ...formRef.current, referenceSubdir: e.target.value };
+                  setForm(updated);
+                  scheduleStorageSave(updated, 600);
+                }}
+                onBlur={handleStorageBlur}
               />
             </Field>
             <Field
@@ -6867,16 +7156,24 @@ function SettingsPage({
               <input
                 required
                 value={form.backupSubdir}
-                onChange={(e) =>
-                  setForm({ ...form, backupSubdir: e.target.value })
-                }
+                onChange={(e) => {
+                  const updated = { ...formRef.current, backupSubdir: e.target.value };
+                  setForm(updated);
+                  scheduleStorageSave(updated, 600);
+                }}
+                onBlur={handleStorageBlur}
               />
             </Field>
             <Field label="Display timezone">
               <input
                 required
                 value={form.timezone}
-                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                onChange={(e) => {
+                  const updated = { ...formRef.current, timezone: e.target.value };
+                  setForm(updated);
+                  scheduleStorageSave(updated, 600);
+                }}
+                onBlur={handleStorageBlur}
                 placeholder="Europe/London"
               />
             </Field>
@@ -6887,9 +7184,12 @@ function SettingsPage({
             >
               <input
                 value={form.pendingHostPath || ""}
-                onChange={(e) =>
-                  setForm({ ...form, pendingHostPath: e.target.value })
-                }
+                onChange={(e) => {
+                  const updated = { ...formRef.current, pendingHostPath: e.target.value };
+                  setForm(updated);
+                  scheduleStorageSave(updated, 600);
+                }}
+                onBlur={handleStorageBlur}
                 placeholder="/path/on/the/hosting-machine"
               />
             </Field>
@@ -6917,19 +7217,42 @@ function SettingsPage({
               </button>
             </div>
           )}
-          <div className="form-actions">
-            <button
-              className="button primary"
-              disabled={busy || appearanceSaving}
-            >
-              {busy ? (
-                <Busy text="Saving…" />
-              ) : (
-                <>
-                  <Check size={16} />
-                  Save settings
-                </>
+          <div className="auto-save-bar">
+            <div className="auto-save-status" role="status" aria-live="polite">
+              {storageStatus === "saving" && (
+                <span className="status-saving">
+                  <LoaderCircle size={14} className="spin" />
+                  <span>Saving…</span>
+                </span>
               )}
+              {storageStatus === "saved" && (
+                <span className="status-saved">
+                  <Check size={14} />
+                  <span>{storageNotice || "All changes saved"}</span>
+                </span>
+              )}
+              {storageStatus === "undone" && (
+                <span className="status-undone">
+                  <RotateCcw size={14} />
+                  <span>{storageNotice || "Undid last change"}</span>
+                </span>
+              )}
+              {storageStatus === "error" && (
+                <span className="status-error">
+                  <AlertCircle size={14} />
+                  <span>Could not save settings</span>
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="button secondary small undo-button"
+              disabled={storageUndoStack.length === 0 || storageStatus === "saving" || busy}
+              onClick={() => void handleStorageUndo()}
+              title="Undo last change (Cmd+Z or Ctrl+Z)"
+            >
+              <RotateCcw size={13} />
+              Undo last change
             </button>
           </div>
         </section>

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { AlertCircle, Check, LoaderCircle, RotateCcw } from "lucide-react";
 import { api, ApiError, json, formatDate } from "../api";
 type Schedule = {
   revision: number;
@@ -33,6 +34,53 @@ export default function ReliabilitySettings({
     [status, setStatus] = useState<Status | null>(null),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState("");
+  const [scheduleUndoStack, setScheduleUndoStack] = useState<Schedule[]>([]);
+  const [scheduleSaveStatus, setScheduleSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [scheduleStatusMessage, setScheduleStatusMessage] = useState("");
+  const scheduleRef = useRef(schedule);
+  scheduleRef.current = schedule;
+
+  const performScheduleSave = useCallback(
+    async (nextSchedule: Schedule, isUndo = false) => {
+      setScheduleSaveStatus("saving");
+      const prior = scheduleRef.current;
+      try {
+        const saved = await api<Schedule>(
+          "/backups/schedule",
+          json(
+            {
+              revision: nextSchedule.revision,
+              enabled: nextSchedule.enabled,
+              intervalHours: nextSchedule.intervalHours,
+            },
+            "PATCH",
+          ),
+        );
+        setSchedule(saved);
+        if (!isUndo && prior) {
+          setScheduleUndoStack((prev) => [...prev.slice(-19), prior]);
+          setScheduleSaveStatus("saved");
+          setScheduleStatusMessage("Backup schedule saved");
+        } else {
+          setScheduleSaveStatus("undone");
+          setScheduleStatusMessage("Undid last change");
+        }
+      } catch (e) {
+        setScheduleSaveStatus("error");
+        setScheduleStatusMessage("Could not save backup schedule");
+        onError(e);
+      }
+    },
+    [onError],
+  );
+
+  const handleScheduleUndo = useCallback(async () => {
+    if (scheduleUndoStack.length === 0 || busy) return;
+    const previous = scheduleUndoStack[scheduleUndoStack.length - 1];
+    setScheduleUndoStack((prev) => prev.slice(0, -1));
+    setSchedule(previous);
+    await performScheduleSave(previous, true);
+  }, [scheduleUndoStack, busy, performScheduleSave]);
   const [kind, setKind] = useState("migrate"),
     [destination, setDestination] = useState(""),
     [backups, setBackups] = useState<{ name: string }[]>([]),
@@ -116,31 +164,18 @@ export default function ReliabilitySettings({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void run(async () => {
-                setSchedule(
-                  await api<Schedule>(
-                    "/backups/schedule",
-                    json(
-                      {
-                        revision: schedule.revision,
-                        enabled: schedule.enabled,
-                        intervalHours: schedule.intervalHours,
-                      },
-                      "PATCH",
-                    ),
-                  ),
-                );
-                setNotice("Backup schedule saved.");
-              });
+              if (scheduleRef.current) void performScheduleSave(scheduleRef.current);
             }}
           >
             <label className="check-field">
               <input
                 type="checkbox"
                 checked={schedule.enabled}
-                onChange={(e) =>
-                  setSchedule({ ...schedule, enabled: e.target.checked })
-                }
+                onChange={(e) => {
+                  const next = { ...scheduleRef.current!, enabled: e.target.checked };
+                  setSchedule(next);
+                  void performScheduleSave(next);
+                }}
               />
               Enable automatic backups
             </label>
@@ -148,38 +183,72 @@ export default function ReliabilitySettings({
               <span>Backup frequency</span>
               <select
                 value={schedule.intervalHours}
-                onChange={(e) =>
-                  setSchedule({
-                    ...schedule,
-                    intervalHours: Number(e.target.value),
-                  })
-                }
+                onChange={(e) => {
+                  const next = { ...scheduleRef.current!, intervalHours: Number(e.target.value) };
+                  setSchedule(next);
+                  void performScheduleSave(next);
+                }}
               >
                 <option value={24}>Daily</option>
                 <option value={168}>Weekly</option>
               </select>
             </label>
-            <div className="form-actions">
-              <button className="button secondary small" disabled={active}>
-                Save backup schedule
-              </button>
-              <button
-                type="button"
-                className="button secondary small"
-                disabled={active}
-                onClick={() =>
-                  void run(async () => {
-                    const r = await api<{ name: string; schedule: Schedule }>(
-                      "/backups/schedule/run",
-                      json({ confirm: true }),
-                    );
-                    setSchedule(r.schedule);
-                    setNotice("Verified backup created: " + r.name);
-                  })
-                }
-              >
-                Run backup now
-              </button>
+            <div className="auto-save-bar">
+              <div className="auto-save-status" role="status" aria-live="polite">
+                {scheduleSaveStatus === "saving" && (
+                  <span className="status-saving">
+                    <LoaderCircle size={14} className="spin" />
+                    <span>Saving…</span>
+                  </span>
+                )}
+                {scheduleSaveStatus === "saved" && (
+                  <span className="status-saved">
+                    <Check size={14} />
+                    <span>{scheduleStatusMessage || "Backup schedule saved"}</span>
+                  </span>
+                )}
+                {scheduleSaveStatus === "undone" && (
+                  <span className="status-undone">
+                    <RotateCcw size={14} />
+                    <span>{scheduleStatusMessage || "Undid last change"}</span>
+                  </span>
+                )}
+                {scheduleSaveStatus === "error" && (
+                  <span className="status-error">
+                    <AlertCircle size={14} />
+                    <span>{scheduleStatusMessage || "Could not save backup schedule"}</span>
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="button secondary small undo-button"
+                  disabled={scheduleUndoStack.length === 0 || scheduleSaveStatus === "saving" || active}
+                  onClick={() => void handleScheduleUndo()}
+                  title="Undo last change (Cmd+Z or Ctrl+Z)"
+                >
+                  <RotateCcw size={13} />
+                  Undo last change
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={active}
+                  onClick={() =>
+                    void run(async () => {
+                      const r = await api<{ name: string; schedule: Schedule }>(
+                        "/backups/schedule/run",
+                        json({ confirm: true }),
+                      );
+                      setSchedule(r.schedule);
+                      setNotice("Verified backup created: " + r.name);
+                    })
+                  }
+                >
+                  Run backup now
+                </button>
+              </div>
             </div>
             {schedule.lastSuccessAt && (
               <p>

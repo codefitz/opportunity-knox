@@ -1,6 +1,7 @@
 import { uploadId } from "../lib/upload-queue";
 import DecisionReview from "./DecisionReview";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
+import { AlertCircle, Check, LoaderCircle, RotateCcw } from "lucide-react";
 import { editedTimestamp, formatDate, localInput } from "../api";
 import type {
   Opportunity,
@@ -49,6 +50,26 @@ function ReviewSnapshot({
     </div>
   );
 }
+type ReviewFormState = {
+  strengths: string;
+  gaps: string;
+  decision: string;
+  reason: string;
+  effectiveAt: string;
+  applyStage: boolean;
+};
+
+function areReviewFormsEqual(a: ReviewFormState, b: ReviewFormState): boolean {
+  return (
+    a.strengths === b.strengths &&
+    a.gaps === b.gaps &&
+    a.decision === b.decision &&
+    a.reason === b.reason &&
+    a.effectiveAt === b.effectiveAt &&
+    a.applyStage === b.applyStage
+  );
+}
+
 export function OpportunityReviewForm({
   opportunity: o,
   timezone,
@@ -57,7 +78,7 @@ export function OpportunityReviewForm({
   onError = () => {},
   onAssessed,
 }: Props) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<ReviewFormState>({
     strengths: o.review?.strengths || "",
     gaps: o.review?.gaps || "",
     decision: o.review?.decision || "",
@@ -65,42 +86,206 @@ export function OpportunityReviewForm({
     effectiveAt: localInput(o.review?.effectiveAt || ""),
     applyStage: false,
   });
-  const [saved, setSaved] = useState(false);
+  const [undoStack, setUndoStack] = useState<ReviewFormState[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("");
   const [assessing, setAssessing] = useState(false);
-  const set = (key: string, value: string | boolean) => {
-    setForm((current) => ({ ...current, [key]: value }));
-    setSaved(false);
+
+  const formRef = useRef(form);
+  formRef.current = form;
+  const lastSavedRef = useRef<ReviewFormState>(form);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const latestOppRef = useRef(o);
+  latestOppRef.current = o;
+
+  const performSave = useCallback(
+    async (targetForm: ReviewFormState, isUndo = false) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!isUndo && areReviewFormsEqual(targetForm, lastSavedRef.current)) {
+        return true;
+      }
+      if (isSavingRef.current) {
+        pendingSaveRef.current = true;
+        return false;
+      }
+      isSavingRef.current = true;
+      setSaveStatus("saving");
+
+      const prior = lastSavedRef.current;
+      const body = {
+        ...targetForm,
+        effectiveAt: editedTimestamp(targetForm.effectiveAt, latestOppRef.current.review?.effectiveAt),
+        revision: latestOppRef.current.revision,
+      };
+
+      try {
+        const ok = await mutate(`/opportunities/${latestOppRef.current.id}/review`, body, "PATCH");
+        if (ok) {
+          if (!isUndo) {
+            setUndoStack((prev) => [...prev.slice(-19), prior]);
+            setSaveStatus("saved");
+            setStatusMessage("Review saved");
+          } else {
+            setSaveStatus("undone");
+            setStatusMessage("Undid last change");
+          }
+          lastSavedRef.current = { ...targetForm };
+        } else {
+          setSaveStatus("error");
+          setStatusMessage("Could not save review");
+        }
+        return ok;
+      } catch {
+        setSaveStatus("error");
+        setStatusMessage("Could not save review");
+        return false;
+      } finally {
+        isSavingRef.current = false;
+        if (pendingSaveRef.current) {
+          pendingSaveRef.current = false;
+          void performSave(formRef.current);
+        }
+      }
+    },
+    [mutate],
+  );
+
+  const scheduleSave = useCallback(
+    (updatedForm: ReviewFormState, delay = 600) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveStatus("saving");
+      if (delay === 0) {
+        saveTimerRef.current = null;
+        void performSave(updatedForm);
+      } else {
+        saveTimerRef.current = setTimeout(() => {
+          saveTimerRef.current = null;
+          void performSave(updatedForm);
+        }, delay);
+      }
+    },
+    [performSave],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void performSave(formRef.current);
+    }
+  }, [performSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(formRef.current);
+      }
+    };
+  }, [performSave]);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || isSavingRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setForm(previous);
+    await performSave(previous, true);
+  }, [undoStack, performSave]);
+
+  const set = (key: keyof ReviewFormState, value: string | boolean, delay = 600) => {
+    const updated = { ...formRef.current, [key]: value };
+    setForm(updated);
+    scheduleSave(updated, delay);
   };
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (
-      await mutate(
-        `/opportunities/${o.id}/review`,
-        {
-          ...form,
-          effectiveAt: editedTimestamp(form.effectiveAt, o.review?.effectiveAt),
-          revision: o.revision,
-        },
-        "PATCH",
-      )
-    )
-      setSaved(true);
-  }
+
+  const renderAutoSaveBar = (isTop = false) => (
+    <div className={`auto-save-bar ${isTop ? "auto-save-bar-top" : ""}`}>
+      <div className="auto-save-status" role="status" aria-live="polite">
+        {saveStatus === "saving" && (
+          <span className="status-saving">
+            <LoaderCircle size={14} className="spin" />
+            <span>Saving…</span>
+          </span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="status-saved">
+            <Check size={14} />
+            <span>{statusMessage || "Review saved"}</span>
+          </span>
+        )}
+        {saveStatus === "undone" && (
+          <span className="status-undone">
+            <RotateCcw size={14} />
+            <span>{statusMessage || "Undid last change"}</span>
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="status-error">
+            <AlertCircle size={14} />
+            <span>{statusMessage || "Could not save review"}</span>
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        className="button secondary small undo-button"
+        disabled={undoStack.length === 0 || saveStatus === "saving" || busy || assessing}
+        onClick={() => void handleUndo()}
+        title="Undo last change (Cmd+Z or Ctrl+Z)"
+      >
+        <RotateCcw size={13} />
+        Undo last change
+      </button>
+    </div>
+  );
+
   return (
     <section className="workflow-section" aria-label="Your review decision">
       <DecisionReview opportunity={o} onError={onError} disabled={busy} onBusy={setAssessing} onAssessed={(draft, savedOpportunity) => {
-        setForm(current => ({...current, strengths: draft.strengths, gaps: draft.gaps, effectiveAt: localInput(draft.effectiveAt)}));
-        setSaved(true);
+        const updated = {
+          ...formRef.current,
+          strengths: draft.strengths,
+          gaps: draft.gaps,
+          effectiveAt: localInput(draft.effectiveAt),
+        };
+        setForm(updated);
+        lastSavedRef.current = updated;
+        setSaveStatus("saved");
+        setStatusMessage("Review saved");
         onAssessed?.(savedOpportunity);
       }}/>
       <div className="section-intro">
         <h3>Your review decision</h3>
         <p>
           Keep your own strengths, gaps and decision alongside Career Buddy’s
-          assessment. No AI is needed.
+          assessment. Changes are saved automatically.
         </p>
       </div>
-      <form onSubmit={submit}>
+      {renderAutoSaveBar(true)}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void performSave(formRef.current);
+        }}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+            if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+              e.preventDefault();
+              void handleUndo();
+            }
+          }
+        }}
+      >
         <fieldset className="workflow-fields" disabled={busy || assessing}>
           <div className="form-grid">
             <label className="field wide">
@@ -109,7 +294,8 @@ export function OpportunityReviewForm({
                 rows={3}
                 maxLength={50000}
                 value={form.strengths}
-                onChange={(e) => set("strengths", e.target.value)}
+                onChange={(e) => set("strengths", e.target.value, 600)}
+                onBlur={handleBlur}
                 placeholder="Relevant skills, achievements and experience…"
               />
             </label>
@@ -119,7 +305,8 @@ export function OpportunityReviewForm({
                 rows={3}
                 maxLength={50000}
                 value={form.gaps}
-                onChange={(e) => set("gaps", e.target.value)}
+                onChange={(e) => set("gaps", e.target.value, 600)}
+                onBlur={handleBlur}
                 placeholder="Missing experience, unanswered questions or trade-offs…"
               />
             </label>
@@ -128,13 +315,14 @@ export function OpportunityReviewForm({
               <select
                 value={form.decision}
                 onChange={(e) => {
-                  setForm((current) => ({
-                    ...current,
+                  const updated = {
+                    ...formRef.current,
                     decision: e.target.value,
                     effectiveAt: "",
                     applyStage: false,
-                  }));
-                  setSaved(false);
+                  };
+                  setForm(updated);
+                  scheduleSave(updated, 0);
                 }}
               >
                 <option value="">Not decided</option>
@@ -148,7 +336,8 @@ export function OpportunityReviewForm({
               <input
                 type="datetime-local"
                 value={form.effectiveAt}
-                onChange={(e) => set("effectiveAt", e.target.value)}
+                onChange={(e) => set("effectiveAt", e.target.value, 600)}
+                onBlur={handleBlur}
               />
               <small>
                 Leave empty to use the current time. Uses this device’s
@@ -161,7 +350,8 @@ export function OpportunityReviewForm({
                 rows={3}
                 maxLength={50000}
                 value={form.reason}
-                onChange={(e) => set("reason", e.target.value)}
+                onChange={(e) => set("reason", e.target.value, 600)}
+                onBlur={handleBlur}
                 placeholder="Why are you proceeding, ignoring or deferring?"
               />
             </label>
@@ -171,7 +361,11 @@ export function OpportunityReviewForm({
                   <input
                     type="checkbox"
                     checked={form.applyStage}
-                    onChange={(e) => set("applyStage", e.target.checked)}
+                    onChange={(e) => {
+                      const updated = { ...formRef.current, applyStage: e.target.checked };
+                      setForm(updated);
+                      scheduleSave(updated, 0);
+                    }}
                   />
                   Also update the workflow stage
                 </label>
@@ -187,16 +381,7 @@ export function OpportunityReviewForm({
             )}
           </div>
         </fieldset>
-        <div className="form-actions">
-          {saved && (
-            <span role="status" className="saved">
-              Review saved
-            </span>
-          )}
-          <button className="button primary small" disabled={busy || assessing}>
-            {busy ? "Saving…" : "Save review"}
-          </button>
-        </div>
+        {renderAutoSaveBar(false)}
       </form>
       {!!o.review?.history?.length && (
         <details className="workflow-history">

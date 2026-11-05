@@ -1,6 +1,6 @@
 import { uploadId } from "../lib/upload-queue";
 import AIRequestProgress from "./AIRequestProgress";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { api, json } from "../api";
 import type {
   Opportunity,
@@ -12,6 +12,10 @@ import type {
 } from "../types";
 import { SENIORITY_LABELS } from "../lib/seniority";
 import {
+  AlertCircle,
+  Check,
+  LoaderCircle,
+  RotateCcw,
   Target,
   DollarSign,
   Award,
@@ -38,16 +42,129 @@ const WORK_MODES: { id: "remote" | "hybrid" | "onsite"; label: string }[] = [
   { id: "onsite", label: "On-site" },
 ];
 
+function areCriteriaProfilesEqual(a: Criteria, b: Criteria): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
   const [profile, setProfile] = useState<Criteria | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [undoStack, setUndoStack] = useState<Criteria[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("");
   const [titleInput, setTitleInput] = useState("");
   const [skillInput, setSkillInput] = useState("");
 
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const lastSavedRef = useRef<Criteria | null>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+
   useEffect(() => {
-    void api<Criteria>("/buddy/fit-criteria").then(setProfile).catch(onError);
-  }, []);
+    void api<Criteria>("/buddy/fit-criteria")
+      .then((p) => {
+        setProfile(p);
+        lastSavedRef.current = p;
+      })
+      .catch(onError);
+  }, [onError]);
+
+  const performSave = useCallback(
+    async (targetProfile: Criteria, isUndo = false) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!isUndo && lastSavedRef.current && areCriteriaProfilesEqual(targetProfile, lastSavedRef.current)) {
+        return true;
+      }
+      if (isSavingRef.current) {
+        pendingSaveRef.current = true;
+        return false;
+      }
+      isSavingRef.current = true;
+      setBusy(true);
+      setSaveStatus("saving");
+
+      const prior = lastSavedRef.current;
+      try {
+        const saved = await api<Criteria>("/buddy/fit-criteria", json(targetProfile, "PATCH"));
+        setProfile(saved);
+        lastSavedRef.current = saved;
+        if (!isUndo && prior) {
+          setUndoStack((prev) => [...prev.slice(-19), prior]);
+          setSaveStatus("saved");
+          setStatusMessage("Criteria saved");
+        } else {
+          setSaveStatus("undone");
+          setStatusMessage("Undid last change");
+        }
+        return true;
+      } catch (e) {
+        setSaveStatus("error");
+        setStatusMessage("Could not save criteria");
+        onError(e);
+        return false;
+      } finally {
+        isSavingRef.current = false;
+        setBusy(false);
+        if (pendingSaveRef.current && profileRef.current) {
+          pendingSaveRef.current = false;
+          void performSave(profileRef.current);
+        }
+      }
+    },
+    [onError],
+  );
+
+  const scheduleSave = useCallback(
+    (nextProfile: Criteria, delay = 600) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveStatus("saving");
+      if (delay === 0) {
+        saveTimerRef.current = null;
+        void performSave(nextProfile);
+      } else {
+        saveTimerRef.current = setTimeout(() => {
+          saveTimerRef.current = null;
+          void performSave(nextProfile);
+        }, delay);
+      }
+    },
+    [performSave],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (saveTimerRef.current && profileRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void performSave(profileRef.current);
+    }
+  }, [performSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current && profileRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(profileRef.current);
+      }
+    };
+  }, [performSave]);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || busy || isSavingRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setProfile(previous);
+    await performSave(previous, true);
+  }, [undoStack, busy, performSave]);
 
   const structured: StructuredCriteria = profile?.structured || {
     targetTitles: [],
@@ -59,15 +176,17 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     workModes: [],
   };
 
-  const updateStructured = (partial: Partial<StructuredCriteria>) => {
-    if (!profile) return;
-    setProfile({
-      ...profile,
+  const updateStructured = (partial: Partial<StructuredCriteria>, delay = 0) => {
+    if (!profileRef.current) return;
+    const next: Criteria = {
+      ...profileRef.current,
       structured: {
         ...structured,
         ...partial,
       },
-    });
+    };
+    setProfile(next);
+    scheduleSave(next, delay);
   };
 
   const addTitle = (val: string) => {
@@ -75,14 +194,14 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     if (!t) return;
     const curr = structured.targetTitles || [];
     if (!curr.some((x) => x.toLowerCase() === t.toLowerCase())) {
-      updateStructured({ targetTitles: [...curr, t] });
+      updateStructured({ targetTitles: [...curr, t] }, 0);
     }
     setTitleInput("");
   };
 
   const removeTitle = (index: number) => {
     const curr = structured.targetTitles || [];
-    updateStructured({ targetTitles: curr.filter((_, i) => i !== index) });
+    updateStructured({ targetTitles: curr.filter((_, i) => i !== index) }, 0);
   };
 
   const addSkill = (val: string) => {
@@ -90,14 +209,14 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     if (!s) return;
     const curr = structured.targetSkills || [];
     if (!curr.some((x) => x.toLowerCase() === s.toLowerCase())) {
-      updateStructured({ targetSkills: [...curr, s] });
+      updateStructured({ targetSkills: [...curr, s] }, 0);
     }
     setSkillInput("");
   };
 
   const removeSkill = (index: number) => {
     const curr = structured.targetSkills || [];
-    updateStructured({ targetSkills: curr.filter((_, i) => i !== index) });
+    updateStructured({ targetSkills: curr.filter((_, i) => i !== index) }, 0);
   };
 
   const toggleSeniority = (level: SeniorityLevel) => {
@@ -105,7 +224,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     const next = curr.includes(level)
       ? curr.filter((l) => l !== level)
       : [...curr, level];
-    updateStructured({ targetSeniorities: next });
+    updateStructured({ targetSeniorities: next }, 0);
   };
 
   const toggleWorkMode = (mode: "remote" | "hybrid" | "onsite") => {
@@ -113,7 +232,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     const next = curr.includes(mode)
       ? curr.filter((m) => m !== mode)
       : [...curr, mode];
-    updateStructured({ workModes: next });
+    updateStructured({ workModes: next }, 0);
   };
 
   const syncFromAlignment = async () => {
@@ -123,10 +242,9 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
       if (s.targetTitles?.length) updates.targetTitles = [...s.targetTitles];
       if (s.targetSkills?.length) updates.targetSkills = [...s.targetSkills];
       if (s.currency) updates.salaryCurrency = s.currency;
-      updateStructured(updates);
-      setNotice("Imported target titles and skills from Alignment settings.");
-    } catch (err) {
-      onError(err);
+      updateStructured(updates, 0);
+    } catch (e) {
+      onError(e);
     }
   };
 
@@ -180,7 +298,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
     }
 
     if (!newItems.length) {
-      setNotice(
+      setStatusMessage(
         "Specify role titles, salary, seniority, or skills above to generate criteria.",
       );
       return;
@@ -192,13 +310,12 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
       ...profile.items.filter((item) => !existingIds.has(item.id)),
     ];
 
-    setProfile({
+    const next: Criteria = {
       ...profile,
       items: mergedItems.slice(0, 30),
-    });
-    setNotice(
-      "Generated criteria items from your structured preferences. Review or adjust importance below.",
-    );
+    };
+    setProfile(next);
+    scheduleSave(next, 0);
   };
 
   return (
@@ -208,7 +325,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
           <h2>Opportunity criteria</h2>
           <p>
             Establish your fit assessment criteria through your desired
-            selection preferences and custom evaluation criteria.
+            selection preferences and custom evaluation criteria. Criteria changes save automatically.
           </p>
         </div>
       </div>
@@ -216,17 +333,7 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            setBusy(true);
-
-            void api<Criteria>("/buddy/fit-criteria", json(profile, "PATCH"))
-              .then((p) => {
-                setProfile(p);
-                setNotice(
-                  "Criteria saved. Older assessments will be marked out of date.",
-                );
-              })
-              .catch(onError)
-              .finally(() => setBusy(false));
+            if (profileRef.current) void performSave(profileRef.current);
           }}
         >
           {/* Structured Criteria Selection Builder */}
@@ -331,16 +438,20 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                     disabled={busy}
                     placeholder="e.g. 100000"
                     onChange={(e) =>
-                      updateStructured({
-                        minSalary: e.target.value ? Number(e.target.value) : null,
-                      })
+                      updateStructured(
+                        {
+                          minSalary: e.target.value ? Number(e.target.value) : null,
+                        },
+                        600,
+                      )
                     }
+                    onBlur={handleBlur}
                   />
                   <select
                     value={structured.salaryCurrency || "USD"}
                     disabled={busy}
                     onChange={(e) =>
-                      updateStructured({ salaryCurrency: e.target.value })
+                      updateStructured({ salaryCurrency: e.target.value }, 0)
                     }
                   >
                     <option value="USD">USD ($)</option>
@@ -354,10 +465,13 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                     value={structured.salaryPeriod || "year"}
                     disabled={busy}
                     onChange={(e) =>
-                      updateStructured({
-                        salaryPeriod: e.target
-                          .value as StructuredCriteria["salaryPeriod"],
-                      })
+                      updateStructured(
+                        {
+                          salaryPeriod: e.target
+                            .value as StructuredCriteria["salaryPeriod"],
+                        },
+                        0,
+                      )
                     }
                   >
                     <option value="year">/ year</option>
@@ -489,16 +603,19 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                   maxLength={1000}
                   value={item.description}
                   disabled={busy}
-                  onChange={(e) =>
-                    setProfile({
+                  onChange={(e) => {
+                    const next: Criteria = {
                       ...profile,
                       items: profile.items.map((c) =>
                         c.id === item.id
                           ? { ...c, description: e.target.value }
                           : c,
                       ),
-                    })
-                  }
+                    };
+                    setProfile(next);
+                    scheduleSave(next, 600);
+                  }}
+                  onBlur={handleBlur}
                 />
               </label>
               <label className="field">
@@ -506,16 +623,18 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                 <select
                   value={item.priority}
                   disabled={busy}
-                  onChange={(e) =>
-                    setProfile({
+                  onChange={(e) => {
+                    const next: Criteria = {
                       ...profile,
                       items: profile.items.map((c) =>
                         c.id === item.id
                           ? { ...c, priority: e.target.value as Criterion["priority"] }
                           : c,
                       ),
-                    })
-                  }
+                    };
+                    setProfile(next);
+                    scheduleSave(next, 0);
+                  }}
                 >
                   <option value="required">Required</option>
                   <option value="preferred">Preferred</option>
@@ -525,12 +644,14 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
                 type="button"
                 className="button secondary small"
                 disabled={busy}
-                onClick={() =>
-                  setProfile({
+                onClick={() => {
+                  const next: Criteria = {
                     ...profile,
                     items: profile.items.filter((c) => c.id !== item.id),
-                  })
-                }
+                  };
+                  setProfile(next);
+                  scheduleSave(next, 0);
+                }}
               >
                 Remove criterion
               </button>
@@ -544,32 +665,68 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
             </p>
           )}
 
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy || profile.items.length >= 30}
-              onClick={() =>
-                setProfile({
-                  ...profile,
-                  items: [
-                    ...profile.items,
-                    {
-                      id: uploadId(),
-                      description: "",
-                      priority: "preferred",
-                    },
-                  ],
-                })
-              }
-            >
-              <Plus size={13} /> Add criterion
-            </button>
-            <button className="button primary" disabled={busy}>
-              Save criteria
-            </button>
+          <div className="auto-save-bar">
+            <div className="auto-save-status" role="status" aria-live="polite">
+              {saveStatus === "saving" && (
+                <span className="status-saving">
+                  <LoaderCircle size={14} className="spin" />
+                  <span>Saving…</span>
+                </span>
+              )}
+              {saveStatus === "saved" && (
+                <span className="status-saved">
+                  <Check size={14} />
+                  <span>{statusMessage || "Criteria saved"}</span>
+                </span>
+              )}
+              {saveStatus === "undone" && (
+                <span className="status-undone">
+                  <RotateCcw size={14} />
+                  <span>{statusMessage || "Undid last change"}</span>
+                </span>
+              )}
+              {saveStatus === "error" && (
+                <span className="status-error">
+                  <AlertCircle size={14} />
+                  <span>{statusMessage || "Could not save criteria"}</span>
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                className="button secondary small undo-button"
+                disabled={undoStack.length === 0 || saveStatus === "saving" || busy}
+                onClick={() => void handleUndo()}
+                title="Undo last change (Cmd+Z or Ctrl+Z)"
+              >
+                <RotateCcw size={13} />
+                Undo last change
+              </button>
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={busy || profile.items.length >= 30}
+                onClick={() => {
+                  const next: Criteria = {
+                    ...profile,
+                    items: [
+                      ...profile.items,
+                      {
+                        id: uploadId(),
+                        description: "",
+                        priority: "preferred",
+                      },
+                    ],
+                  };
+                  setProfile(next);
+                  scheduleSave(next, 0);
+                }}
+              >
+                <Plus size={13} /> Add criterion
+              </button>
+            </div>
           </div>
-          {notice && <p role="status" className="saved" style={{ marginTop: 12, display: "block" }}>{notice}</p>}
         </form>
       )}
     </section>

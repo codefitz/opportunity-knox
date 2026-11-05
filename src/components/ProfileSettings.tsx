@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
+  AlertCircle,
   Camera,
   Check,
   LoaderCircle,
   Palette,
+  RotateCcw,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -369,21 +371,145 @@ export default function ProfileSettings({
   onError: (error: unknown) => void;
   onNotice: (notice: string) => void;
 }) {
-  const [name, setName] = useState(profile.name),
-    [revision, setRevision] = useState(profile.revision),
-    [image, setImage] = useState(""),
-    [preview, setPreview] = useState(""),
-    [remove, setRemove] = useState(false),
-    [busy, setBusy] = useState(false),
-    [dirty, setDirty] = useState(false),
-    [error, setError] = useState(""),
-    [conflict, setConflict] = useState(false);
+  const [name, setName] = useState(profile.name);
+  const [revision, setRevision] = useState(profile.revision);
+  const [image, setImage] = useState("");
+  const [preview, setPreview] = useState("");
+  const [remove, setRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const [undoStack, setUndoStack] = useState<{ name: string; avatarUrl?: string }[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const nameRef = useRef(name);
+  nameRef.current = name;
+  const lastSavedNameRef = useRef(profile.name);
+  const revisionRef = useRef(profile.revision);
+  revisionRef.current = revision;
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef(false);
+
   useEffect(() => {
-    if (!dirty) {
-      setName(profile.name);
-      setRevision(profile.revision);
+    setName(profile.name);
+    setRevision(profile.revision);
+    lastSavedNameRef.current = profile.name;
+  }, [profile.name, profile.revision]);
+
+  const performSave = useCallback(
+    async (
+      targetName: string,
+      customImage?: string,
+      customRemove?: boolean,
+      isUndo = false,
+      priorSnapshot?: { name: string; avatarUrl?: string },
+    ) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (
+        !isUndo &&
+        !customImage &&
+        !customRemove &&
+        targetName.trim() === lastSavedNameRef.current.trim()
+      ) {
+        return;
+      }
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+      setBusy(true);
+      setError("");
+      setSaveStatus("saving");
+
+      const prior = priorSnapshot || { name: lastSavedNameRef.current, avatarUrl: profile.avatarUrl };
+      try {
+        const next = await api<Profile>(
+          "/profile",
+          json(
+            {
+              revision: revisionRef.current,
+              name: targetName,
+              ...(customImage ? { imageBase64: customImage } : {}),
+              ...(customRemove ? { removeAvatar: true } : {}),
+            },
+            "PATCH",
+          ),
+        );
+        onSaved(next);
+        setConflict(false);
+        setRevision(next.revision);
+        lastSavedNameRef.current = next.name;
+        setImage("");
+        setPreview("");
+        setRemove(false);
+        if (!isUndo) {
+          setUndoStack((prev) => [...prev.slice(-19), prior]);
+          setSaveStatus("saved");
+          setStatusMessage("Profile saved");
+        } else {
+          setSaveStatus("undone");
+          setStatusMessage("Undid last change");
+        }
+      } catch (e) {
+        setSaveStatus("error");
+        setStatusMessage("Could not save profile");
+        setError(
+          e instanceof Error ? e.message : "Your profile could not be saved.",
+        );
+        if (e instanceof ApiError && e.status === 401) onError(e);
+        if (e instanceof ApiError && e.status === 409) setConflict(true);
+      } finally {
+        isSavingRef.current = false;
+        setBusy(false);
+      }
+    },
+    [profile.avatarUrl, onSaved, onError],
+  );
+
+  const scheduleSave = useCallback(
+    (targetName: string, delay = 600) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveStatus("saving");
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        void performSave(targetName);
+      }, delay);
+    },
+    [performSave],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void performSave(nameRef.current);
     }
-  }, [profile.revision, dirty]);
+  }, [performSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(nameRef.current);
+      }
+    };
+  }, [performSave]);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || busy || isSavingRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setName(previous.name);
+    await performSave(previous.name, undefined, !previous.avatarUrl && Boolean(profile.avatarUrl), true);
+  }, [undoStack, busy, profile.avatarUrl, performSave]);
+
   async function choose(file?: File) {
     if (!file) return;
     setError("");
@@ -399,50 +525,25 @@ export default function ProfileSettings({
     reader.onload = () => {
       const data = String(reader.result);
       setPreview(data);
-      setImage(data.split(",")[1]);
+      const b64 = data.split(",")[1];
+      setImage(b64);
       setRemove(false);
-      setDirty(true);
+      void performSave(nameRef.current, b64);
     };
     reader.onerror = () => setError("The photo could not be read.");
     reader.readAsDataURL(file);
   }
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const next = await api<Profile>(
-        "/profile",
-        json(
-          {
-            revision,
-            name,
-            ...(image ? { imageBase64: image } : {}),
-            ...(remove ? { removeAvatar: true } : {}),
-          },
-          "PATCH",
-        ),
-      );
-      onSaved(next);
-      setDirty(false);
-      setConflict(false);
-      setRevision(next.revision);
-      setImage("");
-      setPreview("");
-      setRemove(false);
-      onNotice("Your profile is saved.");
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Your profile could not be saved.",
-      );
-      if (e instanceof ApiError && e.status === 401) onError(e);
-      if (e instanceof ApiError && e.status === 409) setConflict(true);
-    } finally {
-      setBusy(false);
-    }
-  }
+
+  const handleRemovePhoto = () => {
+    setRemove(true);
+    setPreview("");
+    setImage("");
+    void performSave(nameRef.current, undefined, true);
+  };
+
   const avatar =
     preview || (!remove && profile.avatarUrl ? profile.avatarUrl : "");
+
   return (
     <section
       className="settings-section profile-settings"
@@ -453,11 +554,11 @@ export default function ProfileSettings({
         <div>
           <h2>Your profile</h2>
           <p>
-            A name and photo to make Opportunity Knox feel like your workspace.
+            A name and photo to make Opportunity Knox feel like your workspace. Changes save automatically.
           </p>
         </div>
       </div>
-      <form onSubmit={save} data-editing={dirty ? "true" : undefined}>
+      <form onSubmit={(e) => { e.preventDefault(); void performSave(nameRef.current); }}>
         <div className="profile-editor">
           <div className="profile-photo">
             {avatar ? (
@@ -489,12 +590,7 @@ export default function ProfileSettings({
               <button
                 className="text-button remove-photo"
                 type="button"
-                onClick={() => {
-                  setRemove(true);
-                  setPreview("");
-                  setImage("");
-                  setDirty(true);
-                }}
+                onClick={handleRemovePhoto}
               >
                 <Trash2 size={12} />
                 Remove photo
@@ -510,8 +606,9 @@ export default function ProfileSettings({
             value={name}
             onChange={(e) => {
               setName(e.target.value);
-              setDirty(true);
+              scheduleSave(e.target.value, 600);
             }}
+            onBlur={handleBlur}
             placeholder="What should we call you?"
             autoComplete="name"
           />
@@ -534,12 +631,9 @@ export default function ProfileSettings({
                 setImage("");
                 setPreview("");
                 setRemove(false);
-                setDirty(false);
                 setConflict(false);
                 setError("");
-                onNotice(
-                  "Latest profile loaded. Unsaved profile changes were replaced.",
-                );
+                onNotice("Latest profile loaded.");
               } catch (e) {
                 onError(e);
               }
@@ -548,19 +642,42 @@ export default function ProfileSettings({
             Reload latest profile
           </button>
         )}
-        <div className="form-actions">
-          <button className="button primary" disabled={busy || !dirty}>
-            {busy ? (
-              <>
-                <LoaderCircle size={15} className="spin" />
-                Saving…
-              </>
-            ) : (
-              <>
-                <Check size={15} />
-                Save profile
-              </>
+        <div className="auto-save-bar">
+          <div className="auto-save-status" role="status" aria-live="polite">
+            {saveStatus === "saving" && (
+              <span className="status-saving">
+                <LoaderCircle size={14} className="spin" />
+                <span>Saving…</span>
+              </span>
             )}
+            {saveStatus === "saved" && (
+              <span className="status-saved">
+                <Check size={14} />
+                <span>{statusMessage || "Profile saved"}</span>
+              </span>
+            )}
+            {saveStatus === "undone" && (
+              <span className="status-undone">
+                <RotateCcw size={14} />
+                <span>{statusMessage || "Undid last change"}</span>
+              </span>
+            )}
+            {saveStatus === "error" && (
+              <span className="status-error">
+                <AlertCircle size={14} />
+                <span>{statusMessage || "Could not save profile"}</span>
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="button secondary small undo-button"
+            disabled={undoStack.length === 0 || saveStatus === "saving" || busy}
+            onClick={() => void handleUndo()}
+            title="Undo last change (Cmd+Z or Ctrl+Z)"
+          >
+            <RotateCcw size={13} />
+            Undo last change
           </button>
         </div>
       </form>

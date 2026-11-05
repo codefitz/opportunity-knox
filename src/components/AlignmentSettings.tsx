@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { SlidersHorizontal, ShieldAlert, Target, Award, Zap, Plus, X } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { SlidersHorizontal, ShieldAlert, Target, Award, Zap, Plus, X, LoaderCircle, Check, RotateCcw, AlertCircle } from "lucide-react";
 import { api, json } from "../api";
 import type { Settings } from "../types";
 
@@ -13,6 +13,30 @@ const POPULAR_EXCLUSIONS = [
   "Weekend work",
 ];
 
+type AlignmentState = {
+  exclusionKeywords: string[];
+  targetTitles: string[];
+  targetSkills: string[];
+  autoAdvanceStages: boolean;
+  autoGenerateTasks: boolean;
+  defaultFollowUpDays: number;
+  dailyTarget: number;
+};
+
+function areAlignmentStatesEqual(a: AlignmentState, b: AlignmentState): boolean {
+  if (a.autoAdvanceStages !== b.autoAdvanceStages) return false;
+  if (a.autoGenerateTasks !== b.autoGenerateTasks) return false;
+  if (a.defaultFollowUpDays !== b.defaultFollowUpDays) return false;
+  if (a.dailyTarget !== b.dailyTarget) return false;
+  if (a.exclusionKeywords.length !== b.exclusionKeywords.length) return false;
+  if (a.targetTitles.length !== b.targetTitles.length) return false;
+  if (a.targetSkills.length !== b.targetSkills.length) return false;
+  if (a.exclusionKeywords.some((v, i) => v !== b.exclusionKeywords[i])) return false;
+  if (a.targetTitles.some((v, i) => v !== b.targetTitles[i])) return false;
+  if (a.targetSkills.some((v, i) => v !== b.targetSkills[i])) return false;
+  return true;
+}
+
 export default function AlignmentSettings({
   settings,
   onSaved,
@@ -24,42 +48,42 @@ export default function AlignmentSettings({
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
 }) {
-  const [exclusionKeywords, setExclusionKeywords] = useState<string[]>(
-    settings.exclusionKeywords || [],
-  );
-  const [targetTitles, setTargetTitles] = useState<string[]>(
-    settings.targetTitles || [],
-  );
-  const [targetSkills, setTargetSkills] = useState<string[]>(
-    settings.targetSkills || [],
-  );
-  const [autoAdvanceStages, setAutoAdvanceStages] = useState<boolean>(
-    settings.autoAdvanceStages !== false,
-  );
-  const [autoGenerateTasks, setAutoGenerateTasks] = useState<boolean>(
-    settings.autoGenerateTasks !== false,
-  );
-  const [defaultFollowUpDays, setDefaultFollowUpDays] = useState<number>(
-    settings.defaultFollowUpDays || 7,
-  );
-  const [dailyTarget, setDailyTarget] = useState<number>(
-    settings.dailyTarget || 3,
-  );
+  const [state, setState] = useState<AlignmentState>({
+    exclusionKeywords: settings.exclusionKeywords || [],
+    targetTitles: settings.targetTitles || [],
+    targetSkills: settings.targetSkills || [],
+    autoAdvanceStages: settings.autoAdvanceStages !== false,
+    autoGenerateTasks: settings.autoGenerateTasks !== false,
+    defaultFollowUpDays: settings.defaultFollowUpDays || 7,
+    dailyTarget: settings.dailyTarget || 3,
+  });
+  const [undoStack, setUndoStack] = useState<AlignmentState[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const lastSavedRef = useRef<AlignmentState>(state);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+
   const [inputExclusion, setInputExclusion] = useState("");
   const [inputTitle, setInputTitle] = useState("");
   const [inputSkill, setInputSkill] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    setExclusionKeywords(settings.exclusionKeywords || []);
-    setTargetTitles(settings.targetTitles || []);
-    setTargetSkills(settings.targetSkills || []);
-    setAutoAdvanceStages(settings.autoAdvanceStages !== false);
-    setAutoGenerateTasks(settings.autoGenerateTasks !== false);
-    setDefaultFollowUpDays(settings.defaultFollowUpDays || 7);
-    setDailyTarget(settings.dailyTarget || 3);
-    setDirty(false);
+    const next: AlignmentState = {
+      exclusionKeywords: settings.exclusionKeywords || [],
+      targetTitles: settings.targetTitles || [],
+      targetSkills: settings.targetSkills || [],
+      autoAdvanceStages: settings.autoAdvanceStages !== false,
+      autoGenerateTasks: settings.autoGenerateTasks !== false,
+      defaultFollowUpDays: settings.defaultFollowUpDays || 7,
+      dailyTarget: settings.dailyTarget || 3,
+    };
+    setState(next);
+    lastSavedRef.current = next;
   }, [
     settings.exclusionKeywords,
     settings.targetTitles,
@@ -70,85 +94,171 @@ export default function AlignmentSettings({
     settings.dailyTarget,
   ]);
 
+  const performSave = useCallback(
+    async (targetState: AlignmentState, isUndo = false) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!isUndo && areAlignmentStatesEqual(targetState, lastSavedRef.current)) {
+        return true;
+      }
+      if (isSavingRef.current) {
+        pendingSaveRef.current = true;
+        return false;
+      }
+      isSavingRef.current = true;
+      setSaveStatus("saving");
+
+      const prior = lastSavedRef.current;
+      try {
+        const updated = await api<Settings>(
+          "/settings",
+          json(targetState, "PATCH"),
+        );
+        onSaved(updated);
+        lastSavedRef.current = targetState;
+        if (!isUndo) {
+          setUndoStack((prev) => [...prev.slice(-19), prior]);
+          setSaveStatus("saved");
+          setStatusMessage("Settings saved");
+        } else {
+          setSaveStatus("undone");
+          setStatusMessage("Undid last change");
+        }
+        return true;
+      } catch (err) {
+        setSaveStatus("error");
+        setStatusMessage("Could not save settings");
+        onError(err);
+        return false;
+      } finally {
+        isSavingRef.current = false;
+        if (pendingSaveRef.current) {
+          pendingSaveRef.current = false;
+          void performSave(stateRef.current);
+        }
+      }
+    },
+    [onSaved, onError],
+  );
+
+  const scheduleSave = useCallback(
+    (nextState: AlignmentState, delay = 600) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveStatus("saving");
+      if (delay === 0) {
+        saveTimerRef.current = null;
+        void performSave(nextState);
+      } else {
+        saveTimerRef.current = setTimeout(() => {
+          saveTimerRef.current = null;
+          void performSave(nextState);
+        }, delay);
+      }
+    },
+    [performSave],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void performSave(stateRef.current);
+    }
+  }, [performSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(stateRef.current);
+      }
+    };
+  }, [performSave]);
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || isSavingRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setState(previous);
+    await performSave(previous, true);
+  }, [undoStack, performSave]);
+
   const addExclusion = (val: string) => {
     const term = val.trim();
     if (!term) return;
-    if (!exclusionKeywords.some((k) => k.toLowerCase() === term.toLowerCase())) {
-      setExclusionKeywords([...exclusionKeywords, term]);
-      setDirty(true);
+    if (!state.exclusionKeywords.some((k) => k.toLowerCase() === term.toLowerCase())) {
+      const next = { ...stateRef.current, exclusionKeywords: [...stateRef.current.exclusionKeywords, term] };
+      setState(next);
+      scheduleSave(next, 0);
     }
     setInputExclusion("");
   };
 
   const removeExclusion = (term: string) => {
-    setExclusionKeywords(
-      exclusionKeywords.filter((k) => k.toLowerCase() !== term.toLowerCase()),
-    );
-    setDirty(true);
+    const next = {
+      ...stateRef.current,
+      exclusionKeywords: stateRef.current.exclusionKeywords.filter((k) => k.toLowerCase() !== term.toLowerCase()),
+    };
+    setState(next);
+    scheduleSave(next, 0);
   };
 
   const addTitle = (val: string) => {
     const term = val.trim();
     if (!term) return;
-    if (!targetTitles.some((t) => t.toLowerCase() === term.toLowerCase())) {
-      setTargetTitles([...targetTitles, term]);
-      setDirty(true);
+    if (!state.targetTitles.some((t) => t.toLowerCase() === term.toLowerCase())) {
+      const next = { ...stateRef.current, targetTitles: [...stateRef.current.targetTitles, term] };
+      setState(next);
+      scheduleSave(next, 0);
     }
     setInputTitle("");
   };
 
   const removeTitle = (term: string) => {
-    setTargetTitles(
-      targetTitles.filter((t) => t.toLowerCase() !== term.toLowerCase()),
-    );
-    setDirty(true);
+    const next = {
+      ...stateRef.current,
+      targetTitles: stateRef.current.targetTitles.filter((t) => t.toLowerCase() !== term.toLowerCase()),
+    };
+    setState(next);
+    scheduleSave(next, 0);
   };
 
   const addSkill = (val: string) => {
     const term = val.trim();
     if (!term) return;
-    if (!targetSkills.some((s) => s.toLowerCase() === term.toLowerCase())) {
-      setTargetSkills([...targetSkills, term]);
-      setDirty(true);
+    if (!state.targetSkills.some((s) => s.toLowerCase() === term.toLowerCase())) {
+      const next = { ...stateRef.current, targetSkills: [...stateRef.current.targetSkills, term] };
+      setState(next);
+      scheduleSave(next, 0);
     }
     setInputSkill("");
   };
 
   const removeSkill = (term: string) => {
-    setTargetSkills(
-      targetSkills.filter((s) => s.toLowerCase() !== term.toLowerCase()),
-    );
-    setDirty(true);
+    const next = {
+      ...stateRef.current,
+      targetSkills: stateRef.current.targetSkills.filter((s) => s.toLowerCase() !== term.toLowerCase()),
+    };
+    setState(next);
+    scheduleSave(next, 0);
   };
 
-  const save = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setSaving(true);
-    try {
-      const updated = await api<Settings>(
-        "/settings",
-        json(
-          {
-            exclusionKeywords,
-            targetTitles,
-            targetSkills,
-            autoAdvanceStages,
-            autoGenerateTasks,
-            defaultFollowUpDays,
-            dailyTarget,
-          },
-          "PATCH",
-        ),
-      );
-      onSaved(updated);
-      setDirty(false);
-      onNotice("Targeting, filters, and workflow automation settings saved.");
-    } catch (err) {
-      onError(err);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const {
+    exclusionKeywords,
+    targetTitles,
+    targetSkills,
+    autoAdvanceStages,
+    autoGenerateTasks,
+    defaultFollowUpDays,
+    dailyTarget,
+  } = state;
 
   return (
     <section className="settings-section alignment-settings-section">
@@ -373,8 +483,9 @@ export default function AlignmentSettings({
               type="checkbox"
               checked={autoAdvanceStages}
               onChange={(e) => {
-                setAutoAdvanceStages(e.target.checked);
-                setDirty(true);
+                const next = { ...stateRef.current, autoAdvanceStages: e.target.checked };
+                setState(next);
+                scheduleSave(next, 0);
               }}
             />
             <span>
@@ -390,8 +501,9 @@ export default function AlignmentSettings({
               type="checkbox"
               checked={autoGenerateTasks}
               onChange={(e) => {
-                setAutoGenerateTasks(e.target.checked);
-                setDirty(true);
+                const next = { ...stateRef.current, autoGenerateTasks: e.target.checked };
+                setState(next);
+                scheduleSave(next, 0);
               }}
             />
             <span>
@@ -412,9 +524,12 @@ export default function AlignmentSettings({
                 style={{ width: 140 }}
                 value={defaultFollowUpDays}
                 onChange={(e) => {
-                  setDefaultFollowUpDays(Math.max(1, Number(e.target.value) || 1));
-                  setDirty(true);
+                  const val = Math.max(1, Number(e.target.value) || 1);
+                  const next = { ...stateRef.current, defaultFollowUpDays: val };
+                  setState(next);
+                  scheduleSave(next, 600);
                 }}
+                onBlur={handleBlur}
               />
             </label>
 
@@ -427,23 +542,54 @@ export default function AlignmentSettings({
                 style={{ width: 140 }}
                 value={dailyTarget}
                 onChange={(e) => {
-                  setDailyTarget(Math.max(1, Number(e.target.value) || 1));
-                  setDirty(true);
+                  const val = Math.max(1, Number(e.target.value) || 1);
+                  const next = { ...stateRef.current, dailyTarget: val };
+                  setState(next);
+                  scheduleSave(next, 600);
                 }}
+                onBlur={handleBlur}
               />
             </label>
           </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+      <div className="auto-save-bar">
+        <div className="auto-save-status" role="status" aria-live="polite">
+          {saveStatus === "saving" && (
+            <span className="status-saving">
+              <LoaderCircle size={14} className="spin" />
+              <span>Saving…</span>
+            </span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="status-saved">
+              <Check size={14} />
+              <span>{statusMessage || "Settings saved"}</span>
+            </span>
+          )}
+          {saveStatus === "undone" && (
+            <span className="status-undone">
+              <RotateCcw size={14} />
+              <span>{statusMessage || "Undid last change"}</span>
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span className="status-error">
+              <AlertCircle size={14} />
+              <span>{statusMessage || "Could not save settings"}</span>
+            </span>
+          )}
+        </div>
         <button
           type="button"
-          className="button primary small"
-          disabled={!dirty || saving}
-          onClick={() => save()}
+          className="button secondary small undo-button"
+          disabled={undoStack.length === 0 || saveStatus === "saving"}
+          onClick={() => void handleUndo()}
+          title="Undo last change (Cmd+Z or Ctrl+Z)"
         >
-          {saving ? "Saving..." : "Save settings"}
+          <RotateCcw size={13} />
+          Undo last change
         </button>
       </div>
     </section>
