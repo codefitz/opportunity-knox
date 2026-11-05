@@ -1,5 +1,25 @@
 # Implementation roadmap
 
+## 4 New Contrasting Themes: Dark Background with Light Sidebar — 5 November 2026
+
+- Added 4 distinct, contrasting themes featuring dark workspace surfaces paired with high-clarity light sidebars:
+  - **Emerald Dusk (`emerald-dusk`):**
+    - Deep forest night background (`#111d17`) paired with a vibrant emerald green accent (`#4ecb8d`) and a crisp linen light sidebar (`#f4f7f2`).
+  - **Velvet Night (`velvet-night`):**
+    - Deep warm onyx background (`#161517`) paired with a warm golden amber accent (`#dfa658`) and a soft clotted cream light sidebar (`#faf5ee`).
+  - **Cyber Porcelain (`cyber-porcelain`):**
+    - Abyssal midnight blue background (`#0f141e`) paired with an electric cyan accent (`#38bdf8`) and a bright pale porcelain light sidebar (`#f0f5fc`).
+  - **Rose Noir (`rose-noir`):**
+    - Deep plum noir background (`#181318`) paired with an electric rose blush accent (`#f472b6`) and a delicate pearl rose light sidebar (`#faf0f5`).
+- **Implementation & Theme Architecture:**
+  - Registered all 4 themes in the `Theme` type definition (`src/types.ts`) and backend settings validation in `server/app.mjs`.
+  - Added theme metadata to `THEMES` in `src/components/ProfileSettings.tsx` with `dark: true`, `navDark: false`, and 3-color preview swatches (`[workspace, accent, sidebar]`).
+  - Configured complete CSS theme variables in `src/themes.css` with dark surfaces, contrasting text/muted hierarchies, custom stage colors, and dedicated `--nav-*` light sidebar variables.
+  - Included all 4 theme selectors in `:root:is(...) .sidebar` to map navigation background and ink colors seamlessly.
+- **Verification:**
+  - Extended mixed contrast theme persistence and server reload tests in `tests/server.test.mjs`.
+  - Verified compilation (`npm run build`) and full test suite (`npm run check`).
+
 ## Unified Settings: Target Roles & Criteria, AI Models & Opportunity Exports Config — 5 November 2026
 
 - Delivered a streamlined reorganization and unification of settings navigation, fit/alignment criteria, and opportunity export storage configuration:

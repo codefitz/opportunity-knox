@@ -177,7 +177,11 @@ export type Theme =
   | "alpine-mint"
   | "sandstone-slate"
   | "nordic-frost"
-  | "solar-dark";
+  | "solar-dark"
+  | "emerald-dusk"
+  | "velvet-night"
+  | "cyber-porcelain"
+  | "rose-noir";
 export type Appearance = {
   theme: Theme;
   themeAccent: string;

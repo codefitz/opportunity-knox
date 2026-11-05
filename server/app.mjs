@@ -2879,6 +2879,10 @@ Strict constraints:
                 "sandstone-slate",
                 "nordic-frost",
                 "solar-dark",
+                "emerald-dusk",
+                "velvet-night",
+                "cyber-porcelain",
+                "rose-noir",
               ],
               "theme",
             );

@@ -129,6 +129,38 @@ export const THEMES: {
     dark: true,
     navDark: false,
   },
+  {
+    id: "emerald-dusk",
+    name: "Emerald Dusk",
+    description: "Deep forest night with a crisp linen sidebar.",
+    swatches: ["#111d17", "#4ecb8d", "#f4f7f2"],
+    dark: true,
+    navDark: false,
+  },
+  {
+    id: "velvet-night",
+    name: "Velvet Night",
+    description: "Deep warm onyx with a soft clotted cream sidebar.",
+    swatches: ["#161517", "#dfa658", "#faf5ee"],
+    dark: true,
+    navDark: false,
+  },
+  {
+    id: "cyber-porcelain",
+    name: "Cyber Porcelain",
+    description: "Abyssal midnight blue with a bright porcelain sidebar.",
+    swatches: ["#0f141e", "#38bdf8", "#f0f5fc"],
+    dark: true,
+    navDark: false,
+  },
+  {
+    id: "rose-noir",
+    name: "Rose Noir",
+    description: "Deep plum noir with a delicate pearl rose sidebar.",
+    swatches: ["#181318", "#f472b6", "#faf0f5"],
+    dark: true,
+    navDark: false,
+  },
 ];
 const isHex = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
 const themeVars = [

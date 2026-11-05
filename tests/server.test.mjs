@@ -878,6 +878,10 @@ test("mixed contrast themes persist while preserving custom colours and existing
     "sandstone-slate",
     "nordic-frost",
     "solar-dark",
+    "emerald-dusk",
+    "velvet-night",
+    "cyber-porcelain",
+    "rose-noir",
   ]) {
     const changed = await f.request("/api/settings", {
       method: "PATCH",
