@@ -22,6 +22,7 @@ import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
 import { FitCriteria } from "./components/DecisionReview";
 import VectorIndex from "./components/VectorIndex";
+import OpportunityAISummary from "./components/OpportunityAISummary";
 import {
   useState,
   useMemo,
@@ -2941,6 +2942,7 @@ function OpportunityDetail({
       <div className="detail-tabs" role="tablist">
         {[
           ["overview", "Overview"],
+          ["summary", "AI Summary"],
           ["decision", "Fit assessment"],
           ["documents", "Documents"],
           ["activities", "Interview & comms"],
@@ -2986,6 +2988,17 @@ function OpportunityDetail({
                 "PATCH",
               )
             }
+          />
+        )}{" "}
+        {tab === "summary" && (
+          <OpportunityAISummary
+            key={o.id}
+            opportunity={o}
+            timezone={timezone}
+            busy={busy}
+            mutate={mutate}
+            onConfigureBuddy={onConfigureBuddy}
+            onNavigateOverview={() => setTab("overview")}
           />
         )}{" "}
         {tab === "decision" && (

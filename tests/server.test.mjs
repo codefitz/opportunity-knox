@@ -5359,3 +5359,93 @@ test('high-fidelity AI document generation preserves two-column sidebar structur
   });
   assert.equal(staleSave.status, 409);
 });
+
+test("opportunity AI description summary generates ~100-word summary, checks prerequisites, and persists edits", async (t) => {
+  let promptSeen = "";
+  const f = await fixture(t, {
+    buddyFetch: async (_, opts) => {
+      promptSeen = opts.body;
+      return buddyResponse(
+        buddyReply({
+          reply:
+            "Lead systems architect responsible for end-to-end cloud infrastructure, microservices migration, and technical governance. Coordinates senior engineers and aligns delivery with business stakeholders. Requires 7+ years distributed systems, Go, Kubernetes, and AWS experience.",
+        }),
+      );
+    },
+  });
+  await f.setup();
+
+  // Create opportunity without description
+  const created = (
+    await f.request("/api/opportunities", {
+      method: "POST",
+      body: { company: "Acme Cloud", role: "Principal Architect" },
+    })
+  ).data;
+
+  // 1. Fails when description is missing
+  const noDesc = await f.request(
+    `/api/opportunities/${created.id}/description-summary`,
+    { method: "POST" },
+  );
+  assert.equal(noDesc.status, 400);
+  assert.match(noDesc.data.error, /Job description is empty/i);
+
+  // Update opportunity with job description
+  const updated = (
+    await f.request(`/api/opportunities/${created.id}`, {
+      method: "PATCH",
+      body: {
+        revision: created.revision,
+        description:
+          "Acme Cloud is hiring a Principal Architect. You will lead cloud infrastructure modernisation, microservices architecture, and technical governance across cross-functional engineering teams. Key requirements include 7+ years with distributed systems, Go, Kubernetes, and AWS.",
+      },
+    })
+  ).data;
+
+  // 2. Fails when Career Buddy is disabled
+  const disabledBuddy = await f.request(
+    `/api/opportunities/${updated.id}/description-summary`,
+    { method: "POST" },
+  );
+  assert.equal(disabledBuddy.status, 400);
+  assert.match(disabledBuddy.data.error, /Career Buddy is disabled/i);
+
+  // Enable Career Buddy
+  await enableBuddy(f);
+
+  // 3. Successfully generates ~100-word summary
+  const genRes = await f.request(
+    `/api/opportunities/${updated.id}/description-summary`,
+    { method: "POST" },
+  );
+  assert.equal(genRes.status, 200);
+  assert.ok(genRes.data.aiSummary);
+  assert.match(genRes.data.aiSummary, /cloud infrastructure/i);
+  assert.ok(genRes.data.aiSummaryGeneratedAt);
+  assert.ok(promptSeen.includes("Acme Cloud is hiring a Principal Architect"));
+
+  // 4. Edits to aiSummary persist via PATCH /api/opportunities/:id
+  const patchRes = await f.request(`/api/opportunities/${updated.id}`, {
+    method: "PATCH",
+    body: {
+      revision: genRes.data.revision,
+      aiSummary: "Refined 100-word executive summary: Lead cloud architect role at Acme Cloud.",
+    },
+  });
+  assert.equal(patchRes.status, 200);
+  assert.equal(
+    patchRes.data.aiSummary,
+    "Refined 100-word executive summary: Lead cloud architect role at Acme Cloud.",
+  );
+
+  // 5. State survives restart
+  await f.restart();
+  await f.login();
+  const loaded = (await f.request(`/api/opportunities/${updated.id}`)).data;
+  assert.equal(
+    loaded.aiSummary,
+    "Refined 100-word executive summary: Lead cloud architect role at Acme Cloud.",
+  );
+  assert.equal(loaded.aiSummaryGeneratedAt, genRes.data.aiSummaryGeneratedAt);
+});

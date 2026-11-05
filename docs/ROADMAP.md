@@ -1,5 +1,25 @@
 # Implementation roadmap
 
+## AI Summary Tab for Opportunities — 5 November 2026
+
+- Introduced a dedicated **"AI Summary"** tab in the Opportunity detail modal situated directly between "Overview" and "Fit assessment":
+  - **Manual 100-Word Summary Generation:**
+    - Features a manual "Generate 100-word summary" action powered by the user's configured Career Buddy AI provider (`POST /api/opportunities/:id/description-summary`).
+    - Focuses strictly on core role purpose/seniority, key responsibilities, and required technical skills/qualifications (constrained between 80 and 120 words).
+    - Preserves uninvented factual integrity without conversational filler, greetings, or fabrications.
+  - **Editable with Auto-Save & Multi-Step Undo:**
+    - Provides instant copy-to-clipboard and re-generate actions.
+    - Allows inline editing with 600ms debounced auto-save, blur flushes, and full undo stack support (`Cmd+Z` / `Ctrl+Z` / "Undo last change" button).
+  - **Clear States & Contextual Navigation:**
+    - Displays a helpful empty state when the job description is missing, with a one-click button to jump directly to the Overview tab.
+    - Prompts to configure Career Buddy if disabled, with a direct link navigating to Career Buddy settings.
+    - Includes a collapsible "Original job description" view with word counts for instant side-by-side verification.
+  - **Data Persistence & Backups:**
+    - Stores `aiSummary` and `aiSummaryGeneratedAt` on the opportunity record in SQLite, surviving restarts, reloads, and export/import routines.
+  - **Verification:**
+    - Added comprehensive server API tests in `tests/server.test.mjs` verifying empty description checks, Career Buddy configuration checks, generation with mocked provider, and patch persistence.
+    - Verified all 355 Node tests and 46 Python tests passing (`npm run check`).
+
 ## Auto-Save Everywhere & Undo Last Change — 5 November 2026
 
 - Eliminated manual "Save" / "Save changes" buttons across primary opportunity and settings editing workflows in favor of seamless, debounced auto-saving and full multi-step undo capabilities:

@@ -145,6 +145,8 @@ export type Opportunity = {
   };
   outputFolder?: string;
   description: string;
+  aiSummary?: string;
+  aiSummaryGeneratedAt?: string;
   priority: "normal" | "high" | "low";
   nextAction: string;
   nextActionDate: string;

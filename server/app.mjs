@@ -79,7 +79,14 @@ import { fileURLToPath } from "node:url";
 import { fetchJobPage } from "./job-fetch.mjs";
 import { parseJobPage } from "./job-parser.mjs";
 import { validateAvatar } from "./profile.mjs";
-import { createCareerBuddy } from "./career-buddy.mjs";
+import { createCareerBuddy, parseBuddyOutput } from "./career-buddy.mjs";
+import {
+  defaultBuddy,
+  assertConfigured,
+  callProvider,
+  buddyError,
+  BUDDY_SCHEMA,
+} from "./buddy-provider.mjs";
 import { createObsidianIntegration } from "./obsidian-vault.mjs";
 import { listBackups, inspectBackup } from "./backup-inspect.mjs";
 import { restoreIsolatedBackup } from "./backup-restore.mjs";
@@ -118,6 +125,8 @@ const textFields = [
   "datePosted",
   "applicantCount",
   "description",
+  "aiSummary",
+  "aiSummaryGeneratedAt",
   "nextAction",
   "nextActionDate",
 ];
@@ -1958,6 +1967,75 @@ export function createApp(options = {}) {
           if (method === "PATCH") return json(res, targetCompanies.update(targetMatch[1], await readBody(req)));
           if (method === "DELETE") return json(res, targetCompanies.remove(targetMatch[1]));
           fail(405, "Method not allowed.");
+        }
+        const summaryMatch = path.match(
+          /^\/api\/opportunities\/([^/]+)\/description-summary$/,
+        );
+        if (summaryMatch && method === "POST") {
+          const record = getRecord(summaryMatch[1]);
+          if (!record.description || !record.description.trim()) {
+            fail(400, "Job description is empty. Add a description in Overview first.");
+          }
+          const c = { ...defaultBuddy(), ...(getConfig("careerBuddy") || {}) };
+          if (!c.enabled) {
+            fail(
+              400,
+              "Career Buddy is disabled. Enable Career Buddy in Settings to generate an AI summary.",
+            );
+          }
+          assertConfigured(c);
+
+          const systemPrompt = `You are an expert executive career summarizer. Summarize the following job description in approximately 100 words (between 80 and 120 words).
+Focus on:
+1. Core purpose and seniority of the role.
+2. 3-4 primary responsibilities.
+3. Key technical skills, domain expertise, and qualifications required.
+Tone: Direct, factual, professional.
+Strict constraints:
+- Do not invent facts, benefits, or requirements not present in the source text.
+- Do not include conversational filler, preamble, greetings, or meta-commentary (never say "Here is a summary", "In summary", "This job is", etc.).
+- Output ONLY the summary text or JSON matching ${JSON.stringify(BUDDY_SCHEMA)} with changes:[], draft:{kind:"none",title:"",content:""}, sourceIds:[], and reply containing the summary.`;
+
+          const userPrompt = `Role: ${record.role}\nCompany: ${record.company}\n\nJob Description:\n${record.description.slice(0, 30000)}`;
+
+          let raw = "";
+          try {
+            raw = await callProvider(
+              c,
+              systemPrompt,
+              [{ role: "user", content: userPrompt }],
+              options.buddyFetch,
+            );
+          } catch (e) {
+            throw buddyError(
+              e.status || 502,
+              `AI provider error: ${e.message || "Failed to generate summary"}`,
+            );
+          }
+
+          let summary = "";
+          try {
+            const parsed = parseBuddyOutput(raw, []);
+            summary = parsed.reply || "";
+          } catch {
+            summary = String(raw || "").trim();
+          }
+
+          summary = summary
+            .replace(/^```(?:markdown|text)?\s*/i, "")
+            .replace(/\s*```$/, "")
+            .trim();
+
+          if (!summary) {
+            fail(502, "The AI provider returned an empty summary.");
+          }
+
+          record.aiSummary = summary;
+          record.aiSummaryGeneratedAt = now();
+          record.revision = (record.revision || 1) + 1;
+          record.updatedAt = now();
+          putRecord(record);
+          return json(res, fullRecord(record));
         }
         const match = path.match(
           /^\/api\/opportunities\/([^/]+)(?:\/(events|activities)(?:\/([^/]+))?)?$/,
