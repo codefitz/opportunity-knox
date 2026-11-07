@@ -81,3 +81,52 @@ test('deriveTemplate sanitizes private details into neutral template slots while
   assert.doesNotMatch(docXml, /Fictional Tech Global/);
   assert.doesNotMatch(docXml, /Led 20 engineers/);
 });
+
+test('Word Template (.dotx) files can be read, derived, and populated into clean .docx documents with normalized content types', async () => {
+  const { inferDocumentClassification } = await import('../server/document-categories.mjs');
+
+  // Classification inference
+  assert.deepEqual(inferDocumentClassification({ name: 'Modern_Resume.dotx' }), { kind: 'other', category: 'cv-template' });
+  assert.deepEqual(inferDocumentClassification({ name: 'Cover_Letter_Style.dotx' }), { kind: 'other', category: 'cover-letter-template' });
+  assert.deepEqual(inferDocumentClassification({ name: 'Executive_Template.dotx' }), { kind: 'other', category: 'template' });
+
+  // Create a realistic .dotx package with template content type
+  const zip = await safeWord(await layoutDraft('Template Dotx', '# Fictional Candidate\n\nExperienced Cloud Architect.\n\n## Core Skills\n- System Design\n- Distributed Systems', 'classic'));
+  const templateContentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml';
+  const docContentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
+
+  let ctXml = await zip.file('[Content_Types].xml').async('string');
+  ctXml = ctXml.replace(docContentType, templateContentType);
+  zip.file('[Content_Types].xml', ctXml);
+
+  const dotxBytes = await zip.generateAsync({ type: 'nodebuffer' });
+
+  // 1. readCVTemplate reads slots correctly from .dotx
+  const { slots } = await readCVTemplate(dotxBytes);
+  assert.ok(slots.length > 0);
+  assert.ok(slots.some(s => s.text.includes('Fictional Candidate')));
+
+  // 2. deriveTemplate cleans template slots
+  const derived = await deriveTemplate(dotxBytes);
+  const derivedZip = await safeWord(derived);
+  const derivedXml = await derivedZip.file('word/document.xml').async('string');
+  assert.match(derivedXml, /\[Candidate Full Name\]/);
+  assert.doesNotMatch(derivedXml, /Fictional Candidate/);
+
+  // 3. populateCVTemplate replaces slots and normalizes [Content_Types].xml to document.main+xml
+  const populated = await populateCVTemplate(dotxBytes, 'Tailored Fictional Profile', async (_, _prompt, payload) => {
+    return JSON.stringify({
+      replacements: payload.slots.map(s => ({
+        id: s.id,
+        text: s.text.includes('Fictional Candidate') ? 'Morgan Fictional' : 'Verified Tailored Evidence',
+      })),
+    });
+  });
+
+  const popZip = await safeWord(populated);
+  const popCtXml = await popZip.file('[Content_Types].xml').async('string');
+  assert.ok(popCtXml.includes(docContentType), 'Content type should be normalized to standard document');
+  assert.ok(!popCtXml.includes(templateContentType), 'Template content type should be replaced');
+  const popDocXml = await popZip.file('word/document.xml').async('string');
+  assert.match(popDocXml, /Morgan Fictional/);
+});

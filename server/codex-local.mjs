@@ -211,7 +211,7 @@ export async function runCodexDocumentGeneration({
   const refPath = join(inputsDir, "reference" + refExt);
   writeFileSync(refPath, styleDocument.bytes, { mode: 0o600 });
 
-  if (refExt === ".docx") {
+  if (refExt === ".docx" || refExt === ".dotx") {
     writeFileSync(join(workspaceDir, "draft.docx"), styleDocument.bytes, { mode: 0o600 });
   }
 
@@ -275,10 +275,15 @@ export async function runCodexDocumentGeneration({
     "- source_cv.txt: The verified candidate career facts. Preserve their real identity, employment chronology, job titles, employers, dates, and qualifications. Never fabricate claims or invent employers.",
     "- job_context.json: The target role, company, job requirements, and tailoring instructions.",
     "",
+    "WORK EXPERIENCE & RECENCY RULES:",
+    "- In the main work experience section, include detailed roles with bulleted achievements strictly for experience from the last 10 years (from 10 years ago to the present).",
+    "- For all experience older than 10 years, group them under a dedicated section titled 'Previous Experience'.",
+    "- Under 'Previous Experience', list ONLY the dates, company names, and job titles (do not include extensive bullet lists). You may include a brief summary highlighting key points or achievements from those earlier roles that are directly relevant to the target job description.",
+    "",
     "WORKSPACE & OUTPUT INSTRUCTIONS:",
     "- Your working directory is the workspace root.",
     "- Write your finished Word document to output.docx in the current directory.",
-    refExt === ".docx"
+    refExt === ".docx" || refExt === ".dotx"
       ? "- A copy of the reference is available as draft.docx in the current directory. You may edit this Word package (e.g. using Python standard library zipfile/xml to replace text in existing paragraph and table runs) to preserve 100% of the reference's tables, columns, and styles."
       : "- Reconstruct the visual layout (including columns and sidebars) in an editable Word (.docx) document.",
     "- Ensure candidate facts from source_cv.txt are completely and accurately presented.",
@@ -392,8 +397,22 @@ export async function runCodexDocumentGeneration({
           throw failure(`Generated Word document "${manifest.outputDocx}" not found.`, 502);
         }
 
-        const docxBytes = readFileSync(docxPath);
-        await safeWord(docxBytes);
+        let docxBytes = readFileSync(docxPath);
+        const validatedZip = await safeWord(docxBytes);
+        const ctFile = validatedZip.file("[Content_Types].xml");
+        if (ctFile) {
+          const ctXml = await ctFile.async("string");
+          if (ctXml.includes("wordprocessingml.template.main+xml")) {
+            validatedZip.file(
+              "[Content_Types].xml",
+              ctXml.replace(
+                /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.template\.main\+xml/g,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+              ),
+            );
+            docxBytes = await validatedZip.generateAsync({ type: "nodebuffer" });
+          }
+        }
 
         let pdfBytes = null;
         if (typeof manifest.outputPdf === "string" && manifest.outputPdf && !manifest.outputPdf.includes("..") && !isAbsolute(manifest.outputPdf)) {

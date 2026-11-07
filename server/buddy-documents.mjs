@@ -369,13 +369,13 @@ export async function extractDocument(name, bytes, options = {}) {
       ],
     };
   }
-  if (![".pdf", ".docx", ".pptx"].includes(extension))
+  if (![".pdf", ".docx", ".dotx", ".pptx"].includes(extension))
     return {
       status: "unsupported",
       text: "",
       chunks: [],
       warnings: [
-        "Use PDF, DOCX, PPTX, Google Workspace (.gdoc/.gsheet/.gslides), TXT, Markdown, HTML, RTF, or caption (.vtt/.srt) files for Career Buddy. The original is still stored.",
+        "Use PDF, DOCX, DOTX, PPTX, Google Workspace (.gdoc/.gsheet/.gslides), TXT, Markdown, HTML, RTF, or caption (.vtt/.srt) files for Career Buddy. The original is still stored.",
       ],
     };
   const result = await new Promise((resolve) => {

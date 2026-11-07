@@ -305,6 +305,7 @@ function inferDocumentTags(name, kind, content) {
   const extMap = {
     ".pdf": "PDF",
     ".docx": "Word",
+    ".dotx": "Word Template",
     ".pptx": "Slides",
     ".md": "Markdown",
     ".markdown": "Markdown",

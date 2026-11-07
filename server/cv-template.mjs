@@ -74,6 +74,19 @@ export async function populateCVTemplate(bytes, content, generate) {
     }
     zip.file(file, $.xml());
   }
+  const ctFile = zip.file("[Content_Types].xml");
+  if (ctFile) {
+    const ctXml = await ctFile.async("string");
+    if (ctXml.includes("wordprocessingml.template.main+xml")) {
+      zip.file(
+        "[Content_Types].xml",
+        ctXml.replace(
+          /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.template\.main\+xml/g,
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+        ),
+      );
+    }
+  }
   return zip.generateAsync({ type: "nodebuffer" });
 }
 

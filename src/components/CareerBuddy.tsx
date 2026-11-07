@@ -207,7 +207,7 @@ export default function CareerBuddy({
         next.documents
           .filter(
             (doc) =>
-              !doc.generated && /\.(pdf|docx|txt|md|csv|json)$/i.test(doc.name),
+              !doc.generated && /\.(pdf|docx|dotx|txt|md|csv|json)$/i.test(doc.name),
           )
           .slice(0, 20)
           .map((doc) => doc.id),

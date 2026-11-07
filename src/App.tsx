@@ -2764,7 +2764,7 @@ function NewOpportunity({
           <span>PDF, Word, or text · up to 15 MB</span>
           <input
             type="file"
-            accept=".pdf,.docx,.doc,.txt,.md"
+            accept=".pdf,.docx,.dotx,.doc,.txt,.md"
             onChange={(e) => {setIntake(null);setFile(e.target.files?.[0] || null);}}
           />
         </label>

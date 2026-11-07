@@ -518,6 +518,12 @@ test("PowerPoint (.pptx) slides and speaker notes, Word footnotes/comments, HTML
   assert.match(docxRes.text, /Main body text/);
   assert.match(docxRes.text, /Published in 2025 architecture review/);
 
+  // 2b. Word Template (.dotx)
+  const dotxRes = await extractDocument("Template-Reference.dotx", docxBytes);
+  assert.equal(dotxRes.status, "ready");
+  assert.match(dotxRes.text, /Main body text/);
+  assert.match(dotxRes.text, /Published in 2025 architecture review/);
+
   // 3. Video captions (.vtt and .srt)
   const vtt = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.500\n<v Speaker>Designed the multi-region failover system.</v>\n`;
   const vttRes = await extractDocument(

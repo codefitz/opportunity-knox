@@ -835,7 +835,7 @@ export default function DocumentStudio({
     }
 
     setMarkdownContent(null);
-    const isPreviewable = /\.(docx|pdf|gdoc|gsheet|gslides)$/i.test(selectedDoc.name);
+    const isPreviewable = /\.(docx|dotx|pdf|gdoc|gsheet|gslides)$/i.test(selectedDoc.name);
     if (!isPreviewable) {
       setPreviewLoading(false);
       setPreview(null);
@@ -920,7 +920,7 @@ export default function DocumentStudio({
 
       if (filetypeFilter !== "all") {
         const ext = (d.name.split(".").pop() || "").toLowerCase();
-        if (filetypeFilter === "docx" && ext !== "docx" && ext !== "doc") return false;
+        if (filetypeFilter === "docx" && ext !== "docx" && ext !== "dotx" && ext !== "doc") return false;
         if (filetypeFilter === "pdf" && ext !== "pdf") return false;
         if (filetypeFilter === "md" && ext !== "md" && ext !== "markdown") return false;
         if (filetypeFilter === "txt" && ext !== "txt") return false;
@@ -972,11 +972,11 @@ export default function DocumentStudio({
       return;
     }
     const ext = (uploadFile.name.split(".").pop() || "").toLowerCase();
-    const allowed = ["docx", "pdf", "md", "markdown", "txt", "gdoc", "gsheet", "gslides"];
+    const allowed = ["docx", "dotx", "pdf", "md", "markdown", "txt", "gdoc", "gsheet", "gslides"];
     if (ext && !allowed.includes(ext)) {
       onError(
         new Error(
-          `Document format ".${ext}" is not supported. Please upload Word (.docx), PDF, Markdown (.md), or text files.`
+          `Document format ".${ext}" is not supported. Please upload Word (.docx, .dotx), PDF, Markdown (.md), or text files.`
         )
       );
       return;
@@ -1428,7 +1428,7 @@ export default function DocumentStudio({
               >
                 <option value="all">All formats ({docs.length})</option>
                 <option value="docx">
-                  Word DOCX ({docs.filter((d) => /\.(docx|doc)$/i.test(d.name)).length})
+                  Word ({docs.filter((d) => /\.(docx|dotx|doc)$/i.test(d.name)).length})
                 </option>
                 <option value="pdf">
                   PDF ({docs.filter((d) => /\.pdf$/i.test(d.name)).length})
@@ -1596,7 +1596,7 @@ export default function DocumentStudio({
                         />
 
                         <div className="studio-doc-icon">
-                          {/\.docx$/i.test(doc.name) ? (
+                          {/\.(docx|dotx)$/i.test(doc.name) ? (
                             <FileText size={18} className="text-blue" />
                           ) : /\.pdf$/i.test(doc.name) ? (
                             <FileText size={18} className="text-red" />
@@ -2376,15 +2376,15 @@ export default function DocumentStudio({
                   </optgroup>
                   {docs.some((d) =>
                     generateKind === "cv"
-                      ? ["template", "cv-template"].includes(d.category || "") || /\btemplate\b/i.test(d.name)
-                      : ["template", "cover-letter-template"].includes(d.category || "") || /\b(cover|letter|template)\b/i.test(d.name)
+                      ? ["template", "cv-template"].includes(d.category || "") || /\b(template|dotx)\b/i.test(d.name) || /\.dotx$/i.test(d.name)
+                      : ["template", "cover-letter-template"].includes(d.category || "") || /\b(cover|letter|template|dotx)\b/i.test(d.name) || /\.dotx$/i.test(d.name)
                   ) && (
                     <optgroup label="Library Templates">
                       {docs
                         .filter((d) =>
                           generateKind === "cv"
-                            ? ["template", "cv-template"].includes(d.category || "") || /\btemplate\b/i.test(d.name)
-                            : ["template", "cover-letter-template"].includes(d.category || "") || /\b(cover|letter|template)\b/i.test(d.name)
+                            ? ["template", "cv-template"].includes(d.category || "") || /\b(template|dotx)\b/i.test(d.name) || /\.dotx$/i.test(d.name)
+                            : ["template", "cover-letter-template"].includes(d.category || "") || /\b(cover|letter|template|dotx)\b/i.test(d.name) || /\.dotx$/i.test(d.name)
                         )
                         .map((d) => (
                           <option key={d.id} value={`template:${d.id}`}>
@@ -2568,11 +2568,11 @@ export default function DocumentStudio({
               </label>
 
               <label className="field full">
-                <span>Choose File (DOCX, PDF, Google Doc shortcut, text)</span>
+                <span>Choose File (Word, PDF, Google Doc shortcut, text)</span>
                 <input
                   type="file"
                   required
-                  accept=".docx,.pdf,.gdoc,.gsheet,.gslides,.txt,.md"
+                  accept=".docx,.dotx,.pdf,.gdoc,.gsheet,.gslides,.txt,.md"
                   onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                 />
               </label>

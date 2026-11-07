@@ -71,3 +71,25 @@ test('executive template with multi-row experience table and sidebar vMerge pres
  assert.match(resultXml, /MSc Artificial Intelligence/);
  assert.doesNotMatch(resultXml, /CHARLOTTE|EXECUTE|Marketing Consultancy|Stanford University/);
 });
+
+test('Previous Experience section is preserved in layouts and parsed as distinct from recent experience', async () => {
+ const candidateMd = '# Fictional Candidate\nSoftware Engineer\ncand@example.com\n\n' +
+  '## Experience\n' +
+  '### Senior Engineer | Modern Corp | 2021 - Present\n- Built high throughput data pipelines.\n\n' +
+  '## Previous Experience\n' +
+  '### Junior Developer | Legacy Inc | 2011 - 2014\n' +
+  '### Intern | Ancient Tech | 2009 - 2010\n' +
+  '• Maintained legacy Java backend and SQL stored procedures.\n\n' +
+  '## Education\n- BSc Computer Science — Fictional University';
+
+ const classicBytes = await layoutDraft('Candidate CV', candidateMd, 'classic');
+ const classicZip = await safeWord(classicBytes);
+ const classicXml = await classicZip.file('word/document.xml').async('string');
+
+ assert.match(classicXml, /Experience/);
+ assert.match(classicXml, /Modern Corp/);
+ assert.match(classicXml, /Previous Experience/);
+ assert.match(classicXml, /Legacy Inc/);
+ assert.match(classicXml, /Ancient Tech/);
+ assert.match(classicXml, /Maintained legacy Java backend/);
+});

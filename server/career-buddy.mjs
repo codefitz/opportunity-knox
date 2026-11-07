@@ -281,7 +281,7 @@ export function systemPrompt(timezone, today, action) {
     "Changes are proposals until the human applies them. Say proposed, not recorded or saved. Use kind note for dated notes; interview/communication for activities; update for individual opportunity fields. Dates YYYY-MM-DD. Types text, phone, video, in-person, assessment, email, other. Status planned, completed, cancelled. Unused string fields must be empty; isFinal false unless explicitly final.",
     "Ground advice and drafts in the supplied candidate evidence. Previous JDs and job requirements are not proof of candidate experience. Do not invent employers, dates, certifications, skills, qualifications, metrics or achievements. Explicitly flag gaps and ask for evidence. In replies cite supplied source names/IDs; return sourceIds only from the supplied context. Explain missing or partial source coverage. Never claim a draft was approved.",
     "For salary: label suggestions as estimates from saved information, not verified market ranges. State currency, base versus total/contract terms and location assumptions; ask if missing. Never invent a salary source or current benchmark.",
-    "For a CV or cover letter return an editable complete document in draft.content using simple Markdown headings and bullets, with no invented claims. Keep the source CV chronology and factual identity; tailor selection and emphasis to this role. Keep advice, gap warnings and citations in reply, outside application prose. Do not copy job requirements into the candidate skill list without evidence. Do not treat a generated draft as new factual evidence.",
+    "For a CV or cover letter return an editable complete document in draft.content using simple Markdown headings and bullets, with no invented claims. Keep the source CV chronology and factual identity; tailor selection and emphasis to this role. For CV work experience, include detailed achievement bullets only for roles from the last 10 years; group roles older than 10 years under a 'Previous Experience' section with only dates, company names, and job titles, plus an optional short summary of points relevant to the job description. Keep advice, gap warnings and citations in reply, outside application prose. Do not copy job requirements into the candidate skill list without evidence. Do not treat a generated draft as new factual evidence.",
     "Requested action: " +
       action +
       ". For cv or cover, return that draft kind if adequate evidence is supplied, otherwise explain what is missing with kind none. Use kind none and empty title/content for other replies unless explicitly asked for a document.",
@@ -740,7 +740,7 @@ export function createCareerBuddy(ctx) {
         if(autoTailor && (!["cv","cover"].includes(action)||!validLayouts.includes(body.templateLayout||"auto")))
           throw buddyError(400,"Choose a CV layout for tailoring.");
         const styleDocument=autoTailor&&action==="cv"&&body.styleDocumentId ? getDocuments().find(d=>d.id===body.styleDocumentId) : null;
-        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|pdf|gdoc)$/i.test(styleDocument.name)||!(["template","cv-template","cover-letter-template"].includes(styleDocument.category)||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template)\b/i.test(styleDocument.name))))
+        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|dotx|pdf|gdoc)$/i.test(styleDocument.name)||!(["template","cv-template","cover-letter-template"].includes(styleDocument.category)||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template|dotx)\b/i.test(styleDocument.name))))
           throw buddyError(400,"Choose an available previous CV style or template.");
         if(styleDocument&&styleDocument.revision!==body.styleDocumentRevision)throw buddyError(409,"The style CV changed. Refresh the style selection.");
         if (body.passToAi !== undefined && typeof body.passToAi !== "boolean")
@@ -760,7 +760,7 @@ export function createCareerBuddy(ctx) {
           let styleProfile,styleSnapshotHash,templateSlots;
           if(styleDocument){
             const bytes=readFileSync(documentPath(styleDocument));
-            if(/\.docx$/i.test(styleDocument.name))templateSlots=(await readCVTemplate(bytes)).slots;
+            if(/\.(docx|dotx)$/i.test(styleDocument.name))templateSlots=(await readCVTemplate(bytes)).slots;
             if(/\.pdf$/i.test(styleDocument.name))styleProfile=await (ctx.pdfStyle||extractPDFStyle)(bytes);
             if(/\.gdoc$/i.test(styleDocument.name)){
               if(!ctx.googleDocuments?.isConnected())throw buddyError(400,"Connect Google Docs in Career Hub to reuse this document’s style.");
@@ -930,7 +930,7 @@ export function createCareerBuddy(ctx) {
             action === "cv" &&
             c.provider === "codex" &&
             styleDocument &&
-            /\.docx$/i.test(styleDocument.name)
+            /\.(docx|dotx)$/i.test(styleDocument.name)
           ) {
             task.progress("preparing");
             const styleBytes = readFileSync(documentPath(styleDocument));
@@ -997,7 +997,7 @@ export function createCareerBuddy(ctx) {
               systemPrompt(timezone, today, action) +
                 (templateSlots ? " The selected cvTemplate owns the document design. Follow its existing section order, headings and example paragraph lengths when drafting. Do not recreate or redesign the CV, introduce new sections, or add your own formatting. Use concise replacement text; example lengths are not character limits and example job counts are not history limits. Additional paragraphs can repeat the template formatting within existing sections or cells. Always return the complete factual CV when evidence is adequate; fitting and population happen separately at save time. Retain all material factual history. Its example text is not candidate evidence. The layout preset is subordinate to the selected template." : "") +
                 (autoTailor
-                  ? " Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. Do not truncate employment history silently. Use layout " +
+                  ? " Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. In the main work experience section, include detailed roles and achievements strictly for experience from the last 10 years; place experience older than 10 years under a 'Previous Experience' section listing only dates, company names, and job titles, optionally accompanied by a concise summary of points relevant to the job description. Do not truncate employment history silently. Use layout " +
                     selectedLayout +
                     ".\n\nIn your reply (AI notes), provide a clear, scannable analysis formatted as follows:\n### Matched Strengths\n- Briefly bullet 2-3 key areas where candidate experience directly matches the job requirements.\n### Missing from Experience (JD Gaps)\n- Explicitly list any important requirements, skills, qualifications, or tools from the job description that are NOT found or are weak in the candidate's verified evidence. Be direct, specific, and honest about what is missing.\n### Tailoring Focus\n- In 1-2 concise sentences, summarize the emphasis and strategic angle chosen for this draft.\n\nKeep all advice, gap analysis, and missing-evidence warnings strictly in your reply outside the document prose."
                   : ""),

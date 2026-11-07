@@ -528,11 +528,11 @@ export function createJobIntake(ctx) {
             fail(400, "Choose a supported job-description file.");
           name = body.name;
           if (
-            ![".pdf", ".docx", ".txt", ".md", ".html", ".htm"].includes(
+            ![".pdf", ".docx", ".dotx", ".txt", ".md", ".html", ".htm"].includes(
               extname(name).toLowerCase(),
             )
           )
-            fail(415, "Use PDF, DOCX, HTML or UTF-8 text for job intake.");
+            fail(415, "Use PDF, Word, HTML or UTF-8 text for job intake.");
           if (
             typeof body.contentBase64 !== "string" ||
             body.contentBase64.length > 21 * 1024 * 1024 ||

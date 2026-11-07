@@ -24,6 +24,7 @@ export function inferDocumentClassification({
     .replace(/\.[a-z0-9]+$/i, "")
     .split("/")
     .reverse();
+  const isDotx = /\.dotx$/i.test(name);
   let inferred = "";
   for (const part of parts) {
     const text = part.replace(/[_-]+/g, " ");
@@ -45,6 +46,15 @@ export function inferDocumentClassification({
           : "cv";
     else if (has("references?|career references?")) inferred = "reference";
     if (inferred) break;
+  }
+  if (isDotx) {
+    if (inferred === "cover-letter" || inferred === "master-cover-letter") {
+      inferred = "cover-letter-template";
+    } else if (inferred === "cv" || inferred === "master-cv" || inferred === "tailored-cv") {
+      inferred = "cv-template";
+    } else if (!inferred) {
+      inferred = "template";
+    }
   }
   const resolvedKind = kind || categoryKinds[category || inferred] || "other";
   const resolvedCategory =

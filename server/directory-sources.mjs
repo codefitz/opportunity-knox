@@ -19,6 +19,7 @@ const extensions = new Set([
   ".markdown",
   ".pdf",
   ".docx",
+  ".dotx",
   ".pptx",
   ".html",
   ".htm",

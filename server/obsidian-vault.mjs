@@ -29,6 +29,7 @@ const SUPPORTED_VAULT_EXTS = new Set([
   ".txt",
   ".pdf",
   ".docx",
+  ".dotx",
   ".pptx",
   ".html",
   ".htm",

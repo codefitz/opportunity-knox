@@ -136,8 +136,8 @@ export function createDocumentStudio({
   let thumbnailQueue=Promise.resolve();
   const cleanDocName = name => (String(name || "").split(/[/\\]/).pop() || name);
   const getObsidian = () => (typeof obsidian === "function" ? obsidian() : obsidian);
-  const isCV=d=>/\.(docx|pdf|gdoc)$/i.test(d.name)&&!["template","cv-template","cover-letter-template"].includes(d.category)&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
-  const isTemplate=d=>/\.(docx|pdf|gdoc)$/i.test(d.name)&&(["template","cv-template","cover-letter-template"].includes(d.category)||/\btemplate\b/i.test(d.name));
+  const isCV=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&!["template","cv-template","cover-letter-template"].includes(d.category)&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
+  const isTemplate=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&(["template","cv-template","cover-letter-template"].includes(d.category)||/\b(template|dotx)\b/i.test(d.name)||/\.dotx$/i.test(d.name));
   let busy = false;
   const activeChatRequests = new Map();
   function clean() {
@@ -319,7 +319,7 @@ export function createDocumentStudio({
             required: ["title", "content"],
           };
           const system = kind === "cv"
-            ? "You are an expert career advisor and document author. Tailor a complete, factual, professional CV for the target role using the candidate's verified source CV. Preserve complete factual identity, employers, chronology, dates and qualifications. Never invent factual claims or employers. Do not silently truncate employment history. Highlight relevant achievements matching the target role. Format output as clear Markdown with headers (## Summary, ## Skills, ## Experience, ## Education). In ## Experience, format each job with job title, company and dates, followed by bulleted achievements."
+            ? "You are an expert career advisor and document author. Tailor a complete, factual, professional CV for the target role using the candidate's verified source CV. Preserve complete factual identity, employers, chronology, dates and qualifications. Never invent factual claims or employers. Highlight relevant achievements matching the target role. Format output as clear Markdown with headers (## Summary, ## Skills, ## Experience, ## Education). In ## Experience, format each job with job title, company and dates, followed by bulleted achievements strictly for roles from the last 10 years. For any roles older than 10 years, place them under a ## Previous Experience section listing only dates, company names, and job titles, optionally accompanied by a concise summary of points relevant to the job description."
             : `You are an expert career advisor and document author. Draft a concise, compelling cover letter for the target role and employer using verified evidence from the candidate source CV. Never invent factual claims or qualifications. Format in clean Markdown paragraphs suitable for a professional letter.`;
 
           const promptPayload = {
@@ -471,7 +471,7 @@ export function createDocumentStudio({
         const targetCategory = b.category || (isCover ? "cover-letter-template" : "cv-template");
 
         let templateBytes;
-        const isDocx = /\.docx$/i.test(sourceDoc.name);
+        const isDocx = /\.(docx|dotx)$/i.test(sourceDoc.name);
         if (isDocx) {
           templateBytes = await deriveTemplate(sourceBytes, { isCoverLetter: isCover });
         } else {
@@ -565,7 +565,7 @@ export function createDocumentStudio({
             const targetKind = isCover ? "cover" : "cv";
             const targetCategory = isCover ? "cover-letter-template" : "cv-template";
             const sourceBytes = readFileSync(documentPath(doc));
-            const templateBytes = /\.docx$/i.test(doc.name)
+            const templateBytes = /\.(docx|dotx)$/i.test(doc.name)
               ? await deriveTemplate(sourceBytes, { isCoverLetter: isCover })
               : await layoutDraft(doc.name + " Template", "# [Candidate Full Name]\n\n## Summary\n[Summary placeholder]", isCover ? "letter" : "classic");
 
@@ -1077,7 +1077,7 @@ export function createDocumentStudio({
       }
       const thumbnailMatch=path.match(/^\/api\/document-studio\/cv-styles\/([^/]+)\/thumbnail$/)||path.match(/^\/api\/document-studio\/thumbnails\/([^/]+)$/);
       if(thumbnailMatch&&method==="GET"){
-        const doc=find(thumbnailMatch[1]);if(!/\.(docx|pdf|gdoc|gsheet|gslides)$/i.test(doc.name))fail(400,"Preview supports PDF, Word and connected Google Workspace files.");
+        const doc=find(thumbnailMatch[1]);if(!/\.(docx|dotx|pdf|gdoc|gsheet|gslides)$/i.test(doc.name))fail(400,"Preview supports PDF, Word and connected Google Workspace files.");
         if(/\.(gdoc|gsheet|gslides)$/i.test(doc.name)&&!googleDocuments?.isConnected())fail(400,"Connect Google Docs in Career Hub to preview this shortcut.");
         const st=statSync(documentPath(doc)),signature=`${doc.revision}:${doc.sha256}:${st.size}:${st.mtimeMs}`;
         let cached=thumbnails.get(doc.id);
@@ -1117,7 +1117,7 @@ export function createDocumentStudio({
         json(res, {
           layouts,
           documents: getDocuments()
-            .filter((d) => /\.docx$/i.test(d.name))
+            .filter((d) => /\.(docx|dotx)$/i.test(d.name))
             .map((d) => ({
               id: d.id,
               name: d.name,
@@ -1251,7 +1251,7 @@ export function createDocumentStudio({
                 template = readFileSync(documentPath(td));
               }
               bytes = await layoutDraft(
-                doc.generation?.title || doc.name.replace(/\.docx$/i, ""),
+                doc.generation?.title || doc.name.replace(/\.(docx|dotx)$/i, ""),
                 content,
                 b.layout,
                 template,
@@ -1283,7 +1283,7 @@ export function createDocumentStudio({
             pageTarget: target,
             overTarget: result.pages > target,
             pdfUrl: "/api/document-studio/" + id + "/pdf",
-            wordUrl: /\.docx$/i.test(doc.name) ? "/api/document-studio/" + id + "/word" : null,
+            wordUrl: /\.(docx|dotx)$/i.test(doc.name) ? "/api/document-studio/" + id + "/word" : null,
             images: Array.from(
               { length: result.pages },
               (_, i) => "/api/document-studio/" + id + "/page/" + (i + 1),
@@ -1328,7 +1328,7 @@ export function createDocumentStudio({
         p.saved ||= {};
         if (!p.saved[b.format])
           p.saved[b.format] = saveDocument({
-            name: p.name.replace(/\.docx$/i, "") + " - reviewed." + b.format,
+            name: p.name.replace(/\.(docx|dotx)$/i, "") + " - reviewed." + b.format,
             kind: p.kind,
             category:source.category,
             status: "draft",

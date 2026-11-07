@@ -32,7 +32,7 @@ export async function safeWord(bytes) {
   try {
     zip = await JSZip.loadAsync(bytes);
   } catch {
-    err(400, "Choose a readable DOCX document.");
+    err(400, "Choose a readable DOCX or DOTX document.");
   }
   const entries = Object.values(zip.files);
   if (
@@ -41,7 +41,7 @@ export async function safeWord(bytes) {
       40 * 1024 * 1024
   )
     err(413, "Word package is too large to render.");
-  if (!zip.file("word/document.xml")) err(400, "Choose a DOCX document.");
+  if (!zip.file("word/document.xml")) err(400, "Choose a DOCX or DOTX document.");
   for (const e of entries) {
     if (/vbaProject|embeddings\/|activeX\//i.test(e.name))
       err(
@@ -148,6 +148,7 @@ export async function layoutDraft(
           accomplishments: [],
           skills: [],
           experience: [],
+          previousExperience: [],
           education: [],
         };
 
@@ -169,7 +170,7 @@ export async function layoutDraft(
           } else if (plainHeadingMatch) {
             const candidateTitle = plainHeadingMatch[2].trim();
             const candLower = candidateTitle.toLowerCase();
-            if (/^(?:work\s+experience|professional\s+experience|experience|employment(?:\s+history)?|career(?:\s+history)?|education(?:\s+and\s+qualifications?)?|qualifications|skills?(?:\s+&\s+competencies)?|key\s+skills|technical\s+skills|competencies|professional\s+summary|summary|profile|about(?:\s+me)?|accomplishments|achievements|strengths)$/i.test(candLower)) {
+            if (/^(?:(?:work|professional|previous|earlier|career|employment)\s+experience|experience|employment(?:\s+history)?|career(?:\s+history)?|education(?:\s+and\s+qualifications?)?|qualifications|skills?(?:\s+&\s+competencies)?|key\s+skills|technical\s+skills|competencies|professional\s+summary|summary|profile|about(?:\s+me)?|accomplishments|achievements|strengths)$/i.test(candLower)) {
               heading = candidateTitle;
               lower = candLower;
               isHeading = true;
@@ -183,6 +184,7 @@ export async function layoutDraft(
             let kind = "general";
             if (/skill|competenc|technolog|proficienc|tool/i.test(lower)) kind = "skills";
             else if (/accomplish|highlight|achievement|strength/i.test(lower)) kind = "accomplishments";
+            else if (/previous\s+(?:work\s+|professional\s+)?experience|earlier\s+experience/i.test(lower)) kind = "previousExperience";
             else if (/experienc|employ|work|career|histor/i.test(lower)) kind = "experience";
             else if (/educat|academ|degre|qualificat/i.test(lower)) kind = "education";
             else if (/summar|profile|about|overview|objective/i.test(lower)) kind = "summary";
@@ -296,6 +298,58 @@ export async function layoutDraft(
               }
             }
             if (currentJob) res.experience.push(currentJob);
+          } else if (sec.kind === "previousExperience") {
+            let currentJob = null;
+            for (const l of sec.lines) {
+              const h3Match = l.match(/^#{3,4}\s+(.+)/);
+              const boldMatch = l.match(/^\*\*([^*]+)\*\*(.*)/);
+              const pipeMatch = !l.trim().startsWith("-") && l.includes("|") && !/@|[|].*@/.test(l);
+              if (h3Match || (boldMatch && !l.trim().startsWith("-")) || pipeMatch) {
+                if (currentJob) res.previousExperience.push(currentJob);
+                const rawTitle = h3Match
+                  ? h3Match[1]
+                  : (boldMatch ? boldMatch[1] + (boldMatch[2] || "") : l.trim());
+                let jobTitle = rawTitle;
+                let jobCompany = "";
+                let jobDates = "";
+                if (rawTitle.includes("|")) {
+                  const parts = rawTitle.split("|").map((p) => p.trim());
+                  jobTitle = parts[0];
+                  jobCompany = parts[1] || "";
+                  jobDates = parts[2] || "";
+                } else if (rawTitle.includes("—") || rawTitle.includes(" - ")) {
+                  const parts = rawTitle.split(/[—–-]/).map((p) => p.trim());
+                  jobTitle = parts[0];
+                  jobCompany = parts[1] || "";
+                }
+                currentJob = {
+                  title: jobTitle,
+                  company: jobCompany,
+                  dates: jobDates,
+                  bullets: [],
+                };
+              } else {
+                const trimmed = l.trim();
+                if (trimmed) {
+                  if (!currentJob) {
+                    currentJob = { title: "", company: "", dates: "", bullets: [] };
+                  }
+                  if (/^[-*•]\s*/.test(trimmed)) {
+                    currentJob.bullets.push(trimmed.replace(/^[-*•]\s*/, ""));
+                  } else if (
+                    !currentJob.dates &&
+                    /\b(19\d\d|20\d\d|present|current)\b/i.test(trimmed)
+                  ) {
+                    currentJob.dates = trimmed;
+                  } else if (!currentJob.company && trimmed.length < 50 && !currentJob.bullets.length) {
+                    currentJob.company = trimmed;
+                  } else {
+                    currentJob.bullets.push(trimmed);
+                  }
+                }
+              }
+            }
+            if (currentJob) res.previousExperience.push(currentJob);
           } else if (sec.kind === "education") {
             for (const l of textLines) {
               const clean = l.replace(/^[-*•]\s*/, "").trim();
@@ -590,14 +644,6 @@ export async function layoutDraft(
         if (candidate.skills.length) sectionsList.push({ kind: "skills", lines: candidate.skills.map(s => "• " + s) });
         if (candidate.experience.length) {
           const expLines = [];
-          candidate.experience.forEach(j => {
-            expLines.push(`**${j.title}** | ${j.company} (${j.dates})`);
-            j.bullets.forEach(b => expLines.push(`• ${b}`));
-          });
-          sectionsList.push({ kind: "experience", lines: expLines });
-        }
-        if (candidate.experience.length) {
-          const expLines = [];
           candidate.experience.forEach((j) => {
             if (j.title || j.company) {
               expLines.push(
@@ -609,6 +655,20 @@ export async function layoutDraft(
             j.bullets.forEach((b) => expLines.push(`• ${b}`));
           });
           sectionsList.push({ kind: "experience", lines: expLines });
+        }
+        if (candidate.previousExperience && candidate.previousExperience.length) {
+          const prevLines = [];
+          candidate.previousExperience.forEach((j) => {
+            if (j.title || j.company) {
+              prevLines.push(
+                `**${j.title || j.company}**${
+                  j.company && j.title ? ` | ${j.company}` : ""
+                }${j.dates ? ` (${j.dates})` : ""}`,
+              );
+            }
+            j.bullets.forEach((b) => prevLines.push(b.startsWith("•") || b.startsWith("-") ? b : `• ${b}`));
+          });
+          sectionsList.push({ kind: "previousExperience", lines: prevLines });
         }
         if (candidate.education.length) {
           const eduLines = [];
@@ -634,6 +694,12 @@ export async function layoutDraft(
             )
           )
             kind = "skills";
+          else if (
+            /^(previous\s+|earlier\s+)(experienc(e|es)|histor(y|ies)|roles?)$/i.test(
+              lower,
+            )
+          )
+            kind = "previousExperience";
           else if (
             /^(work\s+|professional\s+|career\s+|employment\s+)?(experienc(e|es)|histor(y|ies)|career\s+summary|roles?)$/i.test(
               lower,
