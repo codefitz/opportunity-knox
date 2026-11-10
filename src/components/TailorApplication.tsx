@@ -78,7 +78,7 @@ const templates = [
   { id: "career-change", name: "Career Change", description: "Transferable skills and achievements", image: executive },
 ];
 
-function AINotesView({ content }: { content: string }) {
+export function AINotesView({ content }: { content: string }) {
   if (!content.trim()) return null;
 
   const sections: { title: string; kind: "strengths" | "gaps" | "focus" | "general"; lines: string[] }[] = [];

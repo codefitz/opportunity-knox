@@ -749,10 +749,61 @@ export function createCareerBuddy(ctx) {
         const validLayouts = ["auto", ...layouts.map((l) => l.id)];
         if(autoTailor && (!["cv","cover"].includes(action)||!validLayouts.includes(body.templateLayout||"auto")))
           throw buddyError(400,"Choose a CV layout for tailoring.");
-        const styleDocument=autoTailor&&action==="cv"&&body.styleDocumentId ? getDocuments().find(d=>d.id===body.styleDocumentId) : null;
-        if(autoTailor&&action==="cv"&&body.styleDocumentId && (!styleDocument||!/\.(docx|dotx|pdf|gdoc)$/i.test(styleDocument.name)||!(["template","cv-template","cover-letter-template"].includes(styleDocument.category)||styleDocument.kind==="cv"||["master-cv","tailored-cv","cv"].includes(styleDocument.category)||/\b(cv|resume|résumé|template|dotx)\b/i.test(styleDocument.name))))
-          throw buddyError(400,"Choose an available previous CV style or template.");
-        if(styleDocument&&styleDocument.revision!==body.styleDocumentRevision)throw buddyError(409,"The style CV changed. Refresh the style selection.");
+        let styleDocument = null;
+        if (autoTailor) {
+          if (body.styleDocumentId) {
+            styleDocument = getDocuments().find((d) => d.id === body.styleDocumentId) || null;
+            if (action === "cv") {
+              if (
+                !styleDocument ||
+                !/\.(docx|dotx|pdf|gdoc)$/i.test(styleDocument.name) ||
+                !(
+                  ["template", "cv-template", "cover-letter-template"].includes(styleDocument.category) ||
+                  styleDocument.kind === "cv" ||
+                  ["master-cv", "tailored-cv", "cv"].includes(styleDocument.category) ||
+                  /\b(cv|resume|résumé|template|dotx)\b/i.test(styleDocument.name)
+                )
+              ) {
+                throw buddyError(400, "Choose an available previous CV style or template.");
+              }
+            } else if (action === "cover") {
+              if (
+                !styleDocument ||
+                !/\.(docx|dotx|pdf|gdoc)$/i.test(styleDocument.name) ||
+                !(
+                  ["template", "cover-letter-template", "master-cover-letter", "cv-template"].includes(styleDocument.category) ||
+                  styleDocument.kind === "cover" ||
+                  ["master-cover-letter", "cover-letter", "cover"].includes(styleDocument.category) ||
+                  /\b(cover|letter|template|dotx)\b/i.test(styleDocument.name)
+                )
+              ) {
+                throw buddyError(400, "Choose an available cover letter template or style.");
+              }
+            }
+            if (
+              styleDocument &&
+              body.styleDocumentRevision !== undefined &&
+              styleDocument.revision !== body.styleDocumentRevision
+            ) {
+              throw buddyError(409, "The template changed. Refresh the template selection.");
+            }
+          } else if (action === "cover") {
+            const studioDefaults = getConfig ? (getConfig("documentStudioDefaults") || {}) : {};
+            if (studioDefaults.coverLetterTemplateId) {
+              styleDocument = getDocuments().find((d) => d.id === studioDefaults.coverLetterTemplateId) || null;
+            }
+            if (!styleDocument) {
+              styleDocument =
+                getDocuments().find(
+                  (d) =>
+                    /\.(docx|dotx|pdf|gdoc)$/i.test(d.name) &&
+                    (d.category === "cover-letter-template" ||
+                      d.category === "master-cover-letter" ||
+                      (d.kind === "cover" && /\btemplate\b/i.test(d.name))),
+                ) || null;
+            }
+          }
+        }
         if (body.passToAi !== undefined && typeof body.passToAi !== "boolean")
           throw buddyError(400, "passToAi must be a boolean.");
         const passToAi = body.passToAi !== false;
@@ -854,7 +905,17 @@ export function createCareerBuddy(ctx) {
           }).format(new Date());
           const full = fullRecord(opportunity);
           const context = {
-            ...(templateSlots?{cvTemplate:{slots:templateSlots,instructions:"Use the existing sections, ordering and example paragraph lengths. This is a visual template only; its example content is not candidate evidence. Example lengths and job counts are not limits. Additional paragraphs may repeat the existing formatting in the same section or cell; do not design a new layout."}}:{}),
+            ...(templateSlots
+              ? {
+                  cvTemplate: {
+                    slots: templateSlots,
+                    instructions:
+                      action === "cover"
+                        ? "Follow the structure, greeting, paragraph flow, and sign-off of this cover letter template. This is a visual template only; its example content is not candidate evidence. Replace template placeholders with the candidate's tailored letter."
+                        : "Use the existing sections, ordering and example paragraph lengths. This is a visual template only; its example content is not candidate evidence. Example lengths and job counts are not limits. Additional paragraphs may repeat the existing formatting in the same section or cell; do not design a new layout.",
+                  },
+                }
+              : {}),
             ...(autoTailor?{sourceCV:{id:selectedCv.id,name:selectedCv.name,text:selectedCv.text},layout:selectedLayout}:{}),
             opportunity: autoTailor ? {id:full.id,company:full.company,role:full.role,description:full.description.slice(0,35000),location:full.location,salary:full.salary} : {
               ...full,
@@ -1005,7 +1066,11 @@ export function createCareerBuddy(ctx) {
             const raw = await callProvider(
               c,
               systemPrompt(timezone, today, action) +
-                (templateSlots ? " The selected cvTemplate owns the document design. Follow its existing section order, headings and example paragraph lengths when drafting. Do not recreate or redesign the CV, introduce new sections, or add your own formatting. Use concise replacement text; example lengths are not character limits and example job counts are not history limits. Additional paragraphs can repeat the template formatting within existing sections or cells. Always return the complete factual CV when evidence is adequate; fitting and population happen separately at save time. Retain all material factual history. Its example text is not candidate evidence. The layout preset is subordinate to the selected template." : "") +
+                (templateSlots
+                  ? action === "cover"
+                    ? " The selected cover letter template owns the document presentation and structure. Follow its greeting, paragraph flow, and sign-off when drafting. Do not add invented sections or layout code. Keep paragraphs focused, professional, and persuasive."
+                    : " The selected cvTemplate owns the document design. Follow its existing section order, headings and example paragraph lengths when drafting. Do not recreate or redesign the CV, introduce new sections, or add your own formatting. Use concise replacement text; example lengths are not character limits and example job counts are not history limits. Additional paragraphs can repeat the template formatting within existing sections or cells. Always return the complete factual CV when evidence is adequate; fitting and population happen separately at save time. Retain all material factual history. Its example text is not candidate evidence. The layout preset is subordinate to the selected template."
+                  : "") +
                 (autoTailor
                   ? " Use sourceCV as the factual base. Preserve its identity, employers, role chronology, dates and qualifications. Use supporting evidence to tailor emphasis. Target two pages for the CV, with concise headings and bullets. In the main work experience section, include detailed roles and achievements strictly for experience from the last 10 years; place experience older than 10 years under a 'Previous Experience' section listing only dates, company names, and job titles, optionally accompanied by a concise summary of points relevant to the job description. Do not truncate employment history silently. Use layout " +
                     selectedLayout +
@@ -1201,9 +1266,15 @@ export function createCareerBuddy(ctx) {
           const requestedLayout=body.layout||saved.tailoring?.layout||"";
           const layout=requestedLayout && saved.draft.kind==="cover" ? "letter" : requestedLayout;
           if(requestedLayout&&!layouts.some(l=>l.id===requestedLayout))throw buddyError(400,"Choose an available layout.");
-          const styleId=saved.draft.kind==="cv"?saved.tailoring?.styleDocumentId:null;
-          const styleDoc=styleId?getDocuments().find(d=>d.id===styleId):null;
-          if(styleId&&(!styleDoc||styleDoc.revision!==saved.tailoring.styleDocumentRevision||styleDoc.sha256!==saved.tailoring.styleDocumentHash))throw buddyError(409,"The previous CV style changed. Generate a fresh draft before saving.");
+          const styleId = saved.tailoring?.styleDocumentId || null;
+          const styleDoc = styleId ? getDocuments().find((d) => d.id === styleId) : null;
+          if (
+            styleId &&
+            (!styleDoc ||
+              styleDoc.revision !== saved.tailoring.styleDocumentRevision ||
+              styleDoc.sha256 !== saved.tailoring.styleDocumentHash)
+          )
+            throw buddyError(409, "The template changed. Generate a fresh draft before saving.");
           const hash = fingerprint(Buffer.from(content + "\n" + title+(layout?"\n"+layout:"")+(styleId?"\n"+styleId+":"+styleDoc.revision:"")+(saved.artifactBytes ? "\nartifact:" + saved.artifactBytes.length : "")));
           if (saved.savedHash !== hash) {
             let bytes;
@@ -1231,7 +1302,7 @@ export function createCareerBuddy(ctx) {
             }
             // A template may have changed while the model was preparing replacements.
             if(styleDoc && getDocuments().find(d=>d.id===styleId)?.revision!==styleDoc.revision)
-              throw buddyError(409,"The CV template changed. Generate a fresh draft before saving.");
+              throw buddyError(409,"The template changed. Generate a fresh draft before saving.");
             const filename =
               (saved.draft.kind === "cv" ? "CV" : "Cover letter") +
               " - " +

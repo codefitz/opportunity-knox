@@ -141,8 +141,9 @@ export function createDocumentStudio({
   let thumbnailQueue=Promise.resolve();
   const cleanDocName = name => (String(name || "").split(/[/\\]/).pop() || name);
   const getObsidian = () => (typeof obsidian === "function" ? obsidian() : obsidian);
-  const isCV=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&!["template","cv-template","cover-letter-template"].includes(d.category)&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
-  const isTemplate=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&(["template","cv-template","cover-letter-template"].includes(d.category)||/\b(template|dotx)\b/i.test(d.name)||/\.dotx$/i.test(d.name));
+  const isCV=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&!["template","cv-template","cover-letter-template","master-cover-letter"].includes(d.category)&&(d.kind==="cv"||["master-cv","tailored-cv","cv"].includes(d.category)||/\b(cv|resume|résumé)\b/i.test(d.name));
+  const isTemplate=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&(["template","cv-template","cover-letter-template","master-cover-letter"].includes(d.category)||/\b(template|dotx)\b/i.test(d.name)||/\.dotx$/i.test(d.name));
+  const isCoverTemplate=d=>/\.(docx|dotx|pdf|gdoc)$/i.test(d.name)&&(["cover-letter-template","master-cover-letter"].includes(d.category)||(d.kind==="cover"&&(["template","cover-letter-template","master-cover-letter"].includes(d.category)||/\b(template|dotx)\b/i.test(d.name)||/\.dotx$/i.test(d.name)))||(/\b(cover|letter)\b/i.test(d.name)&&(["template","cv-template","cover-letter-template","master-cover-letter"].includes(d.category)||/\b(template|dotx)\b/i.test(d.name)||/\.dotx$/i.test(d.name))));
   let busy = false;
   const activeChatRequests = new Map();
   function clean() {
@@ -1356,11 +1357,31 @@ export function createDocumentStudio({
         return true;
       }
       if(path==="/api/document-studio/cv-styles"&&method==="GET"){
+        const studioDefaults = getConfig ? (getConfig("documentStudioDefaults") || {}) : {};
+        const mapDoc = (d) => ({
+          id: d.id,
+          name: cleanDocName(d.name),
+          fullName: d.name,
+          category: d.category,
+          kind: d.kind,
+          revision: d.revision,
+          version: d.version,
+          reusable: true,
+          format: d.name.split(".").at(-1).toLowerCase(),
+          thumbnailUrl: "/api/document-studio/thumbnails/" + d.id,
+        });
         json(res,{
           googleConnected: !!googleDocuments?.isConnected?.(),
-          documents:getDocuments().filter(isCV).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:cleanDocName(d.name),fullName:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id})),
-          templates:getDocuments().filter(isTemplate).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(d=>({id:d.id,name:cleanDocName(d.name),fullName:d.name,revision:d.revision,version:d.version,reusable:true,format:d.name.split(".").at(-1).toLowerCase(),thumbnailUrl:"/api/document-studio/thumbnails/"+d.id}))
-        });return true;
+          documents: getDocuments().filter(isCV).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(mapDoc),
+          templates: getDocuments().filter(isTemplate).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(mapDoc),
+          coverTemplates: getDocuments().filter(isCoverTemplate).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).map(mapDoc),
+          defaults: {
+            masterCvId: studioDefaults.masterCvId || "",
+            cvTemplateId: studioDefaults.cvTemplateId || "",
+            coverLetterTemplateId: studioDefaults.coverLetterTemplateId || "",
+          },
+        });
+        return true;
       }
       const thumbnailMatch=path.match(/^\/api\/document-studio\/cv-styles\/([^/]+)\/thumbnail$/)||path.match(/^\/api\/document-studio\/thumbnails\/([^/]+)$/);
       if(thumbnailMatch&&method==="GET"){

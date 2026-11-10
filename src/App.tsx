@@ -3464,7 +3464,9 @@ function OpportunityDetail({
               opportunity={o}
               timezone={timezone}
               onChanged={onReload}
+              onUpdate={onUpdate}
               onError={onError}
+              onOpenStudio={onOpenStudio ? (opId, docId) => onOpenStudio(opId || o.id, docId) : undefined}
             />
             <Documents
               documents={o.documents || []}
@@ -5872,7 +5874,7 @@ function Documents({
                                 </a>
                               )}
                               <small>
-                                {doc.kind} · v{doc.version} ·{" "}
+                                {doc.kind === "cover" ? "Cover letter" : doc.kind === "cv" ? "CV" : doc.kind} · v{doc.version} ·{" "}
                                 {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
                                 {formatDate(doc.createdAt, timezone)}
                                 {(doc.originalUrl || doc.externalSource?.url) && (
@@ -5894,7 +5896,50 @@ function Documents({
                                 )}
                               </small>
                               <DocumentCategory document={doc} onChanged={onChanged} onError={onError}/>
-                              {opportunityId && ["cv","cover"].includes(doc.kind) && <button type="button" className="button secondary small" onClick={async()=>{try{await api(`/documents/${doc.id}/reference`,json({revision:doc.revision??1}));onNotice?.("Saved as a reference for future applications.");onChanged();}catch(e){onError(e);}}}><Copy size={14}/>Use this {doc.kind==="cv"?"CV":"cover letter"} as a future reference</button>}
+                              {opportunityId && ["cv", "cover"].includes(doc.kind) && (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                                  <button
+                                    type="button"
+                                    className="button secondary small"
+                                    onClick={async () => {
+                                      try {
+                                        await api(`/documents/${doc.id}/reference`, json({ revision: doc.revision ?? 1 }));
+                                        onNotice?.("Saved as a reference for future applications.");
+                                        onChanged();
+                                      } catch (e) {
+                                        onError(e);
+                                      }
+                                    }}
+                                  >
+                                    <Copy size={14} /> Use this {doc.kind === "cv" ? "CV" : "cover letter"} as a future reference
+                                  </button>
+                                  {(doc.originalUrl || doc.externalSource?.url) ? (
+                                    <a
+                                      href={doc.originalUrl || doc.externalSource?.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="button secondary small"
+                                      title="Open in Google Docs"
+                                    >
+                                      <ExternalLink size={14} /> Open in Google Docs
+                                    </a>
+                                  ) : (
+                                    /\.(docx|dotx|md|markdown|txt)$/i.test(doc.name) && (
+                                      <button
+                                        type="button"
+                                        className="button secondary small"
+                                        title="Export to Google Docs or save local copy for Google Drive"
+                                        onClick={() => {
+                                          setExportGoogleResult(null);
+                                          setExportGoogleDoc(doc);
+                                        }}
+                                      >
+                                        <Cloud size={14} /> Open in Google Drive
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              )}
                               <div className="document-tags">
                                 {(doc.tags || []).map((tag) => (
                                   <span
