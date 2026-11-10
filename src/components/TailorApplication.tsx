@@ -264,7 +264,14 @@ export default function TailorApplication({
           }),
         );
         const stored = result.messages.find((m) => m.id === draft.id)!;
-        ids.push(stored.savedDocuments.at(-1)!.id);
+        const savedDoc = stored.savedDocuments.at(-1)!;
+        ids.push(savedDoc.id);
+        try {
+          await api(
+            `/documents/${savedDoc.id}/reference`,
+            json({ revision: 1 }),
+          );
+        } catch {}
         setDrafts((current) =>
           current.map((d) =>
             d.id === draft.id
@@ -275,7 +282,7 @@ export default function TailorApplication({
       }
       await onSaved(ids, targetDrafts.some((d) => d.draft.kind === "cover"));
       setSaved(true);
-      setStatus("Generated and saved editable Word (.docx) files to this opportunity.");
+      setStatus("Saved editable Word (.docx) files to this opportunity and Career Docs (Reference).");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save drafts.");
       onError(e);
@@ -975,12 +982,44 @@ export default function TailorApplication({
                     (d) => !d.draft.title.trim() || !d.draft.content.trim(),
                   )
                 }
-                title="Save to Opportunity Documents (.docx)"
+                title="Save to Opportunity Documents and Career Docs (Reference)"
                 onClick={() => void save()}
               >
-                {busy ? "Saving…" : saved ? "✓ Saved" : "Save"}
+                {busy
+                  ? "Saving…"
+                  : saved
+                    ? "✓ Saved to Career Docs (Reference)"
+                    : "Save to Career Docs (Reference)"}
               </button>
             )}
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              title="Open or reveal the local folder where this opportunity's CV and cover letter files are stored"
+              onClick={async () => {
+                try {
+                  const res = await api<{
+                    ok: boolean;
+                    folderPath: string;
+                    openedOnHost: boolean;
+                    message: string;
+                  }>(`/opportunities/${encodeURIComponent(opportunity.id)}/open-folder`, json({}));
+                  if (!res.openedOnHost && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(res.folderPath).catch(() => {});
+                  }
+                  setStatus(
+                    res.openedOnHost
+                      ? res.message
+                      : `${res.message} (Path copied to clipboard)`,
+                  );
+                } catch (e) {
+                  onError(e);
+                }
+              }}
+            >
+              Open local folder
+            </button>
           </div>
 
           <label className="check-label cover-checkbox">
@@ -1009,8 +1048,12 @@ export default function TailorApplication({
         {saved && drafts.length > 0 && (
           <div className="save-success-banner">
             <p role="status">
-              ✓ Saved to this opportunity's documents. You can download the
-              editable Word files below.
+              ✓ Saved to this opportunity's documents and Career Docs (Reference).
+              {opportunity.outputFolder ? (
+                <>
+                  {" "}Local folder: <code>{opportunity.outputFolder}</code>
+                </>
+              ) : null}
             </p>
             <div className="download-actions">
               {drafts
@@ -1024,6 +1067,32 @@ export default function TailorApplication({
                     Download {doc.name}
                   </a>
                 ))}
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={async () => {
+                  try {
+                    const res = await api<{
+                      ok: boolean;
+                      folderPath: string;
+                      openedOnHost: boolean;
+                      message: string;
+                    }>(`/opportunities/${encodeURIComponent(opportunity.id)}/open-folder`, json({}));
+                    if (!res.openedOnHost && navigator.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(res.folderPath).catch(() => {});
+                    }
+                    setStatus(
+                      res.openedOnHost
+                        ? res.message
+                        : `${res.message} (Path copied to clipboard)`,
+                    );
+                  } catch (e) {
+                    onError(e);
+                  }
+                }}
+              >
+                Open local folder
+              </button>
             </div>
           </div>
         )}

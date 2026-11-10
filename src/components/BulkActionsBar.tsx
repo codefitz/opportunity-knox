@@ -156,21 +156,15 @@ export default function BulkActionsBar({
   // 5. Bulk Delete
   const handleDelete = async () => {
     if (busy) return;
-    const count = selectedIds.length;
-    const ok = window.confirm(
-      `Permanently delete ${count} ${count === 1 ? "opportunity" : "opportunities"}?\n\nThis will remove their history, notes, tasks, and stage records.`,
-    );
-    if (!ok) return;
-
     setBusy(true);
     try {
-      const res = await api<{ count: number }>("/opportunities/batch", {
-        method: "POST",
-        body: JSON.stringify({
+      const res = await api<{ count: number }>(
+        "/opportunities/batch",
+        json({
           action: "delete",
           ids: selectedIds,
         }),
-      });
+      );
       onNotice(
         `Deleted ${res.count} ${res.count === 1 ? "opportunity" : "opportunities"}.`,
       );

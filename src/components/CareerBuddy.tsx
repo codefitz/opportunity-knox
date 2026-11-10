@@ -5,6 +5,7 @@ import {
   Bot,
   Check,
   Download,
+  FilePlus2,
   FileText,
   Import,
   LoaderCircle,
@@ -16,6 +17,7 @@ import {
 import { api, ApiError, download, formatDate, json } from "../api";
 import type { Opportunity } from "../types";
 import type { BuddySettings } from "./CareerBuddySettings";
+import BuddyAvatar from "./BuddyAvatar";
 import "../career-buddy.css";
 export type BuddySource = {
   id: string;
@@ -179,12 +181,18 @@ export default function CareerBuddy({
   onUpdate,
   onError,
   onConfigure,
+  initialPrompt,
+  onInitialPromptConsumed,
+  onNotice,
 }: {
   opportunity: Opportunity;
   timezone: string;
   onUpdate: (o: Opportunity) => void;
   onError: (e: unknown) => void;
   onConfigure: () => void;
+  initialPrompt?: string;
+  onInitialPromptConsumed?: () => void;
+  onNotice?: (message: string) => void;
 }) {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [pendingUserPrompt, setPendingUserPrompt] = useState<string | null>(null);
@@ -203,15 +211,8 @@ export default function CareerBuddy({
     try {
       const next = await api<State>(base);
       setState(next);
-      setSelected(
-        next.documents
-          .filter(
-            (doc) =>
-              !doc.generated && /\.(pdf|docx|dotx|txt|md|csv|json)$/i.test(doc.name),
-          )
-          .slice(0, 20)
-          .map((doc) => doc.id),
-      );
+      // Dynamic semantic search finds relevant sources when chatting.
+      setSelected([]);
     } catch (error) {
       setActiveRequest(null);
       setError(errorText(error));
@@ -221,6 +222,13 @@ export default function CareerBuddy({
   useEffect(() => {
     void load();
   }, [o.id]);
+  useEffect(() => {
+    if (initialPrompt && initialPrompt.trim()) {
+      setInput(initialPrompt);
+      setAction("chat");
+      onInitialPromptConsumed?.();
+    }
+  }, [initialPrompt]);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
   }, [state?.messages.length, busy]);
@@ -409,8 +417,8 @@ export default function CareerBuddy({
     <section className="buddy-chat" aria-label="Career Buddy chat">
       <div className="buddy-chat-heading">
         <div className="buddy-identity">
-          <span className="buddy-icon">
-            <Bot size={24} />
+          <span className="buddy-icon" style={{ background: "transparent", padding: 0 }}>
+            <BuddyAvatar size={30} />
           </span>
           <div>
             <h3>Career Buddy</h3>
@@ -530,22 +538,47 @@ export default function CareerBuddy({
       {/* 3. Compact Sources */}
       <details className="buddy-context-compact">
         <summary>
-          <span>Sources for your next message ({selected.length} selected)</span>
-          <span className="buddy-context-hint">Configure document excerpts</span>
+          <span>
+            {selected.length === 0
+              ? "Sources (Dynamic semantic search)"
+              : `Sources (${selected.length} pinned)`}
+          </span>
+          <span className="buddy-context-hint">
+            {selected.length === 0 ? "Semantic search finds relevant sources automatically" : "Configure pinned sources"}
+          </span>
         </summary>
         <div className="buddy-context-body">
           <p>
-            This opportunity and these selected document excerpts will be sent to{" "}
-            <strong>
-              {state.settings.providers?.[state.settings.provider]?.name ||
-                state.settings.provider ||
-                "AI"}
-            </strong>
-            . Files are read locally first. Select up to 20; use a source CV for tailoring.
+            {selected.length === 0 ? (
+              <>
+                Career Buddy uses <strong>semantic search</strong> to automatically find and retrieve relevant career evidence from your documents when you chat.
+              </>
+            ) : (
+              <>
+                {selected.length} specific document{selected.length === 1 ? " is" : "s are"} pinned. Excerpts from these files will be sent to{" "}
+                <strong>
+                  {state.settings.providers?.[state.settings.provider]?.name ||
+                    state.settings.provider ||
+                    "AI"}
+                </strong>
+                .
+              </>
+            )}
           </p>
+          {selected.length > 0 && (
+            <div style={{ marginBottom: "10px" }}>
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => setSelected([])}
+              >
+                Clear pinned sources (Use dynamic search)
+              </button>
+            </div>
+          )}
           {state.documents.length === 0 ? (
             <p className="buddy-muted">
-              Add a CV or career evidence in the Career Hub or this opportunity’s Documents tab.
+              Add a CV or career evidence in Career Docs or this opportunity’s Documents tab.
             </p>
           ) : (
             <div className="buddy-source-picker">
@@ -639,6 +672,7 @@ export default function CareerBuddy({
                 </article>
               ) : (
                 <Reply
+                  text={message.content}
                   key={message.id}
                   message={message}
                   opportunity={o}
@@ -646,6 +680,7 @@ export default function CareerBuddy({
                   base={base}
                   onChanged={changed}
                   onError={onError}
+                  onNotice={onNotice}
                 />
               ),
             )}
@@ -920,7 +955,9 @@ function Reply({
   base,
   onChanged,
   onError,
+  onNotice,
 }: {
+  text?: string;
   message: BuddyMessage;
   opportunity: Opportunity;
   timezone: string;
@@ -930,11 +967,13 @@ function Reply({
     messages: BuddyMessage[];
   }) => void;
   onError: (e: unknown) => void;
+  onNotice?: (message: string) => void;
 }) {
   const [changes, setChanges] = useState(m.appliedChanges || m.changes),
     [content, setContent] = useState(m.editedDraft?.content || m.draft.content),
     [title, setTitle] = useState(m.editedDraft?.title || m.draft.title),
     [busy, setBusy] = useState(""),
+    [appendedMaster, setAppendedMaster] = useState(false),
     [error, setError] = useState("");
   const stale = o.revision !== m.baseRevision;
   const update = (index: number, patch: Partial<Change>) =>
@@ -978,10 +1017,47 @@ function Reply({
   return (
     <article className="buddy-message is-assistant">
       <div className="buddy-message-byline">
-        <Bot size={14} />
+        <BuddyAvatar size={18} />
         Career Buddy · {formatDate(m.createdAt, timezone, true)}
       </div>
       <Text value={m.content} />
+      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="button secondary small"
+          disabled={!!busy || appendedMaster}
+          onClick={async () => {
+            setBusy("master-cv");
+            setError("");
+            try {
+              const res = await api<{ message: string }>(
+                "/document-studio/master-cv/append",
+                json({
+                  content: m.content,
+                  heading: `Evidence & Notes (${o.company} – ${o.role})`,
+                }),
+              );
+              setAppendedMaster(true);
+              onNotice?.(res.message || "Added response to Master CV.");
+            } catch (err) {
+              setError(errorText(err));
+              onError(err);
+            } finally {
+              setBusy("");
+            }
+          }}
+          title="Append this refined note or bullet directly to your Master CV in Career Docs"
+        >
+          {busy === "master-cv" ? (
+            <LoaderCircle size={13} className="spin" />
+          ) : appendedMaster ? (
+            <Check size={13} />
+          ) : (
+            <FilePlus2 size={13} />
+          )}
+          {appendedMaster ? "Added to Master CV" : "Add to Master CV"}
+        </button>
+      </div>
       {!!changes.length && (
         <details className="buddy-proposal" open={!m.appliedAt}>
           <summary>
@@ -1221,7 +1297,7 @@ function Reply({
                 " · " +
                   ({
                     "not-indexed":
-                      "Selected sources have no saved vectors. Index them in the Career Hub to enable meaning-based matches.",
+                      "Selected sources have no saved vectors. Index them in Career Docs to enable meaning-based matches.",
                     "external-provider":
                       "Local semantic search requires the built-in embedding provider in Settings.",
                     "model-unavailable":

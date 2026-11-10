@@ -25,6 +25,7 @@ import {
   Sparkles,
   RefreshCw,
   Building,
+  Zap,
 } from "lucide-react";
 
 export const SENIORITY_OPTIONS: { id: SeniorityLevel; label: string }[] = [
@@ -733,7 +734,13 @@ export function FitCriteria({ onError }: { onError: (e: unknown) => void }) {
   );
 }
 export type FitDraft = { strengths: string; gaps: string; effectiveAt: string };
-export default function DecisionReview({ opportunity, onError, onAssessed, onBusy, disabled = false }: {
+export default function DecisionReview({
+  opportunity,
+  onError,
+  onAssessed,
+  onBusy,
+  disabled = false,
+}: {
   opportunity: Opportunity;
   onError: (e: unknown) => void;
   onAssessed: (draft: FitDraft, saved: Opportunity) => void;
@@ -741,37 +748,151 @@ export default function DecisionReview({ opportunity, onError, onAssessed, onBus
   onBusy: (busy: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [engine, setEngine] = useState<"tfidf" | "llm">("tfidf");
+  const [lastUsedEngine, setLastUsedEngine] = useState<"tfidf" | "llm" | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  async function assess() {
+
+  async function assess(overrideEngine?: "tfidf" | "llm") {
+    const selectedEngine = overrideEngine || engine;
+    if (overrideEngine) setEngine(overrideEngine);
     setBusy(true);
     onBusy(true);
     setNotice("");
     setError("");
     const id = uploadId();
-    setRequestId(id);
+    setRequestId(selectedEngine === "llm" ? id : null);
     try {
-      const result = await api<{reviewDraft: FitDraft; opportunity: Opportunity}>("/buddy/decisions/" + opportunity.id, json({
-        revision: opportunity.revision, requestId: id, generalFit: true, engine: "ml", documentIds: [],
-      }));
+      const result = await api<{
+        reviewDraft: FitDraft;
+        opportunity: Opportunity;
+        assessment?: { engine?: string };
+      }>(
+        "/buddy/decisions/" + opportunity.id,
+        json({
+          revision: opportunity.revision,
+          requestId: id,
+          generalFit: true,
+          engine: selectedEngine === "tfidf" ? "ml" : "llm",
+          documentIds: [],
+        }),
+      );
       onAssessed(result.reviewDraft, result.opportunity);
-      setNotice("Assessment saved. Active opportunities move to Fit review.");
+      setLastUsedEngine(selectedEngine);
+      setNotice(
+        selectedEngine === "tfidf"
+          ? "Fast Local (TF-IDF / BM25) assessment saved. If you want deeper synthesis, click 'Upgrade with LLM' or switch to Generative AI (LLM)."
+          : "Generative AI (LLM) assessment saved. Active opportunities move to Fit review.",
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The fit assessment failed. Please retry.");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The fit assessment failed. Please retry.",
+      );
       onError(e);
     } finally {
       setBusy(false);
       onBusy(false);
     }
   }
-  return <div className="section-intro">
-    <button type="button" className="button primary" disabled={busy || disabled} onClick={() => void assess()}>
-      {busy ? "Assessing…" : "Run Automated Fit Assessment"}
-    </button>
-    <p>Conventional ML analyzes your career library, extracted skills, target criteria and seniority, saves strengths, gaps and review date, and advances active opportunities to Fit review. You can edit the saved result.</p>
-    <AIRequestProgress id={requestId} scope={"decision:" + opportunity.id} onError={onError}/>
-    {error && <p role="alert" className="alert" style={{ marginTop: 10 }}>{error} Your review fields have been kept. You can retry the assessment.</p>}
-    {notice && <p role="status" className="saved" style={{ marginTop: 10, display: "block" }}>{notice}</p>}
-  </div>;
+
+  return (
+    <div className="section-intro fit-engine-panel">
+      <div className="fit-engine-toolbar">
+        <div className="ai-engine-selector-wrap">
+          <span className="ai-engine-selector-label">AI Engine:</span>
+          <div
+            className="library-view-toggle ai-engine-toggle"
+            role="group"
+            aria-label="Fit assessment engine"
+          >
+            <button
+              type="button"
+              className={engine === "tfidf" ? "active" : ""}
+              disabled={busy || disabled}
+              onClick={() => setEngine("tfidf")}
+              title="Instant local statistical matching using TF-IDF & BM25 cosine similarity, skill taxonomy, and seniority distance"
+            >
+              <Zap size={12} />
+              Fast Local (TF-IDF / BM25)
+            </button>
+            <button
+              type="button"
+              className={engine === "llm" ? "active" : ""}
+              disabled={busy || disabled}
+              onClick={() => setEngine("llm")}
+              title="Deep evidence-grounded evaluation using your configured Decision or Career Buddy LLM"
+            >
+              <Sparkles size={12} />
+              Generative AI (LLM)
+            </button>
+          </div>
+        </div>
+        <div className="fit-engine-actions">
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || disabled}
+            onClick={() => void assess()}
+          >
+            {busy ? (
+              <>
+                <LoaderCircle size={15} className="spin" />
+                {engine === "tfidf" ? "Assessing locally…" : "Assessing with LLM…"}
+              </>
+            ) : engine === "tfidf" ? (
+              <>
+                <Zap size={15} />
+                Run Fast Local Fit Assessment
+              </>
+            ) : (
+              <>
+                <Sparkles size={15} />
+                Run LLM Fit Assessment
+              </>
+            )}
+          </button>
+          {lastUsedEngine === "tfidf" && engine === "tfidf" && (
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy || disabled}
+              onClick={() => void assess("llm")}
+              title="Re-run fit assessment using your configured Generative AI (LLM) model"
+            >
+              <Sparkles size={14} />
+              Upgrade with LLM
+            </button>
+          )}
+        </div>
+      </div>
+      <p style={{ marginTop: 8 }}>
+        {engine === "tfidf"
+          ? "Fast Local (TF-IDF / BM25) analyzes your career library, extracted skills, target criteria and seniority locally in milliseconds, populates Strengths and Gaps, and advances active opportunities to Fit review. Switch to Generative AI (LLM) anytime for a deeper model-written review."
+          : "Generative AI (LLM) retrieves relevant excerpts from your Career Docs library and evaluates your strengths, gaps and target criteria using your configured Decision or Career Buddy model."}
+      </p>
+      <AIRequestProgress
+        id={requestId}
+        scope={"decision:" + opportunity.id}
+        onError={onError}
+      />
+      {error && (
+        <p role="alert" className="alert" style={{ marginTop: 10 }}>
+          {error} Your review fields have been kept. You can retry the
+          assessment.
+        </p>
+      )}
+      {notice && (
+        <p
+          role="status"
+          className="saved"
+          style={{ marginTop: 10, display: "block" }}
+        >
+          {notice}
+        </p>
+      )}
+    </div>
+  );
 }

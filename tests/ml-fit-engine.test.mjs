@@ -13,6 +13,7 @@ import {
   evaluateSeniorityDistance,
   computeTitleSimilarity,
   evaluateOpportunityFit,
+  generateStatisticalRoleSummary,
 } from "../server/ml-fit-engine.mjs";
 
 async function createFixture(t) {
@@ -273,4 +274,63 @@ test("Conventional ML Fit Engine: HTTP endpoint integration with offline assessm
   const decisions = (await f.request(`/api/buddy/decisions/${opp.id}`)).data;
   assert.equal(decisions.assessments.length, 1);
   assert.equal(decisions.assessments[0].stale, false);
+
+  // 7. Run Fast Local (TF-IDF / BM25) Role Summary offline (no LLM configured)
+  const summaryRes = await f.request(
+    `/api/opportunities/${opp.id}/description-summary`,
+    {
+      method: "POST",
+      body: { engine: "tfidf" },
+    },
+  );
+  assert.equal(summaryRes.status, 200);
+  assert.equal(summaryRes.data.aiSummaryEngine, "tfidf");
+  assert.ok(summaryRes.data.aiSummary.includes("### Top 5 Skills"));
+  assert.ok(summaryRes.data.aiSummary.includes("### Key Responsibilities"));
+  assert.ok(summaryRes.data.aiSummary.includes("TypeScript"));
+});
+
+test("Conventional ML Engine: generateStatisticalRoleSummary extracts executive summary, 5 skills and 5 responsibilities", () => {
+  const summary = generateStatisticalRoleSummary(
+    {
+      role: "Staff Cloud Platform Engineer",
+      company: "Fictional Cloud Ltd",
+      location: "London",
+      workMode: "Hybrid",
+      seniority: "lead",
+      description: `
+        Fictional Cloud Ltd is hiring a Staff Cloud Platform Engineer to lead our core infrastructure architecture.
+        Key Responsibilities:
+        - Architect and scale multi-region Kubernetes clusters on AWS and GCP.
+        - Build automated CI/CD pipelines and GitOps deployment workflows using Terraform.
+        - Partner with application teams to improve distributed systems observability and reliability.
+        - Mentor senior and mid-level engineers on cloud-native security best practices.
+        - Drive incident response automation and service-level objective governance.
+        Requirements:
+        - Deep expertise in Kubernetes, Docker, Terraform, and Go (Golang).
+        - Strong production background with AWS, PostgreSQL, and Prometheus/Kafka.
+      `,
+    },
+    ["Observability"],
+  );
+
+  assert.ok(summary.includes("Staff Cloud Platform Engineer at Fictional Cloud Ltd"));
+  assert.ok(summary.includes("### Top 5 Skills"));
+  assert.ok(summary.includes("### Key Responsibilities"));
+
+  const lines = summary.split("\n");
+  const skillsIdx = lines.indexOf("### Top 5 Skills");
+  const respIdx = lines.indexOf("### Key Responsibilities");
+  assert.ok(skillsIdx > 0);
+  assert.ok(respIdx > skillsIdx);
+
+  const skillBullets = lines
+    .slice(skillsIdx + 1, respIdx)
+    .filter((l) => l.startsWith("- "));
+  const respBullets = lines
+    .slice(respIdx + 1)
+    .filter((l) => l.startsWith("- "));
+
+  assert.equal(skillBullets.length, 5);
+  assert.equal(respBullets.length, 5);
 });

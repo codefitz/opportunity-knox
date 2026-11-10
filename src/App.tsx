@@ -24,6 +24,11 @@ import BuddyWorkspace from "./components/BuddyWorkspace";
 import VectorIndex from "./components/VectorIndex";
 import OpportunityAISummary from "./components/OpportunityAISummary";
 import {
+  groupOpportunitiesByTitle,
+  type TitleGroupAssignment,
+  type TitleGroupResponse,
+} from "./lib/title-grouping";
+import {
   useState,
   useMemo,
   useEffect,
@@ -52,12 +57,14 @@ import {
   ChevronUp,
   CircleHelp,
   Clock3,
+  Cloud,
   Columns3,
   Copy,
   ExternalLink,
   FileText,
   Folder,
   FolderOpen,
+  FolderPlus,
   FolderInput,
   HardDrive,
   Layers,
@@ -72,6 +79,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  RefreshCw,
   RotateCcw,
   RotateCw,
   Search,
@@ -144,6 +152,8 @@ import BulkActionsBar from "./components/BulkActionsBar";
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
 import CareerBuddySettings from "./components/CareerBuddySettings";
+import UnifiedCareerBuddyPane from "./components/UnifiedCareerBuddyPane";
+import { BuddyAvatar, useBuddyAvatar } from "./components/BuddyAvatar";
 import DocumentStudio from "./components/DocumentStudio";
 import EmbeddingSettings from "./components/EmbeddingSettings";
 import MCPSettings from "./components/MCPSettings";
@@ -170,8 +180,8 @@ const PAGE_LABELS: Record<Page, string> = {
   opportunities: "Opportunities",
   board: "Kanban board",
   todos: "To-do list",
-  library: "Career Hub",
-  studio: "Document Studio",
+  library: "Career Docs",
+  studio: "Doc Studio",
   buddy: "Career Buddy",
   activity: "AI activity",
   settings: "Settings",
@@ -346,14 +356,33 @@ export default function App() {
     [newText, setNewText] = useState("");
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(loadSavedColumns);
   const [tableSort, setTableSort] = useState<SortConfig>(loadSavedSort);
-  const [groupByCompany, setGroupByCompany] = useState<boolean>(() => {
+  const [groupByMode, setGroupByMode] = useState<"none" | "company" | "title">(() => {
     try {
-      return localStorage.getItem("knox_opportunity_group_by_company") === "true";
-    } catch {
-      return false;
-    }
+      const saved = localStorage.getItem("knox_opportunity_group_by");
+      if (saved === "company" || saved === "title" || saved === "none") return saved;
+      if (localStorage.getItem("knox_opportunity_group_by_company") === "true") return "company";
+    } catch {}
+    return "none";
   });
+  const groupByCompany = groupByMode === "company";
+  const groupByTitle = groupByMode === "title";
+  const toggleGroupBy = (mode: "company" | "title") => {
+    setGroupByMode((prev) => {
+      const next = prev === mode ? "none" : mode;
+      try {
+        localStorage.setItem("knox_opportunity_group_by", next);
+        localStorage.setItem(
+          "knox_opportunity_group_by_company",
+          String(next === "company"),
+        );
+      } catch {}
+      return next;
+    });
+  };
   const [collapsedCompanies, setCollapsedCompanies] = useState<Record<string, boolean>>({});
+  const [collapsedTitleGroups, setCollapsedTitleGroups] = useState<Record<string, boolean>>({});
+  const [semanticTitleAssignments, setSemanticTitleAssignments] = useState<Record<string, TitleGroupAssignment> | null>(null);
+  const [semanticTitleModel, setSemanticTitleModel] = useState<string>("");
   const [opportunitySubTab, setOpportunitySubTab] = useState<"active" | "wishlist">("active");
   const [targetCompanies, setTargetCompanies] = useState<TargetCompany[]>([]);
   const [profile, setProfile] = useState<Profile>({
@@ -371,8 +400,14 @@ export default function App() {
   const view = page === "board" ? "board" : "list";
   const [selected, setSelected] = useState<Opportunity | null>(null),
     [studioOpportunityId, setStudioOpportunityId] = useState<string>(""),
+    [studioDocumentId, setStudioDocumentId] = useState<string>(""),
+    [studioMode, setStudioMode] = useState<"builder" | "document">("builder"),
+    [buddyPaneOpen, setBuddyPaneOpen] = useState<boolean>(false),
+    [buddyFocusedDoc, setBuddyFocusedDoc] = useState<{ id: string; name: string } | null>(null),
+    [buddyInitialPrompt, setBuddyInitialPrompt] = useState<string>(""),
     [dragging, setDragging] = useState(""),
     [dropStage, setDropStage] = useState("");
+  const [buddyAvatar] = useBuddyAvatar();
   const [selectedOpportunityIds, setSelectedOpportunityIds] = useState<
     string[]
   >([]);
@@ -786,6 +821,7 @@ export default function App() {
     try {
       await api(`/opportunities/${id}`, { method: "DELETE" });
       setSelected(null);
+      setSelectedOpportunityIds((prev) => prev.filter((item) => item !== id));
       await load(true);
       setNotice("Opportunity deleted.");
     } catch (err) {
@@ -816,6 +852,36 @@ export default function App() {
     }
     return [...groups.entries()];
   }, [sortedOpportunities, groupByCompany, tableSort]);
+  const titleFingerprint = useMemo(
+    () => opportunities.map((o) => `${o.id}:${o.role || ""}`).join("|"),
+    [opportunities],
+  );
+  useEffect(() => {
+    if (!groupByTitle || !opportunities.length) return;
+    let cancelled = false;
+    api<TitleGroupResponse>("/opportunities/title-groups")
+      .then((res) => {
+        if (!cancelled && res?.assignments) {
+          setSemanticTitleAssignments(res.assignments);
+          if (res.model) setSemanticTitleModel(res.model);
+        }
+      })
+      .catch(() => {
+        // Fallback to deterministic keyword grouping silently
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupByTitle, titleFingerprint]);
+  const titleGroups = useMemo(() => {
+    if (!groupByTitle) return null;
+    const sortDir = tableSort.column === "opportunity" ? tableSort.direction : null;
+    return groupOpportunitiesByTitle(
+      sortedOpportunities,
+      semanticTitleAssignments,
+      sortDir,
+    );
+  }, [sortedOpportunities, groupByTitle, semanticTitleAssignments, tableSort]);
   const active = opportunities.filter((o) => !o.outcome),
     activeExcluded = active.filter((o) => o.matchedExclusions && o.matchedExclusions.length > 0),
     interviews = active.filter((o) =>
@@ -827,7 +893,7 @@ export default function App() {
     return (
       <tr
         key={o.id}
-        className={`${groupByCompany ? "company-grouped-row" : ""} ${isSelected ? "selected" : ""}`}
+        className={`${groupByCompany || groupByTitle ? "company-grouped-row" : ""} ${isSelected ? "selected" : ""}`}
       >
         <td className="select-col" onClick={(e) => e.stopPropagation()}>
           <input
@@ -1030,6 +1096,18 @@ export default function App() {
           >
             <ArrowUpRight size={17} />
           </button>
+          <button
+            type="button"
+            className="icon-button danger-text"
+            aria-label={`Delete ${o.role} at ${o.company}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void deleteOpportunity(o.id);
+            }}
+            title="Delete opportunity"
+          >
+            <Trash2 size={15} />
+          </button>
         </div>
       </td>
     </tr>
@@ -1086,7 +1164,7 @@ export default function App() {
             <LayoutGrid size={20} />
           </span>
           <span>
-            Opportunity Knox<span className="brand-sub">YOUR NEXT CHAPTER</span>
+            Opportunity Knox<span className="brand-sub">CAREER WORKSPACE</span>
           </span>
         </a>
         <div className="workspace-label">PERSONAL WORKSPACE</div>
@@ -1105,42 +1183,70 @@ export default function App() {
               },
               { id: "board", label: "Kanban board", icon: LayoutGrid },
               { id: "todos", label: "To-do list", icon: ListTodo },
-              { id: "library", label: "Career Hub", icon: FolderOpen },
-              { id: "studio", label: "Document Studio", icon: FileText },
-              { id: "buddy", label: "Career Buddy", icon: Sparkles },
+              { id: "library", label: "Career Docs", icon: FolderOpen },
               { id: "activity", label: "AI activity", icon: Clock3 },
               { id: "settings", label: "Settings", icon: Settings2 },
             ] as const
           ).map((item) => (
-            <button
-              key={item.id}
-              className={page === item.id ? "nav-item active" : "nav-item"}
-              aria-current={page === item.id ? "page" : undefined}
-              onClick={() => navigate(item.id)}
-            >
-              <item.icon size={18} />
-              {item.label}
-              {item.id === "opportunities" && (
-                <span className="nav-count">{active.length}</span>
+            <Fragment key={item.id}>
+              <button
+                className={page === item.id ? "nav-item active" : "nav-item"}
+                aria-current={page === item.id ? "page" : undefined}
+                onClick={() => navigate(item.id)}
+              >
+                <item.icon size={18} />
+                {item.label}
+                {item.id === "opportunities" && (
+                  <span className="nav-count">{active.length}</span>
+                )}
+                {item.id === "todos" && tasks.some((t) => !t.completed) && (
+                  <span className="nav-count">
+                    {tasks.filter((t) => !t.completed).length}
+                  </span>
+                )}
+              </button>
+              {item.id === "library" && (
+                <button
+                  type="button"
+                  className={
+                    page === "studio"
+                      ? "nav-item nav-subitem active"
+                      : "nav-item nav-subitem"
+                  }
+                  aria-current={page === "studio" ? "page" : undefined}
+                  onClick={() => {
+                    setStudioDocumentId("");
+                    setStudioMode("builder");
+                    navigate("studio");
+                  }}
+                >
+                  <FileText size={15} />
+                  Doc Studio
+                </button>
               )}
-              {item.id === "todos" && tasks.some((t) => !t.completed) && (
-                <span className="nav-count">
-                  {tasks.filter((t) => !t.completed).length}
-                </span>
-              )}
-            </button>
+            </Fragment>
           ))}
+          <button
+            type="button"
+            className={buddyPaneOpen ? "nav-item active" : "nav-item"}
+            aria-expanded={buddyPaneOpen}
+            onClick={() => setBuddyPaneOpen((v) => !v)}
+          >
+            <BuddyAvatar variant={buddyAvatar} size={18} />
+            Career Buddy
+            <span className="nav-count" style={{ fontSize: 10 }}>
+              {buddyPaneOpen ? "Open" : "Panel"}
+            </span>
+          </button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note">
           <span className="tiny-icon">
             <ShieldCheck size={17} />
           </span>
-          <strong>Your workspace, your data.</strong>
+          <strong>Local Private Storage</strong>
           <p>
-            Saved on your private host.
-            <br />
-            Ready whenever you are.
+            Database and documents are stored locally on your host.
           </p>
         </div>
         <div className="sidebar-profile">
@@ -1339,14 +1445,14 @@ export default function App() {
                 <div className="page-heading">
                   <div>
                     <div className="eyebrow">
-                      A LITTLE STRUCTURE. A CLEARER PATH.
+                      OPPORTUNITY REGISTER
                     </div>
                     <h1>
-                      Your opportunities
+                      Opportunities
                       <span className="heading-dot">.</span>
                     </h1>
                     <p>
-                      Every possibility, application, and next action in one place.
+                      Track job opportunities, application stages, and upcoming actions.
                     </p>
                   </div>
                   <div className="opportunity-page-actions">
@@ -1489,22 +1595,25 @@ export default function App() {
                           type="button"
                           className={`button secondary small${groupByCompany ? " active" : ""}`}
                           aria-pressed={groupByCompany}
-                          onClick={() => {
-                            setGroupByCompany((prev) => {
-                              const next = !prev;
-                              try {
-                                localStorage.setItem(
-                                  "knox_opportunity_group_by_company",
-                                  String(next),
-                                );
-                              } catch {}
-                              return next;
-                            });
-                          }}
+                          onClick={() => toggleGroupBy("company")}
                           title={groupByCompany ? "Switch to flat list view" : "Group opportunities by company"}
                         >
                           <Building2 size={14} />
                           Group by company
+                        </button>
+                        <button
+                          type="button"
+                          className={`button secondary small${groupByTitle ? " active" : ""}`}
+                          aria-pressed={groupByTitle}
+                          onClick={() => toggleGroupBy("title")}
+                          title={
+                            groupByTitle
+                              ? "Switch to flat list view"
+                              : "Group opportunities by similar job title (keyword mapping + semantic embeddings)"
+                          }
+                        >
+                          <BriefcaseBusiness size={14} />
+                          Group by title
                         </button>
                         <details className="column-picker-dropdown">
                           <summary
@@ -1746,14 +1855,12 @@ export default function App() {
                             {!cards.length && (
                               <div className="column-empty">
                                 <span>
-                                  {index === 0
-                                    ? "Every next chapter starts here."
-                                    : "Room for what’s next."}
+                                  No opportunities in this stage.
                                 </span>
                                 {index === 0 && (
                                   <button onClick={() => add()}>
                                     <Plus size={14} />
-                                    Add your first opportunity
+                                    Add opportunity
                                   </button>
                                 )}
                               </div>
@@ -1903,6 +2010,126 @@ export default function App() {
                               </Fragment>
                             );
                           })
+                        ) : groupByTitle && titleGroups ? (
+                          titleGroups.map((cluster) => {
+                            const isCollapsed =
+                              !!collapsedTitleGroups[cluster.key];
+                            const totalCols = visibleColumns.length + 2;
+                            const activeCount = cluster.items.filter(
+                              (x) => !x.outcome,
+                            ).length;
+                            const distinctVariants = cluster.variants.filter(
+                              (v) =>
+                                v.toLowerCase() !== cluster.label.toLowerCase(),
+                            );
+                            return (
+                              <Fragment key={cluster.key}>
+                                <tr
+                                  className="company-group-row title-group-row"
+                                  onClick={() => {
+                                    setCollapsedTitleGroups((curr) => ({
+                                      ...curr,
+                                      [cluster.key]: !curr[cluster.key],
+                                    }));
+                                  }}
+                                >
+                                  <td colSpan={totalCols}>
+                                    <div className="company-group-header-cell">
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          color: "var(--ink-secondary)",
+                                        }}
+                                      >
+                                        {isCollapsed ? (
+                                          <ChevronRight size={15} />
+                                        ) : (
+                                          <ChevronDown size={15} />
+                                        )}
+                                      </span>
+                                      <span
+                                        className={`company-avatar tint-${cluster.label.length % 4}`}
+                                      >
+                                        {initials(cluster.label)}
+                                      </span>
+                                      <strong className="company-group-name">
+                                        {cluster.label}
+                                      </strong>
+                                      <span className="group-count-badge">
+                                        {cluster.items.length}{" "}
+                                        {cluster.items.length === 1
+                                          ? "role"
+                                          : "roles"}
+                                      </span>
+                                      {activeCount > 0 && (
+                                        <span className="group-active-badge">
+                                          {activeCount} active
+                                        </span>
+                                      )}
+                                      {cluster.key !== "__unspecified__" && (
+                                        <span
+                                          className="group-method-badge"
+                                          title={
+                                            cluster.matchMethod ===
+                                            "keyword+semantic"
+                                              ? `Grouped via keyword mapping & semantic embeddings${semanticTitleModel ? ` (${semanticTitleModel})` : ""}`
+                                              : "Grouped via canonical keyword mapping"
+                                          }
+                                        >
+                                          <Sparkles size={10} />
+                                          {cluster.matchMethod ===
+                                          "keyword+semantic"
+                                            ? "Keyword + Semantic"
+                                            : "Keyword match"}
+                                        </span>
+                                      )}
+                                      {distinctVariants.length > 0 && (
+                                        <span
+                                          className="group-variants-hint"
+                                          title={`Matched job titles: ${cluster.variants.join(" · ")}`}
+                                        >
+                                          {distinctVariants
+                                            .slice(0, 2)
+                                            .join(", ")}
+                                          {distinctVariants.length > 2
+                                            ? ` +${distinctVariants.length - 2} more`
+                                            : ""}
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="button secondary small"
+                                        style={{
+                                          marginLeft: "auto",
+                                          minHeight: 24,
+                                          padding: "2px 8px",
+                                          fontSize: 10,
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          add({
+                                            role:
+                                              cluster.label ===
+                                              "Unspecified role"
+                                                ? ""
+                                                : cluster.label,
+                                          });
+                                        }}
+                                        title={`Add ${cluster.label} opportunity`}
+                                      >
+                                        <Plus size={12} />
+                                        Add role
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {!isCollapsed &&
+                                  cluster.items.map((o) =>
+                                    renderOpportunityRow(o),
+                                  )}
+                              </Fragment>
+                            );
+                          })
                         ) : (
                           sortedOpportunities.map((o) =>
                             renderOpportunityRow(o),
@@ -1913,8 +2140,8 @@ export default function App() {
                     {!opportunities.length && (
                       <div className="empty-state">
                         <Search size={26} />
-                        <h3>A fresh start, all yours.</h3>
-                        <p>Add a role to start building your next chapter.</p>
+                        <h3>No opportunities yet</h3>
+                        <p>Add a job opportunity to start tracking your applications.</p>
                       </div>
                     )}
                     {opportunities.length > 0 && !filtered.length && (
@@ -1946,10 +2173,9 @@ export default function App() {
                       <Sparkles size={20} />
                     </div>
                     <div>
-                      <h3>Make space for your next move.</h3>
+                      <h3>Get started with your first opportunity</h3>
                       <p>
-                        Add a job link, a description, or a PDF. Your history
-                        and documents stay together as you go.
+                        Add a job link, paste a description, or upload a job specification PDF.
                       </p>
                     </div>
                     <button
@@ -1975,8 +2201,18 @@ export default function App() {
             )}
           </main>
         )}
-        {page === "activity" && <AIActivity timezone={settings?.timezone||"Europe/London"} onError={report} onOpen={(destination:ActivityDestination)=>{if(destination.type==="opportunity"&&destination.id)void openOpportunity(destination.id,destination.tab);else if(destination.type==="buddy"){localStorage.setItem("knox-buddy-conversation",destination.id||"legacy");navigate("buddy");}else if(destination.type==="intake"){setNewUrl("");setNewFile(null);setNewText("");setNewOpen(true);}else if(destination.type==="feedback")window.dispatchEvent(new Event("knox-feedback-inbox"));else navigate("settings", "career-buddy");}}/>}
-        {page === "buddy" && <BuddyWorkspace onError={report} onChanged={()=>void load(true)} />}
+        {page === "activity" && <AIActivity timezone={settings?.timezone||"Europe/London"} onError={report} onOpen={(destination:ActivityDestination)=>{if(destination.type==="opportunity"&&destination.id){if(destination.tab==="buddy"){setBuddyPaneOpen(true);void openOpportunity(destination.id,"overview");}else void openOpportunity(destination.id,destination.tab);}else if(destination.type==="buddy"){localStorage.setItem("knox-buddy-conversation",destination.id||"legacy");setBuddyPaneOpen(true);}else if(destination.type==="intake"){setNewUrl("");setNewFile(null);setNewText("");setNewOpen(true);}else if(destination.type==="feedback")window.dispatchEvent(new Event("knox-feedback-inbox"));else navigate("settings", "career-buddy");}}/>}
+        {page === "buddy" && (
+          <BuddyWorkspace
+            onError={report}
+            onChanged={()=>void load(true)}
+            onNotice={setNotice}
+            initialPrompt={buddyInitialPrompt}
+            onInitialPromptConsumed={()=>setBuddyInitialPrompt("")}
+            focusedDocument={buddyFocusedDoc}
+            onClearFocusedDocument={()=>setBuddyFocusedDoc(null)}
+          />
+        )}
         {page === "library" && (
           <Library
             onError={report}
@@ -1985,6 +2221,15 @@ export default function App() {
             onRestart={() => void restartBoard()}
             restarting={restarting}
             timezone={settings?.timezone || "Europe/London"}
+            onOpenInStudio={(docId) => {
+              setStudioDocumentId(docId);
+              setStudioMode("document");
+              navigate("studio");
+            }}
+            onChatAboutDocument={(doc) => {
+              setBuddyFocusedDoc({ id: doc.id, name: doc.name });
+              setBuddyPaneOpen(true);
+            }}
           />
         )}
         {page === "studio" && (
@@ -1994,6 +2239,16 @@ export default function App() {
             onChanged={() => void load(true)}
             timezone={settings?.timezone || "Europe/London"}
             initialOpportunityId={studioOpportunityId}
+            initialDocumentId={studioDocumentId}
+            initialMode={studioMode}
+            onBackToCareerDocs={() => navigate("library")}
+            onChatAboutDocument={(doc) => {
+              setBuddyFocusedDoc({ id: doc.id, name: doc.name });
+              setBuddyPaneOpen(true);
+            }}
+            onActiveDocumentChange={(doc) => {
+              setBuddyFocusedDoc(doc ? { id: doc.id, name: doc.name } : null);
+            }}
           />
         )}
         {page === "settings" && settings && (
@@ -2034,7 +2289,7 @@ export default function App() {
             updated(op);
             setNewOpen(false);
             setNotice(
-              warning || "Opportunity added. Your next chapter is underway.",
+              warning || "Opportunity added.",
             );
           }}
         />
@@ -2048,9 +2303,10 @@ export default function App() {
           initialTab={initialOpportunityTab}
           timezone={settings?.timezone || "Europe/London"}
           onClose={() => setSelected(null)}
-          onDeleted={result=>{setSelected(null);void load(true);setNotice(`Opportunity deleted. Backup: ${result.backup.location}`);}}
+          onDeleted={() => void deleteOpportunity(selected.id)}
           onUpdate={updated}
           onError={report}
+          onNotice={setNotice}
           onReload={() => void openOpportunity(selected.id)}
           onConfigureBuddy={() => {
             setSelected(null);
@@ -2061,8 +2317,23 @@ export default function App() {
                 ?.scrollIntoView({ block: "start" }),
             );
           }}
-          onOpenStudio={(opId) => {
+          onOpenBuddy={(prompt) => {
+            if (prompt) setBuddyInitialPrompt(prompt);
+            setBuddyPaneOpen(true);
+          }}
+          onChatAboutDocument={(doc) => {
+            setBuddyFocusedDoc({ id: doc.id, name: doc.name });
+            setBuddyPaneOpen(true);
+          }}
+          onOpenStudio={(opId, docId) => {
             if (opId) setStudioOpportunityId(opId);
+            if (docId) {
+              setStudioDocumentId(docId);
+              setStudioMode("document");
+            } else {
+              setStudioDocumentId("");
+              setStudioMode("builder");
+            }
             setSelected(null);
             navigate("studio");
           }}
@@ -2080,6 +2351,31 @@ export default function App() {
           onNotice={(msg) => setNotice(msg)}
         />
       )}
+      <UnifiedCareerBuddyPane
+        open={buddyPaneOpen}
+        onToggleOpen={(next) => setBuddyPaneOpen(next !== undefined ? next : !buddyPaneOpen)}
+        activeOpportunity={selected}
+        onUpdateOpportunity={updated}
+        focusedDocument={buddyFocusedDoc}
+        onClearFocusedDocument={() => setBuddyFocusedDoc(null)}
+        activePageLabel={PAGE_LABELS[page]}
+        initialPrompt={buddyInitialPrompt}
+        onInitialPromptConsumed={() => setBuddyInitialPrompt("")}
+        timezone={settings?.timezone || "Europe/London"}
+        onChanged={() => void load(true)}
+        onError={report}
+        onNotice={setNotice}
+        onConfigure={() => {
+          setSelected(null);
+          setBuddyPaneOpen(false);
+          navigate("settings", "career-buddy");
+          requestAnimationFrame(() =>
+            document
+              .getElementById("career-buddy-settings")
+              ?.scrollIntoView({ block: "start" }),
+          );
+        }}
+      />
     </div>
   );
 }
@@ -2577,8 +2873,8 @@ function NewOpportunity({
   }
   return (
     <Modal
-      title="A new possibility."
-      subtitle="Start with a job link. Fetch its details, review them, and make it yours."
+      title="New Opportunity"
+      subtitle="Import a job listing from a URL, file, or text, then review and save the details."
       onClose={onClose}
     >
       <form onSubmit={submit}>
@@ -2805,8 +3101,11 @@ function OpportunityDetail({
   onClose,
   onUpdate,
   onError,
+  onNotice,
   onReload,
   onConfigureBuddy,
+  onOpenBuddy,
+  onChatAboutDocument,
   onOpenStudio,
   onDeleted,
 }: {
@@ -2818,17 +3117,53 @@ function OpportunityDetail({
   onClose: () => void;
   onUpdate: (o: Opportunity) => void;
   onError: (e: unknown) => void;
+  onNotice?: (s: string) => void;
   onReload: () => void;
   onConfigureBuddy: () => void;
-  onOpenStudio?: (opId?: string) => void;
-  onDeleted: (result: import("./components/WorkspaceAction").WorkspaceActionResult) => void;
+  onOpenBuddy?: (prompt?: string) => void;
+  onChatAboutDocument?: (doc: BoardDocument) => void;
+  onOpenStudio?: (opId?: string, docId?: string) => void;
+  onDeleted: () => Promise<void> | void;
 }) {
-  const [tab, setTab] = useState(initialTab),
+  const [tab, setTab] = useState(initialTab === "buddy" ? "overview" : initialTab),
     [busy, setBusy] = useState(false),
-    [localError, setLocalError] = useState("");
+    [deleting, setDeleting] = useState(false),
+    [localError, setLocalError] = useState(""),
+    [localNotice, setLocalNotice] = useState(""),
+    [openingFolder, setOpeningFolder] = useState(false);
+  const [buddyAvatar] = useBuddyAvatar();
+  const deletingRef = useRef(false);
   const latestOpportunityRef = useRef(o);
   latestOpportunityRef.current = o;
+
+  async function handleOpenOpportunityFolder() {
+    if (openingFolder) return;
+    setOpeningFolder(true);
+    setLocalNotice("");
+    try {
+      const res = await api<{
+        ok: boolean;
+        opened?: boolean;
+        openedOnHost?: boolean;
+        folderPath?: string;
+        message: string;
+      }>(`/opportunities/${encodeURIComponent(o.id)}/open-folder`, { method: "POST" });
+      const wasOpened = Boolean(res.opened ?? res.openedOnHost);
+      let feedback = res.message || "";
+      if (!wasOpened && res.folderPath && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(res.folderPath).catch(() => {});
+        feedback = `${res.message} (path copied to clipboard)`;
+      }
+      setLocalNotice(feedback);
+      onNotice?.(feedback);
+    } catch (e) {
+      setLocalError(displayError(e));
+    } finally {
+      setOpeningFolder(false);
+    }
+  }
   async function mutate(path: string, body: unknown, method = "POST") {
+    if (deletingRef.current) return false;
     setBusy(true);
     setLocalError("");
     try {
@@ -2845,28 +3180,92 @@ function OpportunityDetail({
       setBusy(false);
     }
   }
+  const currentStageIndex = STAGES.findIndex((s) => s.id === o.stage);
+  const nextStageObj =
+    currentStageIndex >= 0 && currentStageIndex < STAGES.length - 1
+      ? STAGES[currentStageIndex + 1]
+      : null;
+
+  async function assignStage(targetStage: StageId) {
+    if (targetStage === o.stage && !(targetStage === "outcome" && !o.outcome)) return;
+    const body: Record<string, unknown> = {
+      revision: latestOpportunityRef.current.revision,
+      stage: targetStage,
+      outcome:
+        targetStage === "outcome"
+          ? latestOpportunityRef.current.outcome || "closed"
+          : "",
+    };
+    await mutate(`/opportunities/${latestOpportunityRef.current.id}`, body, "PATCH");
+  }
+
   return (
     <Modal title={o.role} subtitle={o.company} wide onClose={onClose}>
       <div className="detail-context">
-        <Badge
-          kind={o.outcome === "hired" ? "green" : o.outcome ? "muted" : "green"}
-        >
-          {o.outcome
-            ? OUTCOMES.find((x) => x.id === o.outcome)?.label
-            : stageLabel(o.stage)}
-        </Badge>
+        <div className="detail-stage-controls">
+          <div className="detail-stage-select-wrap">
+            <span className={`stage-dot stage-dot-${o.stage}`} aria-hidden="true" />
+            <select
+              aria-label="Opportunity stage"
+              className="detail-stage-select"
+              value={o.stage}
+              disabled={busy}
+              onChange={(e) => void assignStage(e.target.value as StageId)}
+            >
+              {STAGES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} aria-hidden="true" />
+          </div>
+          {nextStageObj && (
+            <button
+              type="button"
+              className="button primary small detail-next-stage-btn"
+              disabled={busy}
+              onClick={() => void assignStage(nextStageObj.id)}
+              title={`Advance to ${nextStageObj.label}`}
+            >
+              <span>Next Stage</span>
+              <ArrowRight size={13} />
+            </button>
+          )}
+          {o.outcome && (
+            <Badge kind={o.outcome === "hired" ? "green" : "muted"}>
+              {OUTCOMES.find((x) => x.id === o.outcome)?.label || o.outcome}
+            </Badge>
+          )}
+        </div>
         <span>
           <Clock3 size={13} />
           Added {formatDate(o.createdAt, timezone)}
         </span>
-        {o.outputFolder && (
-          <span
-            title={`Dedicated folder: ${o.outputFolder}`}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+        {o.outputFolder ? (
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={busy || openingFolder}
+            onClick={() => void handleOpenOpportunityFolder()}
+            title={`Open dedicated folder: ${o.outputFolder}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", fontSize: 11 }}
           >
-            <Folder size={13} />
-            {o.outputFolder}
-          </span>
+            <FolderOpen size={13} />
+            {openingFolder ? "Opening…" : o.outputFolder}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={busy || openingFolder}
+            onClick={() => void handleOpenOpportunityFolder()}
+            title="Open local opportunity folder"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", fontSize: 11 }}
+          >
+            <FolderOpen size={13} />
+            {openingFolder ? "Opening…" : "Open local folder"}
+          </button>
         )}
         {o.url && (
           <a
@@ -2954,7 +3353,6 @@ function OpportunityDetail({
             ? [["offers", `Offers${o.offers?.length ? ` (${o.offers.length})` : ""}`]]
             : []),
           ["timeline", "Timeline & notes"],
-          ["buddy", "Career Buddy"],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -2972,7 +3370,37 @@ function OpportunityDetail({
             )}
           </button>
         ))}
+        {onOpenBuddy && (
+          <button
+            type="button"
+            className="detail-buddy-tab-btn"
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            onClick={() => onOpenBuddy()}
+            title="Open the Career Buddy right-hand panel with this opportunity's context"
+          >
+            <BuddyAvatar variant={buddyAvatar} size={16} />
+            <span>Career Buddy</span>
+          </button>
+        )}
       </div>
+      {localNotice && (
+        <div className="alert notice" role="status" style={{ margin: "12px 18px 0" }}>
+          <Check size={16} />
+          <span>{localNotice}</span>
+          <button
+            type="button"
+            className="button-link"
+            onClick={() => setLocalNotice("")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {localError && (
         <div className="alert error" role="alert">
           {localError}
@@ -3013,7 +3441,9 @@ function OpportunityDetail({
             busy={busy}
             mutate={mutate}
             onError={onError}
+            onNotice={onNotice}
             onAssessed={onUpdate}
+            onOpenBuddyWithPrompt={(prompt) => onOpenBuddy?.(prompt)}
           />
         )}{" "}
         {tab === "documents" && (
@@ -3024,9 +3454,9 @@ function OpportunityDetail({
                   type="button"
                   className="btn-ghost"
                   onClick={() => onOpenStudio(o.id)}
-                  title="Open Document Studio"
+                  title="Open Doc Studio"
                 >
-                  <FileText size={14} /> Open Document Studio
+                  <FileText size={14} /> Open Doc Studio
                 </button>
               </div>
             )}
@@ -3041,6 +3471,12 @@ function OpportunityDetail({
               opportunityId={o.id}
               timezone={timezone}
               onChanged={onReload}
+              onNotice={(msg) => {
+                setLocalNotice(msg);
+                onNotice?.(msg);
+              }}
+              onOpenInStudio={(docId) => onOpenStudio?.(o.id, docId)}
+              onChatAboutDocument={onChatAboutDocument}
               onError={(e) => {
                 setLocalError(displayError(e));
                 if (e instanceof ApiError && e.status === 401) onError(e);
@@ -3075,18 +3511,28 @@ function OpportunityDetail({
             mutate={mutate}
             onNavigateTab={(targetTab) => setTab(targetTab)}
           />
-        )}{" "}
-        {tab === "buddy" && (
-          <CareerBuddy
-            opportunity={o}
-            timezone={timezone}
-            onUpdate={onUpdate}
-            onError={onError}
-            onConfigure={onConfigureBuddy}
-          />
         )}
       </div>
-      <div className="opportunity-delete-action"><WorkspaceAction action="delete-opportunity" opportunityId={o.id} label="Delete opportunity" disabled={busy} onComplete={onDeleted}/></div>
+      <div className="opportunity-delete-action">
+        <button
+          type="button"
+          className="button secondary small danger-text"
+          disabled={busy || deleting}
+          onClick={async () => {
+            if (deletingRef.current) return;
+            deletingRef.current = true;
+            setDeleting(true);
+            try {
+              await onDeleted();
+            } finally {
+              setDeleting(false);
+            }
+          }}
+        >
+          <Trash2 size={14} />
+          {deleting ? "Deleting…" : "Delete opportunity"}
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -3242,6 +3688,30 @@ function Overview({
   }, [performSave]);
 
   useEffect(() => {
+    setForm((prev) => {
+      if (prev.stage === o.stage && prev.outcome === o.outcome) {
+        return prev;
+      }
+      const next = {
+        ...prev,
+        stage: o.stage,
+        outcome: o.outcome || "",
+        nextAction: o.nextAction || "",
+        nextActionDate: o.nextActionDate || "",
+      };
+      formRef.current = next;
+      lastSavedRef.current = {
+        ...lastSavedRef.current,
+        stage: o.stage,
+        outcome: o.outcome || "",
+        nextAction: o.nextAction || "",
+        nextActionDate: o.nextActionDate || "",
+      };
+      return next;
+    });
+  }, [o.stage, o.outcome, o.nextAction, o.nextActionDate]);
+
+  useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
@@ -3383,9 +3853,9 @@ function Overview({
         </div>
       )}
       <div className="section-intro">
-        <h3>Keep the details in one place.</h3>
+        <h3>Opportunity Details</h3>
         <p>
-          Changes are saved automatically. Stage changes are dated
+          Edit role details, stage, and key dates. Changes are saved
           automatically.
         </p>
       </div>
@@ -3752,9 +4222,9 @@ function Timeline({
     <>
       <div className="section-intro with-action">
         <div>
-          <h3>Every step, remembered.</h3>
+          <h3>Timeline &amp; Notes</h3>
           <p>
-            Stage changes, notes, and activity history.
+            View and record stage transitions, effective dates, and application notes.
           </p>
         </div>
         <button
@@ -4065,8 +4535,8 @@ function Activities({
     <>
       <div className="section-intro with-action">
         <div>
-          <h3>Keep the conversation moving.</h3>
-          <p>Add as many interviews and communications as you need.</p>
+          <h3>Interviews &amp; Communications</h3>
+          <p>Log interviews, recruiter calls, and messages for this opportunity.</p>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           {Boolean(o.activities?.some((a) => a.scheduledAt)) && (
@@ -4515,6 +4985,8 @@ function Documents({
   splitByPrepared = false,
   sourceFilter = "split",
   onPrepareDocument,
+  onOpenInStudio,
+  onChatAboutDocument,
   selectedTag = "",
   onSelectTag,
 }: {
@@ -4531,6 +5003,8 @@ function Documents({
   splitByPrepared?: boolean;
   sourceFilter?: "split" | "used" | "unused";
   onPrepareDocument?: (id: string, force: boolean) => Promise<void>;
+  onOpenInStudio?: (docId: string) => void;
+  onChatAboutDocument?: (doc: BoardDocument) => void;
   selectedTag?: string;
   onSelectTag?: (tag: string) => void;
 }) {
@@ -4559,7 +5033,16 @@ function Documents({
     [moveFolder, setMoveFolder] = useState(""),
     [moveError, setMoveError] = useState(""),
     [moving, setMoving] = useState(false),
-    [organizing, setOrganizing] = useState(false);
+    [organizing, setOrganizing] = useState(false),
+    [openingFolder, setOpeningFolder] = useState(false),
+    [exportGoogleDoc, setExportGoogleDoc] = useState<BoardDocument | null>(null),
+    [exportGoogleMode, setExportGoogleMode] = useState<"api" | "local" | null>(null),
+    [exportGoogleResult, setExportGoogleResult] = useState<{
+      mode: "api" | "local";
+      url?: string;
+      filePath?: string;
+      message: string;
+    } | null>(null);
   const [categoryFilter,setCategoryFilter]=useState(''),[uploadCategory,setUploadCategory]=useState(''),[bulkCategory,setBulkCategory]=useState(''),[categorising,setCategorising]=useState(false);
   const queue=useUploadQueue(opportunityId, options=>{setKind(options.automaticDefaults ? options.kind : "");setNotes(options.notes);setUploadCategory(options.automaticDefaults ? options.category : "");setBatchUploads(options.batchUploads);});
   const files=queue.files,uploadAbort=useRef<AbortController|null>(null);
@@ -4606,6 +5089,66 @@ function Documents({
       onError(e);
     } finally {
       setOrganizing(false);
+    }
+  }
+
+  const [folderNotice, setFolderNotice] = useState("");
+  async function handleOpenLocalFolder() {
+    if (openingFolder) return;
+    setOpeningFolder(true);
+    setFolderNotice("");
+    try {
+      const url = opportunityId
+        ? `/opportunities/${encodeURIComponent(opportunityId)}/open-folder`
+        : `/documents/open-folder`;
+      const res = await api<{
+        ok: boolean;
+        opened?: boolean;
+        openedOnHost?: boolean;
+        folderPath?: string;
+        message: string;
+      }>(url, { method: "POST" });
+      const wasOpened = Boolean(res.opened ?? res.openedOnHost);
+      let feedback = res.message || "";
+      if (!wasOpened && res.folderPath && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(res.folderPath).catch(() => {});
+        feedback = `${res.message} (path copied to clipboard)`;
+      }
+      setFolderNotice(feedback);
+      if (feedback) {
+        onNotice?.(feedback);
+      }
+    } catch (e) {
+      onError(e);
+    } finally {
+      setOpeningFolder(false);
+    }
+  }
+
+  const [syncingFolder, setSyncingFolder] = useState(false);
+  async function handleSyncLocalFolder() {
+    if (syncingFolder) return;
+    setSyncingFolder(true);
+    setFolderNotice("");
+    try {
+      const url = opportunityId
+        ? `/opportunities/${encodeURIComponent(opportunityId)}/sync-folder`
+        : `/documents/refresh`;
+      const res = await api<{
+        ok?: boolean;
+        added: number;
+        changed: number;
+        missing: number;
+        checked: number;
+      }>(url, { method: "POST" });
+      onChanged();
+      const msg = `Folder sync complete: ${res.added} new document${res.added === 1 ? "" : "s"} added, ${res.changed} updated.`;
+      setFolderNotice(msg);
+      onNotice?.(msg);
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSyncingFolder(false);
     }
   }
 
@@ -4774,22 +5317,76 @@ function Documents({
         : `${files.length} files queued (${Math.max(1, Math.round(files.reduce((sum, f) => sum + f.file.size, 0) / 1024))} KB total)`;
   return (
     <>
+      {/* Local Folder Management Banner */}
+      <div className="local-folder-sync-banner">
+        <div className="local-folder-info">
+          <Folder size={18} className="text-muted" />
+          <div>
+            <strong>
+              {opportunityId ? "Local Opportunity Folder" : "Local Career Docs Folder"}
+            </strong>
+            <p>
+              Documents are stored directly on your computer. You can add, rename, or remove files in Finder or File Explorer, then click <strong>Sync folder</strong> to update Opportunity Knox.
+            </p>
+            {folderNotice && (
+              <p className="local-folder-notice" role="status" style={{ marginTop: 6, fontSize: 12, color: "var(--accent)" }}>
+                {folderNotice}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="local-folder-actions">
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={busy || openingFolder}
+            onClick={() => void handleOpenLocalFolder()}
+            title="Open the folder on your local computer"
+          >
+            <FolderOpen size={15} />
+            {openingFolder ? "Opening…" : "Open local folder"}
+          </button>
+          <button
+            type="button"
+            className="button primary small"
+            disabled={busy || syncingFolder}
+            onClick={() => void handleSyncLocalFolder()}
+            title="Detect newly added, updated, or removed files in this folder"
+          >
+            <RefreshCw size={15} className={syncingFolder ? "spinning" : ""} />
+            {syncingFolder ? "Syncing…" : "Sync folder"}
+          </button>
+        </div>
+      </div>
+
       <details className="document-upload-expander" open={files.length>0||busy||undefined}>
-        <summary>Add documents{files.length?` · ${files.length} queued`:""}</summary>
+        <summary>Manual upload dropzone / queue{files.length?` · ${files.length} queued`:""}</summary>
       <div className="section-intro with-action">
         <div>
           <h3>
             {opportunityId
-              ? "The right documents, at every step."
-              : "Your experience is the starting point."}
+              ? "Opportunity Documents"
+              : "Upload Career Documents"}
           </h3>
           <p>
             {opportunityId
-              ? "Each upload creates a separate version. Submitted files stay preserved."
-              : "Drag and drop files or entire directories into your library. Career Buddy prepares PDF, DOCX, Google Workspace (.gdoc, .gsheet, .gslides) and text sources locally."}
+              ? "Manage tailored CVs, cover letters, and reference files for this role. Submitted files stay preserved."
+              : "Drag and drop files or folders into your Career Docs library. PDF, DOCX, Google Workspace (.gdoc, .gsheet, .gslides), and text sources are prepared locally."}
           </p>
         </div>
         <div className="section-actions">
+          {opportunityId && (
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={busy || openingFolder}
+              onClick={() => void handleOpenLocalFolder()}
+              title="Open the local folder where this opportunity's documents and applications are saved."
+            >
+              <Folder size={15} />
+              {openingFolder ? "Opening…" : "Open local folder"}
+            </button>
+          )}
           {opportunityId && allDocuments.length > 0 && (
             <button
               type="button"
@@ -5007,7 +5604,7 @@ function Documents({
               ? "Move library file"
               : `Move ${moveDocuments.length} library files`
           }
-          subtitle="Choose a folder within your configured Career Hub location."
+          subtitle="Choose a folder within your configured Career Docs location."
           onClose={() => {
             if (!moving) setMoveDocuments(null);
           }}
@@ -5254,14 +5851,26 @@ function Documents({
                             )}
                             <DocumentThumbnail key={`${doc.id}:${doc.revision}`} id={doc.id} name={doc.name} revision={doc.revision} className="document-row-thumbnail"/>
                             <div className="document-name">
-                              <a
-                                href={
-                                  doc.url || `/api/documents/${doc.id}/content`
-                                }
-                                download
-                              >
-                                {displayName}
-                              </a>
+                              {onOpenInStudio ? (
+                                <button
+                                  type="button"
+                                  className="table-link"
+                                  style={{ textAlign: "left", padding: 0, fontWeight: 600, fontSize: "inherit", cursor: "pointer" }}
+                                  onClick={() => onOpenInStudio(doc.id)}
+                                  title={`Open ${displayName} in Doc Studio`}
+                                >
+                                  {displayName}
+                                </button>
+                              ) : (
+                                <a
+                                  href={
+                                    doc.url || `/api/documents/${doc.id}/content`
+                                  }
+                                  download
+                                >
+                                  {displayName}
+                                </a>
+                              )}
                               <small>
                                 {doc.kind} · v{doc.version} ·{" "}
                                 {Math.max(1, Math.round(doc.size / 1024))} KB ·{" "}
@@ -5489,6 +6098,42 @@ function Documents({
                                 onClick={() => startMove([doc])}
                               >
                                 <FolderInput size={17} />
+                              </button>
+                            )}
+                            {onOpenInStudio && (
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={`Open ${doc.name} in Doc Studio`}
+                                title="Open in Doc Studio"
+                                onClick={() => onOpenInStudio(doc.id)}
+                              >
+                                <FileText size={17} />
+                              </button>
+                            )}
+                            {onChatAboutDocument && (
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={`Chat about ${doc.name} with Career Buddy`}
+                                title="Chat about this document with Career Buddy"
+                                onClick={() => onChatAboutDocument(doc)}
+                              >
+                                <Sparkles size={17} />
+                              </button>
+                            )}
+                            {/\.(docx|dotx|md|markdown|txt)$/i.test(doc.name) && (
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label={`Export ${doc.name} to Google Docs`}
+                                title="Export to Google Docs (Direct API or Local Copy)"
+                                onClick={() => {
+                                  setExportGoogleResult(null);
+                                  setExportGoogleDoc(doc);
+                                }}
+                              >
+                                <Cloud size={17} />
                               </button>
                             )}
                             {(doc.originalUrl || doc.externalSource?.url) && (
@@ -5736,6 +6381,221 @@ function Documents({
         <p className="quiet-empty">
           No documents yet. Add one above to keep everything together.
         </p>
+      )}
+      {exportGoogleDoc && (
+        <Modal
+          title="Export to Google Docs"
+          subtitle={`Export "${exportGoogleDoc.name.split("/").pop() || exportGoogleDoc.name}" via Direct Google Drive API or Local Copy.`}
+          onClose={() => {
+            if (!exportGoogleMode) setExportGoogleDoc(null);
+          }}
+        >
+          {exportGoogleResult && (
+            <div
+              className="alert"
+              style={{
+                background: "var(--panel-soft)",
+                border: "1px solid var(--green, #10b981)",
+                borderRadius: 10,
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                marginBottom: 14,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--green, #10b981)" }}>
+                <Check size={16} />
+                <span>{exportGoogleResult.message}</span>
+              </div>
+              {exportGoogleResult.url && (
+                <div>
+                  <a
+                    href={exportGoogleResult.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button primary small"
+                  >
+                    <ExternalLink size={14} /> Open in Google Docs
+                  </a>
+                </div>
+              )}
+              {exportGoogleResult.filePath && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                  <div>
+                    Saved to: <code>{exportGoogleResult.filePath}</code>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(exportGoogleResult.filePath || "");
+                        onNotice?.("Copied local file path to clipboard.");
+                      }}
+                    >
+                      <Copy size={13} /> Copy file path
+                    </button>
+                    <a
+                      href="https://drive.google.com/drive/my-drive"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button secondary small"
+                    >
+                      <ExternalLink size={13} /> Open Google Drive
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+            <div
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                padding: 16,
+                background: "var(--panel-soft)",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 6 }}>
+                  <Cloud size={17} />
+                  <span>Direct Google Drive API</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                  Uploads the formatted Word document directly to Google Drive and converts it into a native, editable Google Doc.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="button primary"
+                disabled={Boolean(exportGoogleMode)}
+                onClick={async () => {
+                  setExportGoogleMode("api");
+                  setExportGoogleResult(null);
+                  try {
+                    const res = await api<{
+                      mode: "api" | "local";
+                      url?: string;
+                      message: string;
+                    }>(
+                      "/document-studio/google/export",
+                      json({ documentId: exportGoogleDoc.id, mode: "api" }),
+                    );
+                    setExportGoogleResult(res);
+                    onChanged();
+                    onNotice?.(res.message);
+                  } catch (e) {
+                    onError(e);
+                  } finally {
+                    setExportGoogleMode(null);
+                  }
+                }}
+              >
+                {exportGoogleMode === "api" ? (
+                  <Busy text="Uploading…" />
+                ) : (
+                  <>
+                    <Cloud size={15} /> Upload &amp; Convert to Google Doc
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                padding: 16,
+                background: "var(--panel-soft)",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 6 }}>
+                  <Folder size={17} />
+                  <span>Local Copy (Sync / Upload)</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                  Saves a formatted <code>.docx</code> copy to your configured applications &amp; exports folder (for Google Drive Desktop sync) or downloads it directly.
+                </p>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={Boolean(exportGoogleMode)}
+                  onClick={async () => {
+                    setExportGoogleMode("local");
+                    setExportGoogleResult(null);
+                    try {
+                      const res = await api<{
+                        mode: "api" | "local";
+                        filePath?: string;
+                        message: string;
+                      }>(
+                        "/document-studio/google/export",
+                        json({ documentId: exportGoogleDoc.id, mode: "local" }),
+                      );
+                      setExportGoogleResult(res);
+                      onNotice?.(res.message);
+                    } catch (e) {
+                      onError(e);
+                    } finally {
+                      setExportGoogleMode(null);
+                    }
+                  }}
+                >
+                  {exportGoogleMode === "local" ? (
+                    <Busy text="Saving copy…" />
+                  ) : (
+                    <>
+                      <FolderPlus size={15} /> Save to Local Export Folder
+                    </>
+                  )}
+                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <a
+                    href={exportGoogleDoc.url || `/api/documents/${exportGoogleDoc.id}/content`}
+                    download
+                    className="button secondary small"
+                    style={{ flex: 1, justifyContent: "center" }}
+                  >
+                    <ArrowDownToLine size={14} /> Download .docx
+                  </a>
+                  <a
+                    href="https://docs.new"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button secondary small"
+                    style={{ flex: 1, justifyContent: "center" }}
+                  >
+                    <ExternalLink size={14} /> Open docs.new
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="form-actions" style={{ marginTop: 14 }}>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={Boolean(exportGoogleMode)}
+              onClick={() => setExportGoogleDoc(null)}
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );
@@ -6016,7 +6876,7 @@ function ObsidianVaultPanel({
                 className="button secondary small"
                 disabled={Boolean(busy) || totalDocs === 0 || Boolean(obsidian?.readOnly)}
                 onClick={() => void handleImportToVault()}
-                title="Export existing Career Hub sources into your Obsidian vault"
+                title="Export existing Career Docs sources into your Obsidian vault"
               >
                 {busy === "export" ? (
                   <LoaderCircle size={14} className="spin" />
@@ -6240,7 +7100,7 @@ function ObsidianVaultPanel({
                   onChange={(e) => setImportExisting(e.target.checked)}
                 />
                 <span>
-                  Import existing Career Hub sources into this vault right
+                  Import existing Career Docs sources into this vault right
                   away ({totalDocs} document{totalDocs === 1 ? "" : "s"})
                 </span>
               </label>
@@ -6299,6 +7159,8 @@ function Library({
   onRestart,
   restarting,
   timezone,
+  onOpenInStudio,
+  onChatAboutDocument,
 }: {
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
@@ -6306,6 +7168,8 @@ function Library({
   onRestart?: () => void;
   restarting?: boolean;
   timezone: string;
+  onOpenInStudio?: (docId: string) => void;
+  onChatAboutDocument?: (doc: BoardDocument) => void;
 }) {
   const [extraction, setExtraction] = useState<
       Record<string, BuddySource["extraction"]>
@@ -6362,11 +7226,17 @@ function Library({
             force,
           }),
         );
+      try {
+        await api("/buddy/vector-index", json({ force, documentIds: docs.map((doc) => doc.id) }));
+      } catch {
+        // Vector index is displayed below
+      }
+      setConnectionRevision((v) => v + 1);
       await load();
       onNotice(
         force
-          ? "Library text reset and re-prepared."
-          : "Library text prepared for Career Buddy.",
+          ? "Library text and semantic search index reset and re-prepared."
+          : "Library text and semantic search index prepared.",
       );
     } catch (error) {
       onError(error);
@@ -6452,23 +7322,33 @@ function Library({
     >
       <div className="page-heading">
         <div>
-          <div className="eyebrow">BUILT ON YOUR EXPERIENCE</div>
+          <div className="eyebrow">CAREER EVIDENCE &amp; MASTER DOCUMENTS</div>
           <h1>
-            Career Hub<span className="heading-dot">.</span>
+            Career Docs<span className="heading-dot">.</span>
           </h1>
           <p>
-            Bring your career material together. Give Career Buddy the evidence
-            for your next application.
+            Manage master CVs, past job descriptions, project notes, and career evidence.
           </p>
         </div>
         <Badge kind="green">
           {docs.length} document{docs.length === 1 ? "" : "s"}
         </Badge>
       </div>
-      <WorkspaceSections label="Career Hub sections" sections={[
+      <WorkspaceSections label="Career Docs sections" sections={[
         { id: "documents", label: "Documents", content: <>
-      <CareerFileManager documents={docs} onChanged={()=>void load()} onError={onError} onNotice={onNotice}/>
-      <details><summary>Upload files & advanced library tools</summary>
+      <div className="career-docs-studio-note">
+        <FileText size={15} />
+        <span>Click on any document to open and edit it in Doc Studio.</span>
+      </div>
+      <CareerFileManager
+        documents={docs}
+        onChanged={()=>void load()}
+        onError={onError}
+        onNotice={onNotice}
+        onOpenInStudio={onOpenInStudio}
+        onChatAboutDocument={onChatAboutDocument}
+      />
+      <details><summary>Upload files &amp; advanced library tools</summary>
       <div className="content-panel">
         <div className="library-browse-bar">
           <div className="search-input library-search">
@@ -6749,6 +7629,8 @@ function Library({
             splitByPrepared={true}
             sourceFilter={sourceFilter}
             onPrepareDocument={prepareSingleDocument}
+            onOpenInStudio={onOpenInStudio}
+            onChatAboutDocument={onChatAboutDocument}
             selectedTag={selectedTag}
             onSelectTag={setSelectedTag}
             onChanged={() => void load()}
@@ -6766,16 +7648,15 @@ function Library({
       </div>
       </details>
         </> },
-        { id: "preparation", label: "Text preparation", content: <>
+        { id: "preparation", label: "Indexing & search", aliases: ["search"], content: <>
       <div className="library-intro-panel">
         <div>
           <FolderOpen size={24} />
-          <h2>Your career, in its own words.</h2>
+          <h2>Document Preparation &amp; Semantic Indexing</h2>
           <p>
-            Drop in CVs, old job descriptions, project notes, achievements,
-            certificates, interview notes, articles, or entire folders of
-            career-related evidence. This is your source library; you can select
-            what Career Buddy reads for each conversation.
+            Extract readable text and build semantic search vectors from your CVs,
+            job descriptions, project notes, and career evidence so they can be
+            searched and used by Career Buddy.
           </p>
         </div>
         <div className="library-index-state">
@@ -6783,13 +7664,11 @@ function Library({
             <Check size={12} />
             Stored originals
           </span>
-          <span className="badge muted">Local text preparation</span>
+          <span className="badge muted">Local text preparation &amp; search</span>
           <p>
             PDF, DOCX, PPTX, HTML, RTF, captions (.vtt/.srt), and text files can
-            be prepared locally as text chunks. Career Buddy selects excerpts by
-            matching words and, for indexed sources, meaning. Select sources for semantic indexing below. Selected
-            excerpts are sent only when you message Career Buddy. Scanned PDFs
-            need OCR first; originals stay unchanged.
+            be prepared locally as text chunks and indexed for semantic search. Career Buddy selects excerpts by
+            matching words and, for indexed sources, meaning.
           </p>
         </div>
       </div>
@@ -6802,7 +7681,7 @@ function Library({
         <div className="library-tool-actions">
           <button
             type="button"
-            className="button secondary small"
+            className="button primary small"
             disabled={preparing || resetting || clearing || !docs.length}
             onClick={() => void prepare(false)}
           >
@@ -6811,17 +7690,17 @@ function Library({
             ) : (
               <Sparkles size={15} />
             )}{" "}
-            {preparing ? "Preparing text…" : "Prepare library text"}
+            {preparing ? "Preparing & indexing…" : "Prepare & index documents"}
           </button>
           <button
             type="button"
             className="button secondary small"
             disabled={preparing || resetting || clearing || !docs.length}
             onClick={() => void prepare(true)}
-            title="Clear cached text chunks and re-prepare all library documents from scratch"
+            title="Clear cached text chunks and re-prepare and index all library documents from scratch"
           >
             <RotateCw size={15} className={preparing ? "spin" : ""} />
-            Reset &amp; re-prepare
+            Reset &amp; re-index all
           </button>
           {docs.some((doc) => extraction[doc.id]?.status === "ready") && (
             <button
@@ -6876,11 +7755,7 @@ function Library({
             ))}
         </div>
       </div>
-
-        </> },
-        { id: "search", label: "Semantic search", content: <>
       <VectorIndex onError={onError} refreshKey={connectionRevision} />
-
         </> },
         { id: "connections", label: "Connections", aliases: ["obsidian"], content: <>
       <DocumentConnections onError={onError} onChanged={()=>{setConnectionRevision(v=>v+1);void load();}} onRestart={onRestart} restarting={restarting} />

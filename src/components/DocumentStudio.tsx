@@ -33,11 +33,13 @@ import {
   CloudOff,
   BookOpen,
   AlertTriangle,
+  Sliders,
 } from "lucide-react";
 import { api, json, ApiError } from "../api";
 import type { BoardDocument, Opportunity } from "../types";
 import categories, {libraryCategory} from "../lib/document-categories";
 import MarkdownViewer from "./MarkdownViewer";
+import TemplateBuilder from "./TemplateBuilder";
 
 type ConnectedSources = {
   obsidian: {
@@ -52,7 +54,9 @@ type ConnectedSources = {
   google: {
     configured: boolean;
     connected: boolean;
+    canExport?: boolean;
     clientId: string;
+    localExportPath?: string;
   };
 };
 
@@ -144,6 +148,10 @@ export default function DocumentStudio({
   timezone = "Europe/London",
   initialDocumentId,
   initialOpportunityId,
+  initialMode,
+  onBackToCareerDocs,
+  onChatAboutDocument,
+  onActiveDocumentChange,
 }: {
   onError: (e: unknown) => void;
   onNotice?: (s: string) => void;
@@ -151,6 +159,10 @@ export default function DocumentStudio({
   timezone?: string;
   initialDocumentId?: string;
   initialOpportunityId?: string;
+  initialMode?: "builder" | "document";
+  onBackToCareerDocs?: () => void;
+  onChatAboutDocument?: (doc: BoardDocument) => void;
+  onActiveDocumentChange?: (doc: BoardDocument | null) => void;
 }) {
   const [docs, setDocs] = useState<BoardDocument[]>([]);
   const [defaults, setDefaults] = useState<StudioDefaults>({
@@ -164,6 +176,7 @@ export default function DocumentStudio({
   const [filetypeFilter, setFiletypeFilter] = useState<FileTypeFilter>("all");
   const [groupByFolder, setGroupByFolder] = useState(true);
   const [selectedDocId, setSelectedDocId] = useState<string>(() => {
+    if (initialMode === "builder") return "";
     return initialDocumentId || localStorage.getItem("knox-studio-selected") || "";
   });
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
@@ -216,6 +229,23 @@ export default function DocumentStudio({
 
   // Template creation & History state (Phase 3)
   const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [isBuildingTemplate, setIsBuildingTemplate] = useState<boolean>(() => {
+    if (initialMode === "builder") return true;
+    if (initialDocumentId) return false;
+    return initialMode !== "document";
+  });
+  const [editingTemplateDef, setEditingTemplateDef] = useState<any>(null);
+
+  useEffect(() => {
+    if (initialMode === "builder") {
+      setIsBuildingTemplate(true);
+      setEditingTemplateDef(null);
+    } else if (initialDocumentId) {
+      setIsBuildingTemplate(false);
+      setSelectedDocId(initialDocumentId);
+    }
+  }, [initialMode, initialDocumentId]);
+
   const [showHistory, setShowHistory] = useState(false);
   const [historyDocs, setHistoryDocs] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -238,6 +268,15 @@ export default function DocumentStudio({
   // Connected Documents state (Phase 4)
   const [connections, setConnections] = useState<ConnectedSources | null>(null);
   const [exportingObsidian, setExportingObsidian] = useState(false);
+  const [exportingGoogleTarget, setExportingGoogleTarget] = useState<BoardDocument | null>(null);
+  const [exportingGoogleMode, setExportingGoogleMode] = useState<"api" | "local" | null>(null);
+  const [exportGoogleResult, setExportGoogleResult] = useState<{
+    mode: "api" | "local";
+    url?: string;
+    filePath?: string;
+    relPath?: string;
+    message: string;
+  } | null>(null);
   const [showDriveSearch, setShowDriveSearch] = useState(false);
   const [driveQuery, setDriveQuery] = useState("");
   const [driveFiles, setDriveFiles] = useState<
@@ -285,6 +324,43 @@ export default function DocumentStudio({
       onError(err);
     } finally {
       setExportingObsidian(false);
+    }
+  }
+
+  async function handleExportToGoogleDocs(doc: BoardDocument, mode: "api" | "local") {
+    setExportingGoogleMode(mode);
+    setExportGoogleResult(null);
+    try {
+      const res = await api<{
+        ok: boolean;
+        mode: "api" | "local";
+        url?: string;
+        filePath?: string;
+        relPath?: string;
+        document?: BoardDocument;
+        message: string;
+      }>(
+        "/document-studio/google/export",
+        json({ documentId: doc.id, mode })
+      );
+      await loadData(true);
+      if (res.document) {
+        setExportingGoogleTarget(res.document);
+      }
+      setExportGoogleResult({
+        mode: res.mode,
+        url: res.url,
+        filePath: res.filePath,
+        relPath: res.relPath,
+        message: res.message,
+      });
+      setDriveNotice(res.message);
+      setTimeout(() => setDriveNotice(null), 5000);
+      onNotice?.(res.message);
+    } catch (err: any) {
+      onError(err);
+    } finally {
+      setExportingGoogleMode(null);
     }
   }
 
@@ -468,6 +544,10 @@ export default function DocumentStudio({
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        if (exportingGoogleTarget && !exportingGoogleMode) {
+          setExportingGoogleTarget(null);
+          return;
+        }
         if (driveConflict) {
           setDriveConflict(null);
           return;
@@ -779,10 +859,20 @@ export default function DocumentStudio({
     }
   }, [selectedDocId]);
 
+  useEffect(() => {
+    if (initialDocumentId) {
+      setSelectedDocId(initialDocumentId);
+    }
+  }, [initialDocumentId]);
+
   const selectedDoc = useMemo(
     () => docs.find((d) => d.id === selectedDocId) || null,
     [docs, selectedDocId],
   );
+
+  useEffect(() => {
+    onActiveDocumentChange?.(selectedDoc);
+  }, [selectedDoc?.id, selectedDoc?.name]);
 
   // If initial selection was cleared or not in docs, pick default master CV or first doc
   useEffect(() => {
@@ -1192,19 +1282,90 @@ export default function DocumentStudio({
   const defaultCvTplDoc = docs.find((d) => d.id === defaults.cvTemplateId);
   const defaultCoverTplDoc = docs.find((d) => d.id === defaults.coverLetterTemplateId);
 
+  if (isBuildingTemplate) {
+    return (
+      <TemplateBuilder
+        initialTemplate={editingTemplateDef}
+        onClose={() => {
+          setIsBuildingTemplate(false);
+          setEditingTemplateDef(null);
+        }}
+        onSaved={(doc) => {
+          setIsBuildingTemplate(false);
+          setEditingTemplateDef(null);
+          onChanged?.();
+          void loadData(true);
+          if (doc?.id) setSelectedDocId(doc.id);
+        }}
+        onError={onError}
+        onNotice={onNotice}
+      />
+    );
+  }
+
   return (
     <div className="document-studio-container" onClick={() => setOpenMenuId(null)}>
       {/* Workspace Header */}
       <div className="workspace-header">
         <div>
-          <h1>
-            Document Studio<span className="heading-dot">.</span>
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => {
+                if (onBackToCareerDocs) onBackToCareerDocs();
+                else window.location.hash = "#/library";
+              }}
+            >
+              <ArrowLeft size={14} /> Back to Career Docs
+            </button>
+          </div>
+          <h1>Doc Studio</h1>
           <p>
-            One workspace to organise CVs and cover letters, maintain templates, preview every page, and export documents.
+            Preview pages, adjust formatting, derive templates, and export the active document.
           </p>
         </div>
-        <div className="studio-header-actions">
+        <div className="studio-header-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {docs.length > 0 && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+              <span className="text-muted">Active doc:</span>
+              <select
+                aria-label="Active document in Doc Studio"
+                value={selectedDocId}
+                onChange={(e) => setSelectedDocId(e.target.value)}
+                style={{ maxWidth: 280 }}
+              >
+                {docs.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {cleanDocName(d.name)} ({getCategoryLabel(d.category)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {selectedDoc && onChatAboutDocument && (
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => onChatAboutDocument(selectedDoc)}
+              title="Open Career Buddy with this document in context"
+            >
+              <MessageSquare size={16} />
+              Chat with Career Buddy
+            </button>
+          )}
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => {
+              setEditingTemplateDef(null);
+              setIsBuildingTemplate(true);
+            }}
+            title="Create or edit a visual template with customizable columns, fonts, and colors"
+          >
+            <Sliders size={15} />
+            Template Builder
+          </button>
           <button
             type="button"
             className="button primary studio-generate-header-btn"
@@ -1218,86 +1379,8 @@ export default function DocumentStudio({
             <Sparkles size={16} />
             Generate
           </button>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() => {
-              setUploadRole("master-cv");
-              setShowUpload(true);
-            }}
-          >
-            <Upload size={16} />
-            Upload
-          </button>
-          {connections?.google.connected && (
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => void handleOpenDriveSearch()}
-              title="Browse and import documents from Google Drive"
-            >
-              <Cloud size={16} />
-              Google Drive
-            </button>
-          )}
         </div>
       </div>
-
-      {/* Connected Sources Status Bar (Phase 4) */}
-      {connections && (connections.obsidian.enabled || connections.google.connected) && (
-        <div className="studio-connections-bar">
-          <div className="studio-connections-items">
-            {connections.obsidian.enabled && (
-              <div className="studio-conn-chip">
-                <BookOpen size={14} className="text-accent" />
-                <span className="studio-conn-label">{connections.obsidian.vaultName}</span>
-                <span className="studio-conn-status">
-                  {connections.obsidian.readOnly ? "(Read-only)" : "(Writable)"}
-                  {connections.obsidian.lastSyncedAt
-                    ? ` • Synced ${new Date(connections.obsidian.lastSyncedAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
-                    : ""}
-                </span>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => { window.location.hash = "/library?section=connections"; }}
-                  title="Review new Obsidian Inbox files in Career Hub"
-                >
-                  <RefreshCw size={12} />
-                  Review Obsidian Inbox
-                </button>
-              </div>
-            )}
-            {connections.google.connected ? (
-              <div className="studio-conn-chip">
-                <Cloud size={14} className="text-green" />
-                <span className="studio-conn-label">Google Drive</span>
-                <span className="studio-conn-status">Connected</span>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => void handleOpenDriveSearch()}
-                  title="Import from Google Drive"
-                >
-                  <Download size={12} />
-                  Import from Drive
-                </button>
-              </div>
-            ) : connections.google.configured ? (
-              <div className="studio-conn-chip">
-                <CloudOff size={14} className="text-muted" />
-                <span className="studio-conn-label">Google Drive</span>
-                <span className="studio-conn-status">Disconnected</span>
-              </div>
-            ) : null}
-          </div>
-          {driveNotice && (
-            <span className="studio-conn-status font-medium" style={{ color: "var(--accent)" }}>
-              {driveNotice}
-            </span>
-          )}
-        </div>
-      )}
 
       {/* Defaults bar */}
       <div className="studio-defaults-bar">
@@ -1309,7 +1392,7 @@ export default function DocumentStudio({
               type="button"
               className="studio-chip-value"
               onClick={() => setSelectedDocId(defaultMasterDoc.id)}
-              title="Click to view default master CV"
+              title="Click to open default master CV"
             >
               {cleanDocName(defaultMasterDoc.name)}
             </button>
@@ -1326,7 +1409,7 @@ export default function DocumentStudio({
               type="button"
               className="studio-chip-value"
               onClick={() => setSelectedDocId(defaultCvTplDoc.id)}
-              title="Click to view default CV template"
+              title="Click to open default CV template"
             >
               {cleanDocName(defaultCvTplDoc.name)}
             </button>
@@ -1343,7 +1426,7 @@ export default function DocumentStudio({
               type="button"
               className="studio-chip-value"
               onClick={() => setSelectedDocId(defaultCoverTplDoc.id)}
-              title="Click to view default cover letter template"
+              title="Click to open default cover letter template"
             >
               {cleanDocName(defaultCoverTplDoc.name)}
             </button>
@@ -1353,432 +1436,14 @@ export default function DocumentStudio({
         </div>
       </div>
 
-      {/* Main Split Workspace */}
-      <div className={`studio-split-view ${showMobilePreview ? "mobile-show-preview" : ""}`}>
-        {/* Left Pane: List & Filters */}
-        <div className="studio-list-pane">
-          {/* Controls Bar */}
-          <div className="library-browse-bar">
-            <div className="search-input library-search">
-              <Search size={15} />
-              <input
-                type="text"
-                aria-label="Search studio documents"
-                placeholder="Find a CV, cover letter, template, or folder…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="library-view-toggle" role="group" aria-label="Filter documents">
-              <button
-                type="button"
-                className={filter === "all" ? "active" : ""}
-                onClick={() => setFilter("all")}
-              >
-                All ({docs.length})
-              </button>
-              <button
-                type="button"
-                className={filter === "master-cv" ? "active" : ""}
-                onClick={() => setFilter("master-cv")}
-              >
-                Master CVs ({docs.filter((d) => d.category === "master-cv").length})
-              </button>
-              <button
-                type="button"
-                className={filter === "templates" ? "active" : ""}
-                onClick={() => setFilter("templates")}
-              >
-                Templates (
-                {
-                  docs.filter(
-                    (d) =>
-                      ["template", "cv-template", "cover-letter-template"].includes(d.category || "") ||
-                      /\btemplate\b/i.test(d.name)
-                  ).length
-                }
-                )
-              </button>
-              <button
-                type="button"
-                className={filter === "generated" ? "active" : ""}
-                onClick={() => setFilter("generated")}
-              >
-                Generated (
-                {
-                  docs.filter(
-                    (d) =>
-                      ["tailored-cv", "cover-letter"].includes(d.category || "") ||
-                      Boolean(d.opportunityId) ||
-                      d.status === "draft"
-                  ).length
-                }
-                )
-              </button>
-            </div>
-
-            <div className="studio-format-filter">
-              <Filter size={13} className="text-muted" />
-              <select
-                aria-label="Filter by file format"
-                value={filetypeFilter}
-                onChange={(e) => setFiletypeFilter(e.target.value as FileTypeFilter)}
-                className="studio-format-select"
-              >
-                <option value="all">All formats ({docs.length})</option>
-                <option value="docx">
-                  Word ({docs.filter((d) => /\.(docx|dotx|doc)$/i.test(d.name)).length})
-                </option>
-                <option value="pdf">
-                  PDF ({docs.filter((d) => /\.pdf$/i.test(d.name)).length})
-                </option>
-                <option value="md">
-                  Markdown ({docs.filter((d) => /\.(md|markdown)$/i.test(d.name)).length})
-                </option>
-                <option value="txt">
-                  Text ({docs.filter((d) => /\.txt$/i.test(d.name)).length})
-                </option>
-                <option value="gdoc">
-                  Google Workspace ({docs.filter((d) => /\.(gdoc|gsheet|gslides)$/i.test(d.name)).length})
-                </option>
-              </select>
-            </div>
-
-            <button
-              type="button"
-              className={`button secondary small ${groupByFolder ? "active" : ""}`}
-              onClick={() => setGroupByFolder((v) => !v)}
-              title="Toggle folder grouping"
-            >
-              <Folder size={14} />
-              Folders
-            </button>
-          </div>
-
-          {/* Bulk toolbar if items checked */}
-          {checkedIds.length > 0 && (
-            <div className="studio-bulk-bar">
-              <span>{checkedIds.length} selected</span>
-              <div className="studio-bulk-buttons">
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => {
-                    const selected = docs.filter((d) => checkedIds.includes(d.id));
-                    setMoveTargetDocs(selected);
-                    setMoveFolderValue("");
-                  }}
-                >
-                  <Folder size={13} /> Move
-                </button>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => {
-                    const selected = docs.filter((d) => checkedIds.includes(d.id));
-                    setBulkCategoryTarget(selected);
-                  }}
-                >
-                  <Edit3 size={13} /> Assign Category
-                </button>
-                <button type="button" className="button danger small" onClick={handleBulkDelete}>
-                  <Trash2 size={13} /> Delete
-                </button>
-                <button type="button" className="button secondary small" onClick={() => setCheckedIds([])}>
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Document list */}
-          <div className="studio-doc-list">
-            {docs.length === 0 ? (
-              <div className="studio-empty-list studio-library-empty">
-                <FileText size={32} className="text-muted" />
-                <h3>Your document library is empty</h3>
-                <p>Upload a master CV or template to start creating and tailoring documents.</p>
-                <div className="studio-empty-actions">
-                  <button
-                    type="button"
-                    className="button primary small"
-                    onClick={() => {
-                      setUploadRole("master-cv");
-                      setShowUpload(true);
-                    }}
-                  >
-                    <Upload size={14} /> Upload Master CV
-                  </button>
-                  <button
-                    type="button"
-                    className="button secondary small"
-                    onClick={() => {
-                      setUploadRole("cv-template");
-                      setShowUpload(true);
-                    }}
-                  >
-                    <FileText size={14} /> Upload Template
-                  </button>
-                  {connections?.google.connected && (
-                    <button
-                      type="button"
-                      className="button secondary small"
-                      onClick={() => setShowDriveSearch(true)}
-                    >
-                      <ExternalLink size={14} /> Import from Drive
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : groupedDocs.length === 0 || (groupedDocs.length === 1 && groupedDocs[0][1].length === 0) ? (
-              <div className="studio-empty-list">
-                <FileQuestion size={28} className="text-muted" />
-                <p>No documents match this filter.</p>
-                <button
-                  type="button"
-                  className="button secondary small"
-                  onClick={() => {
-                    setFilter("all");
-                    setSearch("");
-                  }}
-                >
-                  Reset filters
-                </button>
-              </div>
-            ) : (
-              groupedDocs.map(([folderName, folderDocs]) => (
-                <div key={folderName || "__root__"} className="studio-folder-group">
-                  {groupByFolder && folderName && (
-                    <div className="studio-folder-header">
-                      <Folder size={14} />
-                      <span>{folderName}</span>
-                      <span className="studio-count">({folderDocs.length})</span>
-                    </div>
-                  )}
-
-                  {folderDocs.map((doc) => {
-                    const isSelected = doc.id === selectedDocId;
-                    const isDefaultMaster = doc.id === defaults.masterCvId;
-                    const isDefaultCvTpl = doc.id === defaults.cvTemplateId;
-                    const isDefaultCoverTpl = doc.id === defaults.coverLetterTemplateId;
-                    const isChecked = checkedIds.includes(doc.id);
-
-                    return (
-                      <div
-                        key={doc.id}
-                        className={`studio-doc-row ${isSelected ? "selected" : ""}`}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={isSelected}
-                        aria-label={`Select document ${cleanDocName(doc.name)}`}
-                        onClick={() => {
-                          setSelectedDocId(doc.id);
-                          setShowMobilePreview(true);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setSelectedDocId(doc.id);
-                            setShowMobilePreview(true);
-                          }
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            toggleCheck(doc.id);
-                          }}
-                          aria-label={`Select ${doc.name}`}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-
-                        <div className="studio-doc-icon">
-                          {/\.(docx|dotx)$/i.test(doc.name) ? (
-                            <FileText size={18} className="text-blue" />
-                          ) : /\.pdf$/i.test(doc.name) ? (
-                            <FileText size={18} className="text-red" />
-                          ) : /\.(gdoc|gsheet|gslides)$/i.test(doc.name) ? (
-                            <ExternalLink size={18} className="text-green" />
-                          ) : (
-                            <FileText size={18} className="text-muted" />
-                          )}
-                        </div>
-
-                        <div className="studio-doc-info">
-                          <div className="studio-doc-title">
-                            <span className="doc-name-text">{cleanDocName(doc.name)}</span>
-                            {isDefaultMaster && (
-                              <span className="studio-default-badge" title="Default Master CV">
-                                ★ Master
-                              </span>
-                            )}
-                            {isDefaultCvTpl && (
-                              <span className="studio-default-badge" title="Default CV Template">
-                                ★ CV Tpl
-                              </span>
-                            )}
-                            {isDefaultCoverTpl && (
-                              <span className="studio-default-badge" title="Default Cover Template">
-                                ★ Letter Tpl
-                              </span>
-                            )}
-                          </div>
-                          <div className="studio-doc-sub">
-                            <span className="badge badge-neutral studio-format-badge">
-                              {(doc.name.split(".").pop() || "").toUpperCase()}
-                            </span>
-                            <span className={`badge ${getCategoryBadgeClass(doc.category)}`}>
-                              {getCategoryLabel(doc.category)}
-                            </span>
-                            {doc.opportunityId && (
-                              <span className="badge badge-neutral">Linked to Opportunity</span>
-                            )}
-                            <span className="studio-doc-size">{formatBytes(doc.size)}</span>
-                          </div>
-                        </div>
-
-                        {/* Row overflow menu */}
-                        <div
-                          className="studio-row-actions"
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="icon-button"
-                            aria-label={`Actions for ${doc.name}`}
-                            onClick={() =>
-                              setOpenMenuId((prev) => (prev === doc.id ? null : doc.id))
-                            }
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-
-                          {openMenuId === doc.id && (
-                            <div className="studio-menu-dropdown">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  setRenameTarget(doc);
-                                  setRenameValue(
-                                    cleanDocName(doc.name).replace(/\.[a-zA-Z0-9]+$/, "")
-                                  );
-                                }}
-                              >
-                                <Edit3 size={13} /> Rename
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  void handleDuplicate(doc);
-                                }}
-                              >
-                                <Copy size={13} /> Duplicate
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  setMoveTargetDocs([doc]);
-                                  setMoveFolderValue(getDocFolder(doc.name));
-                                }}
-                              >
-                                <Folder size={13} /> Move
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  setBulkCategoryTarget([doc]);
-                                  setSelectedCategoryValue(libraryCategory(doc.category));
-                                }}
-                              >
-                                <Sparkles size={13} /> Change Category
-                              </button>
-                              {doc.category === "master-cv" && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    void updateDefault("masterCvId", doc.id);
-                                  }}
-                                >
-                                  <Star size={13} /> Set as Default Master CV
-                                </button>
-                              )}
-                              {(doc.category === "cv-template" || doc.category === "template") && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    void updateDefault("cvTemplateId", doc.id);
-                                  }}
-                                >
-                                  <Star size={13} /> Set as Default CV Template
-                                </button>
-                              )}
-                              {doc.category === "cover-letter-template" && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    void updateDefault("coverLetterTemplateId", doc.id);
-                                  }}
-                                >
-                                  <Star size={13} /> Set as Default Cover Template
-                                </button>
-                              )}
-                              <a
-                                href={`/api/documents/${doc.id}/content`}
-                                download={cleanDocName(doc.name)}
-                                className="dropdown-link"
-                                onClick={() => setOpenMenuId(null)}
-                              >
-                                <Download size={13} /> Download
-                              </a>
-                              {doc.status !== "submitted" && (
-                                <button
-                                  type="button"
-                                  className="text-danger"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    void handleDelete(doc);
-                                  }}
-                                >
-                                  <Trash2 size={13} /> Delete
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right Pane: Document Preview & Actions */}
-        <div className="studio-preview-pane">
+      {/* Single-Document Studio Workspace */}
+      <div className="studio-single-doc-view" style={{ display: "block" }}>
+        <div className="studio-preview-pane" style={{ width: "100%", borderLeft: "none" }}>
           {selectedDoc ? (
             <div className="studio-preview-content">
               {/* Preview Header */}
               <div className="studio-preview-header">
                 <div className="studio-preview-title-row">
-                  <button
-                    type="button"
-                    className="button secondary small studio-mobile-back"
-                    onClick={() => setShowMobilePreview(false)}
-                  >
-                    <ArrowLeft size={16} /> Back to list
-                  </button>
                   <h2>{cleanDocName(selectedDoc.name)}</h2>
                 </div>
 
@@ -1815,13 +1480,28 @@ export default function DocumentStudio({
                 <div className="studio-preview-actions-bar">
                   {(["template", "cv-template", "cover-letter-template"].includes(selectedDoc.category || "") ||
                     /\btemplate\b/i.test(selectedDoc.name)) && (
-                    <button
-                      type="button"
-                      className="button primary small studio-context-generate-btn"
-                      onClick={() => openGenerateWithTemplate(selectedDoc)}
-                    >
-                      <Sparkles size={14} /> Generate with template
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="button primary small studio-context-generate-btn"
+                        onClick={() => openGenerateWithTemplate(selectedDoc)}
+                      >
+                        <Sparkles size={14} /> Generate with template
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={() => {
+                          setEditingTemplateDef(selectedDoc.generation?.templateDef || {
+                            title: cleanDocName(selectedDoc.name).replace(/\.[^.]+$/, ""),
+                          });
+                          setIsBuildingTemplate(true);
+                        }}
+                        title="Edit layout, fonts, margins, or blocks in Template Builder"
+                      >
+                        <Sliders size={14} /> Edit in Template Builder
+                      </button>
+                    </>
                   )}
 
                   {selectedDoc.category === "master-cv" && (
@@ -1859,18 +1539,33 @@ export default function DocumentStudio({
                     Studio Assistant
                   </button>
 
-                  {/* Export to Obsidian (Phase 4) */}
-                  {connections?.obsidian.enabled && !connections.obsidian.readOnly && (
+                  {/* Export to Google Docs (Direct API + Local Copy) */}
+                  {/\.(docx|dotx|md|markdown|txt)$/i.test(selectedDoc.name) && (
                     <button
                       type="button"
                       className="button secondary small"
-                      disabled={exportingObsidian}
-                      onClick={() => void handleExportToObsidian(selectedDoc)}
-                      title="Export this document to the configured writable Obsidian vault folder"
+                      onClick={() => {
+                        setExportGoogleResult(null);
+                        setExportingGoogleTarget(selectedDoc);
+                      }}
+                      title="Export this document to Google Docs (via Direct Google Drive API or Local Copy)"
                     >
-                      {exportingObsidian ? <Loader2 size={14} className="spin" /> : <BookOpen size={14} />}
-                      Export to Obsidian
+                      <Cloud size={14} />
+                      Export to Google Docs
                     </button>
+                  )}
+
+                  {(selectedDoc.originalUrl || selectedDoc.externalSource?.url) && (
+                    <a
+                      href={selectedDoc.originalUrl || selectedDoc.externalSource?.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button secondary small"
+                      title="Open in Google Docs"
+                    >
+                      <ExternalLink size={14} />
+                      Open in Google Docs
+                    </a>
                   )}
 
                   {/* Refresh from Google Drive (Phase 4) */}
@@ -2237,17 +1932,17 @@ export default function DocumentStudio({
           ) : (
             <div className="studio-no-selection">
               <FileText size={48} className="text-muted" />
-              <h3>Select a document</h3>
-              <p>Choose any CV, cover letter, or template from the list to preview every page.</p>
+              <h3>No document selected</h3>
+              <p>Select a document in Career Docs to open and edit it in Doc Studio.</p>
               <button
                 type="button"
                 className="button primary"
                 onClick={() => {
-                  setUploadRole("master-cv");
-                  setShowUpload(true);
+                  if (onBackToCareerDocs) onBackToCareerDocs();
+                  else window.location.hash = "#/library";
                 }}
               >
-                <Upload size={16} /> Upload Master CV
+                <ArrowLeft size={16} /> Go to Career Docs
               </button>
             </div>
           )}
@@ -3093,6 +2788,268 @@ export default function DocumentStudio({
                 onClick={() => void handleRefreshFromDrive(driveConflict.document, "keep-local")}
               >
                 Keep Local Version (Ignore External Update)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export to Google Docs Modal (Direct API & Local Copy) */}
+      {exportingGoogleTarget && (
+        <div
+          className="modal-overlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !exportingGoogleMode) {
+              setExportingGoogleTarget(null);
+            }
+          }}
+        >
+          <div
+            className="modal studio-export-google-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Export to Google Docs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h2>Export to Google Docs</h2>
+                <p>
+                  Export <strong>{cleanDocName(exportingGoogleTarget.name)}</strong> via Direct Google Drive API or Local Copy.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close dialog"
+                disabled={Boolean(exportingGoogleMode)}
+                onClick={() => setExportingGoogleTarget(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {exportGoogleResult && (
+              <div
+                className="alert"
+                style={{
+                  background: "var(--panel-soft)",
+                  border: "1px solid var(--green, #10b981)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  marginBottom: 14,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--green, #10b981)" }}>
+                  <Check size={16} />
+                  <span>{exportGoogleResult.message}</span>
+                </div>
+                {exportGoogleResult.url && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <a
+                      href={exportGoogleResult.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button primary small"
+                    >
+                      <ExternalLink size={14} /> Open in Google Docs
+                    </a>
+                  </div>
+                )}
+                {exportGoogleResult.filePath && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                    <div>
+                      Saved to: <code>{exportGoogleResult.filePath}</code>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(exportGoogleResult.filePath || "");
+                          onNotice?.("Copied local file path to clipboard.");
+                        }}
+                      >
+                        <Copy size={13} /> Copy file path
+                      </button>
+                      <a
+                        href="https://drive.google.com/drive/my-drive"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="button secondary small"
+                      >
+                        <ExternalLink size={13} /> Open Google Drive
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="studio-export-options-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+              {/* Option 1: Direct Google Drive API */}
+              <div
+                className="studio-export-option-card"
+                style={{
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: 16,
+                  background: "var(--panel-soft)",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                      <Cloud size={17} className="text-accent" />
+                      <span>Direct Google Drive API</span>
+                    </div>
+                    <span className={`badge ${connections?.google.connected ? "badge-green" : "badge-neutral"}`}>
+                      {connections?.google.connected ? "Connected" : "Not connected"}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                    Uploads the formatted Word document directly to your Google Drive and automatically converts it into a native, editable Google Doc.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {(exportingGoogleTarget.originalUrl || exportingGoogleTarget.externalSource?.url) && (
+                    <a
+                      href={exportingGoogleTarget.originalUrl || exportingGoogleTarget.externalSource?.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button secondary small"
+                      style={{ justifyContent: "center" }}
+                    >
+                      <ExternalLink size={14} /> Open Existing Google Doc
+                    </a>
+                  )}
+                  {connections?.google.connected ? (
+                    <button
+                      type="button"
+                      className="button primary"
+                      disabled={Boolean(exportingGoogleMode)}
+                      onClick={() => void handleExportToGoogleDocs(exportingGoogleTarget, "api")}
+                      style={{ justifyContent: "center" }}
+                    >
+                      {exportingGoogleMode === "api" ? (
+                        <>
+                          <Loader2 size={15} className="spin" /> Uploading to Google Docs…
+                        </>
+                      ) : (
+                        <>
+                          <Cloud size={15} /> Upload &amp; Open in Google Docs
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => {
+                        setExportingGoogleTarget(null);
+                        window.location.hash = "/settings?section=connections";
+                      }}
+                      style={{ justifyContent: "center" }}
+                    >
+                      <Cloud size={15} /> Connect Google in Settings
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Option 2: Local Copy & Sync */}
+              <div
+                className="studio-export-option-card"
+                style={{
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: 16,
+                  background: "var(--panel-soft)",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                      <Folder size={17} className="text-amber" />
+                      <span>Local Copy (Sync / Upload)</span>
+                    </div>
+                    <span className="badge badge-blue">No API setup required</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                    Saves a formatted <code>.docx</code> copy to your configured applications &amp; exports folder (synced automatically if using Google Drive for Desktop) or downloads it directly.
+                  </p>
+                  {connections?.google.localExportPath && (
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                      Export folder: <code>{connections.google.localExportPath}</code>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={Boolean(exportingGoogleMode)}
+                    onClick={() => void handleExportToGoogleDocs(exportingGoogleTarget, "local")}
+                    style={{ justifyContent: "center" }}
+                  >
+                    {exportingGoogleMode === "local" ? (
+                      <>
+                        <Loader2 size={15} className="spin" /> Saving local copy…
+                      </>
+                    ) : (
+                      <>
+                        <FolderPlus size={15} /> Save to Local Export Folder
+                      </>
+                    )}
+                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <a
+                      href={`/api/documents/${exportingGoogleTarget.id}/content`}
+                      download={
+                        cleanDocName(exportingGoogleTarget.name).replace(/\.(md|markdown|txt)$/i, "") +
+                        (/\.(docx|dotx)$/i.test(exportingGoogleTarget.name) ? "" : ".docx")
+                      }
+                      className="button secondary small"
+                      style={{ flex: 1, justifyContent: "center" }}
+                    >
+                      <Download size={14} /> Download .docx
+                    </a>
+                    <a
+                      href="https://docs.new"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button secondary small"
+                      style={{ flex: 1, justifyContent: "center" }}
+                      title="Open a new Google Doc (File → Open → Upload)"
+                    >
+                      <ExternalLink size={14} /> Open docs.new
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="form-actions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={Boolean(exportingGoogleMode)}
+                onClick={() => setExportingGoogleTarget(null)}
+              >
+                Close
               </button>
             </div>
           </div>

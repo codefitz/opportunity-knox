@@ -64,3 +64,13 @@ class ReliabilityTests(unittest.TestCase):
   backup=r.snapshot(self.state,self.config)
   self.assertEqual((backup/'documents'/self.id).read_bytes(),b'Fictional original')
   self.assertEqual(r.read(backup/'manifest.json')['documents'][0]['id'],self.id)
+
+ def test_snapshot_reconciles_edited_opportunity_draft_hash_but_rejects_edited_submitted_snapshot(self):
+  self.path.write_bytes(b'Edited in Word on host')
+  self.assertRaises(ValueError,r.snapshot,self.state,self.config)
+  db=r.connection(self.state);draft={**self.doc,'status':'draft','opportunityId':'fictional'};db.execute('UPDATE documents SET data=?',(json.dumps(draft),));db.commit();db.close()
+  backup=r.snapshot(self.state,self.config)
+  self.assertEqual((backup/'documents'/self.id).read_bytes(),b'Edited in Word on host')
+  db=r.connection(self.state);updated=r.documents(db)[0];db.close()
+  self.assertEqual(updated['sha256'],r.digest(self.path))
+  self.assertEqual(updated['revision'],2)

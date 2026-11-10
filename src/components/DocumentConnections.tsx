@@ -22,6 +22,7 @@ type Google = {
   redirectUri: string;
   configured: boolean;
   connected: boolean;
+  canExport?: boolean;
   scope: string;
 };
 type GoogleFile = {
@@ -514,6 +515,23 @@ export default function DocumentConnections({
             >
               Connect Google Docs
             </button>
+            <button
+              type="button"
+              className="button secondary small"
+              disabled={busy || !google?.configured}
+              onClick={() =>
+                void action(async () => {
+                  const result = await api<{ url: string }>(
+                    "/connections/google/start",
+                    json({ allowExport: true }),
+                  );
+                  window.location.assign(result.url);
+                })
+              }
+              title="Connect with permission to export generated CVs and cover letters directly as editable Google Docs"
+            >
+              Connect with Export Access
+            </button>
             {google?.connected && (
               <button
                 type="button"
@@ -586,7 +604,7 @@ export default function DocumentConnections({
                         setNotice(
                           result.unchanged
                             ? "This version is already imported."
-                            : "Google Docs snapshot imported into the Career Hub. The original is unchanged.",
+                            : "Google Docs snapshot imported into Career Docs. The original is unchanged.",
                         );
                       })
                     }

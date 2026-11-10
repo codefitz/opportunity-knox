@@ -147,6 +147,7 @@ export type Opportunity = {
   outputFolder?: string;
   description: string;
   aiSummary?: string;
+  aiSummaryEngine?: "tfidf" | "llm";
   aiSummaryGeneratedAt?: string;
   priority: "normal" | "high" | "low";
   nextAction: string;

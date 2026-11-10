@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DOC = "application/vnd.google-apps.document";
 const DOCX =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -35,6 +36,13 @@ export function createGoogleDocuments({
       redirectUri: "",
       tokens: null,
     };
+  const hasWriteAccess = () => {
+    const c = config();
+    if (!c.tokens) return false;
+    const scopes = String(c.tokens.scope || "").split(/\s+/).filter(Boolean);
+    if (!scopes.length) return true;
+    return scopes.includes(FILE_SCOPE) || scopes.includes("https://www.googleapis.com/auth/drive");
+  };
   const status = () => {
     const c = config();
     return {
@@ -44,6 +52,7 @@ export function createGoogleDocuments({
       redirectUri: c.redirectUri,
       configured: Boolean(c.clientId && c.clientSecret && c.redirectUri),
       connected: Boolean(c.tokens?.refresh_token || c.tokens?.access_token),
+      canExport: hasWriteAccess(),
       scope: SCOPE,
     };
   };
@@ -190,6 +199,73 @@ export function createGoogleDocuments({
       }
       return await api("files/" + fileId(id) + "?alt=media", true);
     },
+    async uploadToGoogleDocs({ name, bytes, mimeType = DOCX }) {
+      if (!Buffer.isBuffer(bytes) || bytes.length === 0)
+        fail(400, "Document content is empty.");
+      if (bytes.length > 20 * 1024 * 1024)
+        fail(413, "Document exceeds the 20 MB Google Docs export limit.");
+      const cleanName = String(name || "Exported Document")
+        .replace(/[\0\r\n]/g, " ")
+        .replace(/\.(docx|dotx|md|markdown|txt)$/i, "")
+        .trim()
+        .slice(0, 200) || "Exported Document";
+      const boundary = "knox_gdoc_" + randomBytes(16).toString("hex");
+      const metaJson = JSON.stringify({
+        name: cleanName,
+        mimeType: DOC,
+      });
+      const preamble = Buffer.from(
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+        "utf8",
+      );
+      const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+      const body = Buffer.concat([preamble, bytes, epilogue]);
+      const token = await accessToken();
+      let response;
+      try {
+        response = await fetcher(
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,version,webViewLink&supportsAllDrives=true",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer " + token,
+              "Content-Type": `multipart/related; boundary=${boundary}`,
+              "Content-Length": String(body.length),
+            },
+            body,
+            redirect: "error",
+            signal: AbortSignal.timeout(30000),
+          },
+        );
+      } catch {
+        fail(502, "Google could not be reached. Check the connection and retry.");
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        if (response.status === 401) {
+          fail(401, "Google authorization expired. Reconnect your account.");
+        }
+        if (response.status === 403) {
+          fail(
+            403,
+            "Google Drive write access is required to export directly to Google Docs. Reconnect Google with export access in Settings → Connections, or use Local Sync / Download.",
+          );
+        }
+        fail(502, "Google could not complete the export. Check access, API setup or quota.");
+      }
+      const data = await response.json().catch(() => null);
+      if (!data || !data.id) {
+        fail(502, "Google did not return a created document ID.");
+      }
+      return {
+        id: data.id,
+        name: data.name || cleanName,
+        mimeType: data.mimeType || DOC,
+        modifiedTime: data.modifiedTime || new Date().toISOString(),
+        version: String(data.version || data.modifiedTime || "1"),
+        webViewLink: data.webViewLink || `https://docs.google.com/document/d/${data.id}/edit`,
+      };
+    },
     async handle(path, method, req, res, { json, readBody }) {
       if (path === "/api/connections/google/callback" && method === "GET") {
         const q = new URL(req.url, "http://board").searchParams,
@@ -280,12 +356,13 @@ export function createGoogleDocuments({
         }
       }
       if (path === "/api/connections/google/start" && method === "POST") {
-        await readBody(req);
+        const b = await readBody(req);
         const c = config();
         if (!c.clientId || !c.clientSecret || !c.redirectUri)
           fail(400, "Configure the Google OAuth client first.");
         const state = randomBytes(32).toString("base64url"),
           verifier = randomBytes(32).toString("base64url");
+        const requestedScope = b.allowExport ? `${SCOPE} ${FILE_SCOPE}` : SCOPE;
         putConfig("googleOAuthPending", {
           state,
           verifier,
@@ -298,7 +375,7 @@ export function createGoogleDocuments({
           client_id: c.clientId,
           redirect_uri: c.redirectUri,
           response_type: "code",
-          scope: SCOPE,
+          scope: requestedScope,
           access_type: "offline",
           prompt: "consent",
           state,

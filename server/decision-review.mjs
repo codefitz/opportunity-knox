@@ -335,9 +335,17 @@ export function createDecisionReview(ctx) {
           ],
         } : criteria();
 
+      const requestedEngine =
+        typeof body.engine === "string" ? body.engine.trim().toLowerCase() : "";
+      const isExplicitLlm = requestedEngine === "llm";
       const isMlEngine =
         body.generalFit === true &&
-        (!c.enabled || body.engine === "ml" || body.useML === true);
+        !isExplicitLlm &&
+        (!c.enabled ||
+          requestedEngine === "ml" ||
+          requestedEngine === "tfidf" ||
+          requestedEngine === "bm25" ||
+          body.useML === true);
 
       if (isMlEngine) {
         if (body.revision !== opportunity.revision)
@@ -601,6 +609,7 @@ export function createDecisionReview(ctx) {
           criteria: profile,
           results: report.criteria,
           generalFit: body.generalFit === true,
+          engine: "llm",
           modelRevision: c.revision,
           modelSource:
             !config().enabled ? "careerBuddy" : "decisionModel",

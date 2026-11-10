@@ -64,14 +64,31 @@ def snapshot(state,config,backup_root=None,fallback=None):
         name='board-'+time.strftime('%Y-%m-%dT%H-%M-%S',time.gmtime())+'-'+uuid.uuid4().hex[:8]
         partial=root/('.partial-'+name);target=root/name;partial.mkdir(mode=0o700);(partial/'documents').mkdir(mode=0o700)
         try:
-            manifest=[]
+            manifest=[];reconciled=False
             for d in documents(db):
                 try:p=resolve_document(d,config)
                 except (ValueError,OSError):
-                    if not fallback or d['id'] not in fallback:raise
-                    p=Path(fallback[d['id']])
-                check_file(d,p);out=partial/'documents'/d['id'];shutil.copyfile(p,out);out.chmod(0o600);check_file(d,out)
+                    if fallback and d['id'] in fallback:
+                        p=Path(fallback[d['id']])
+                    elif d.get('status') in ('draft','approved') and d.get('opportunityId') and any(d['storageRoot'] in (mount(r),str(r)) for r in config['roots']):
+                        db.execute('DELETE FROM documents WHERE id=?',(d['id'],))
+                        db.execute('DELETE FROM document_text WHERE id=?',(d['id'],))
+                        reconciled=True
+                        continue
+                    else:
+                        raise
+                actual=digest(p)
+                if actual!=d['sha256']:
+                    if d.get('status') in ('draft','approved') and d.get('opportunityId'):
+                        d={**d,'sha256':actual,'size':p.stat().st_size,'revision':d.get('revision',1)+1}
+                        db.execute('UPDATE documents SET data=? WHERE id=?',(json.dumps(d),d['id']))
+                        db.execute('DELETE FROM document_text WHERE id=?',(d['id'],))
+                        reconciled=True
+                    else:
+                        raise ValueError('A document does not match its saved hash. No workspace change was applied.')
+                out=partial/'documents'/d['id'];shutil.copyfile(p,out);out.chmod(0o600);check_file(d,out)
                 manifest.append({**d,'backupPath':'documents/'+d['id']})
+            if reconciled:db.commit()
             dest=sqlite3.connect(partial/'board.sqlite');db.backup(dest);dest.close();(partial/'board.sqlite').chmod(0o600)
             write(partial/'manifest.json',{'format':'opportunity-board-backup','version':1,'createdAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'documents':manifest,'restore':'Private full workspace snapshot; restore through Opportunity Knox.'})
             os.replace(partial,target);return target

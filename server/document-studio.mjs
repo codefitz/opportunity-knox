@@ -9,7 +9,7 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,6 +17,7 @@ import { extractDocument } from "./buddy-documents.mjs";
 import { layouts, layoutDraft, safeWord } from "./document-layout.mjs";
 import { readCVTemplate, populateCVTemplate, deriveTemplate } from "./cv-template.mjs";
 import { callProvider } from "./buddy-provider.mjs";
+import { opportunityFolderPath } from "./managed-folders.mjs";
 
 const run = promisify(execFile),
   fail = (s, m) => {
@@ -118,6 +119,10 @@ export async function renderPDFPages(bytes, folder) {
 }
 export function createDocumentStudio({
   getDocuments,
+  getDocument,
+  putDocument,
+  publicDocument = (d) => d,
+  settings,
   documentPath,
   saveDocument,
   convert = convertWord,
@@ -202,6 +207,150 @@ export function createDocumentStudio({
         }
         if (putConfig) putConfig("documentStudioDefaults", current);
         json(res, current);
+        return true;
+      }
+      if (path === "/api/document-studio/templates/export-docx" && method === "POST") {
+        const body = await readBody(req);
+        const { buildTemplateDocx } = await import("./template-docx.mjs");
+        const templateDef = body.template || body;
+        const buffer = await buildTemplateDocx(templateDef);
+        const title = (templateDef.title || "template").replace(/[^a-zA-Z0-9_-]/g, "_");
+        res.writeHead(200, {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "Content-Length": buffer.length,
+          "Content-Disposition": `attachment; filename="${title}.docx"`,
+        });
+        res.end(buffer);
+        return true;
+      }
+      if (path === "/api/document-studio/templates/save" && method === "POST") {
+        const body = await readBody(req);
+        const { buildTemplateDocx } = await import("./template-docx.mjs");
+        const templateDef = body.template || body;
+        const buffer = await buildTemplateDocx(templateDef);
+        const title = (templateDef.title || "Custom CV Template").trim();
+        const filename = title.toLowerCase().endsWith(".docx") ? title : `${title}.docx`;
+        const savedDoc = saveDocument({
+          name: filename,
+          kind: "cv",
+          category: body.category || "cv-template",
+          status: "draft",
+          opportunityId: body.opportunityId || "",
+          content: buffer,
+          notes: "Created with Document Studio Template Builder.",
+          generation: {
+            source: "template-builder",
+            title,
+            templateDef,
+          },
+        });
+        json(res, { ok: true, document: publicDocument(savedDoc) });
+        return true;
+      }
+      if (path === "/api/document-studio/master-cv/append" && method === "POST") {
+        const b = await readBody(req);
+        const textToAppend = typeof b.content === "string" ? b.content.trim() : "";
+        if (!textToAppend) fail(400, "Content to add is required.");
+        const sectionHeading = typeof b.heading === "string" && b.heading.trim()
+          ? cleanText(b.heading, "Heading", 120)
+          : "Additional Experience & Evidence";
+        const gapTitle = typeof b.gap === "string" && b.gap.trim()
+          ? cleanText(b.gap, "Gap", 300)
+          : "";
+        const docs = getDocuments();
+        const studioDefaults = getConfig ? (getConfig("documentStudioDefaults") || {}) : {};
+        let masterDoc = null;
+        if (b.documentId) {
+          masterDoc = find(b.documentId);
+        } else if (studioDefaults.masterCvId) {
+          masterDoc = docs.find((d) => d.id === studioDefaults.masterCvId) || null;
+        }
+        if (!masterDoc) {
+          masterDoc =
+            docs.find((d) => !d.opportunityId && d.category === "master-cv") ||
+            docs.find((d) => !d.opportunityId && d.kind === "cv") ||
+            null;
+        }
+
+        const formattedBlock = gapTitle
+          ? `- **${gapTitle}:** ${textToAppend}`
+          : textToAppend.startsWith("-") || textToAppend.startsWith("#")
+            ? textToAppend
+            : `- ${textToAppend}`;
+
+        if (!masterDoc) {
+          const initialMarkdown = `# Master CV\n\n## ${sectionHeading}\n${formattedBlock}\n`;
+          const bytes = await layoutDraft("Master CV", initialMarkdown, "classic");
+          const created = saveDocument({
+            name: "Master CV.docx",
+            kind: "cv",
+            category: "master-cv",
+            status: "draft",
+            content: bytes,
+            notes: "Master CV created with career evidence.",
+            generation: {
+              source: "master-cv-append",
+              master: true,
+              title: "Master CV",
+              content: initialMarkdown,
+            },
+          });
+          if (putConfig) {
+            putConfig("documentStudioDefaults", {
+              ...studioDefaults,
+              masterCvId: created.id,
+            });
+          }
+          json(res, { ok: true, document: created, message: `Created "${created.name}" and added your evidence.` }, 201);
+          return true;
+        }
+
+        const rawBytes = readFileSync(documentPath(masterDoc));
+        const existingText =
+          masterDoc.generation?.content ||
+          (await extractDocument(masterDoc.name, rawBytes)).text ||
+          "";
+
+        const updatedMarkdown = existingText.includes(`## ${sectionHeading}`)
+          ? `${existingText.trimEnd()}\n${formattedBlock}\n`
+          : `${existingText.trimEnd()}\n\n## ${sectionHeading}\n${formattedBlock}\n`;
+
+        const isMd = /\.(md|markdown|txt)$/i.test(masterDoc.name);
+        const title = masterDoc.generation?.title || cleanDocName(masterDoc.name).replace(/\.[^.]+$/, "") || "Master CV";
+        const newBytes = isMd
+          ? Buffer.from(updatedMarkdown, "utf8")
+          : await layoutDraft(title, updatedMarkdown, "classic");
+
+        const updatedDoc = saveDocument({
+          name: masterDoc.name.endsWith(".pdf") ? masterDoc.name.replace(/\.pdf$/i, ".docx") : masterDoc.name,
+          kind: "cv",
+          category: "master-cv",
+          status: "draft",
+          parentDocumentId: masterDoc.id,
+          content: newBytes,
+          notes: gapTitle
+            ? `Updated Master CV with evidence addressing: ${gapTitle}`
+            : "Updated Master CV with additional career evidence.",
+          generation: {
+            ...(masterDoc.generation || {}),
+            source: "master-cv-append",
+            master: true,
+            parentDocumentId: masterDoc.id,
+            title,
+            content: updatedMarkdown,
+          },
+        });
+        if (putConfig && (!studioDefaults.masterCvId || studioDefaults.masterCvId === masterDoc.id)) {
+          putConfig("documentStudioDefaults", {
+            ...studioDefaults,
+            masterCvId: updatedDoc.id,
+          });
+        }
+        json(res, {
+          ok: true,
+          document: updatedDoc,
+          message: `Added to "${updatedDoc.name}" (v${updatedDoc.version || 1}).`,
+        });
         return true;
       }
       if (path === "/api/document-studio/generate" && method === "POST") {
@@ -817,6 +966,7 @@ export function createDocumentStudio({
       if (path === "/api/document-studio/connections" && method === "GET") {
         const obs = getObsidian()?.status?.() || null;
         const g = googleDocuments?.status?.() || null;
+        const s = settings ? settings() : null;
         json(res, {
           obsidian: obs
             ? {
@@ -833,9 +983,16 @@ export function createDocumentStudio({
             ? {
                 configured: Boolean(g.configured),
                 connected: Boolean(g.connected),
+                canExport: Boolean(g.canExport),
                 clientId: g.clientId || "",
+                localExportPath: s ? (s.resolvedExportsPath || s.exportsPath || "") : "",
               }
-            : { configured: false, connected: false },
+            : {
+                configured: false,
+                connected: false,
+                canExport: false,
+                localExportPath: s ? (s.resolvedExportsPath || s.exportsPath || "") : "",
+              },
         });
         return true;
       }
@@ -928,6 +1085,136 @@ export function createDocumentStudio({
           },
         });
         json(res, { ok: true, document: doc }, 201);
+        return true;
+      }
+
+      if (path === "/api/document-studio/google/export" && method === "POST") {
+        const body = await readBody(req);
+        if (!body.documentId || typeof body.documentId !== "string") {
+          fail(400, "documentId is required.");
+        }
+        const doc = find(body.documentId);
+        const mode = body.mode === "local" ? "local" : "api";
+        const ext = extname(doc.name).toLowerCase();
+
+        // Prepare DOCX buffer (convert markdown/txt to formatted DOCX if needed)
+        const sourceBytes = readFileSync(documentPath(doc));
+        let exportBytes = sourceBytes;
+        const mimeType =
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        if ([".md", ".markdown", ".txt"].includes(ext)) {
+          const text = sourceBytes.toString("utf8");
+          const title =
+            doc.generation?.title ||
+            cleanDocName(doc.name).replace(/\.(md|markdown|txt)$/i, "");
+          exportBytes = await layoutDraft(
+            title,
+            text,
+            doc.kind === "cover" ? "letter" : "classic",
+          );
+        } else if (ext === ".docx" || ext === ".dotx") {
+          await safeWord(exportBytes);
+        } else {
+          fail(
+            400,
+            "Only Word (.docx, .dotx), Markdown (.md), or text (.txt) documents can be exported to Google Docs.",
+          );
+        }
+
+        const cleanBase =
+          cleanDocName(doc.name)
+            .replace(/\.(docx|dotx|md|markdown|txt)$/i, "")
+            .replace(/[/\\:*?"<>|\0]/g, "-")
+            .trim() || "Exported Document";
+
+        if (mode === "local") {
+          const s = settings ? settings() : null;
+          const exportRoot = s?.resolvedExportsPath || s?.exportsPath || "";
+          if (!exportRoot) {
+            fail(
+              400,
+              "No local application export folder is configured. Configure an export folder in Settings → Files & storage.",
+            );
+          }
+          let subfolder = "Google Docs Exports";
+          if (doc.opportunityId && getRecord) {
+            try {
+              const opp = getRecord(doc.opportunityId);
+              if (opp) subfolder = opportunityFolderPath(opp);
+            } catch {}
+          }
+          if (typeof body.subfolder === "string" && body.subfolder.trim()) {
+            const customSub = body.subfolder
+              .trim()
+              .replace(/^[/\\]+|[/\\]+$/g, "")
+              .replace(/\.\./g, "");
+            if (customSub) subfolder = customSub;
+          }
+          const targetDir = resolve(exportRoot, subfolder);
+          mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+          const targetFileName = `${cleanBase}.docx`;
+          const targetPath = join(targetDir, targetFileName);
+          writeFileSync(targetPath, exportBytes, { mode: 0o600 });
+          const relPath = `${subfolder}/${targetFileName}`;
+          json(res, {
+            ok: true,
+            mode: "local",
+            filePath: targetPath,
+            relPath,
+            folderPath: targetDir,
+            message: `Saved "${targetFileName}" to ${targetPath} for Google Drive sync.`,
+          });
+          return true;
+        }
+
+        // Direct Google Drive API upload & conversion to native Google Doc
+        if (!googleDocuments?.isConnected?.()) {
+          fail(
+            400,
+            "Google Drive is not connected. Connect Google in Settings → Connections, or choose Local Copy.",
+          );
+        }
+        const uploaded = await googleDocuments.uploadToGoogleDocs({
+          name: cleanBase,
+          bytes: exportBytes,
+          mimeType,
+        });
+
+        let updatedDoc = doc;
+        if (getDocument && putDocument) {
+          try {
+            const rawDoc = getDocument(doc.id);
+            const nextDoc = {
+              ...rawDoc,
+              originalUrl: uploaded.webViewLink,
+              externalSource: {
+                ...(rawDoc.externalSource || {}),
+                provider: "google-docs",
+                id: uploaded.id,
+                name: uploaded.name,
+                mimeType: uploaded.mimeType,
+                version: uploaded.version,
+                modifiedTime: uploaded.modifiedTime,
+                url: uploaded.webViewLink,
+                exportedAt: new Date().toISOString(),
+                lastSyncedRevision: rawDoc.version || 1,
+              },
+              revision: (rawDoc.revision || 1) + 1,
+            };
+            putDocument(nextDoc);
+            updatedDoc = publicDocument(nextDoc);
+          } catch {}
+        }
+
+        json(res, {
+          ok: true,
+          mode: "api",
+          file: uploaded,
+          url: uploaded.webViewLink,
+          document: updatedDoc,
+          message: `Exported "${uploaded.name}" to Google Docs.`,
+        });
         return true;
       }
 

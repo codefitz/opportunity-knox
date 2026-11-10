@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Settings,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { formatDate } from "../api";
 import type { Opportunity } from "../types";
@@ -36,6 +37,9 @@ export default function OpportunityAISummary({
   onNavigateOverview?: () => void;
 }) {
   const [generating, setGenerating] = useState(false);
+  const [engine, setEngine] = useState<"tfidf" | "llm">(
+    o.aiSummaryEngine === "llm" ? "llm" : "tfidf",
+  );
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -58,21 +62,31 @@ export default function OpportunityAISummary({
   const descWordCount = countWords(o.description);
   const summaryWordCount = countWords(o.aiSummary);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (overrideEngine?: "tfidf" | "llm") => {
     if (generating || busy) return;
+    const selectedEngine = overrideEngine || engine;
+    if (overrideEngine) setEngine(overrideEngine);
     setGenerating(true);
     setError("");
     setSaveStatus("idle");
 
     try {
-      const ok = await mutate(`/opportunities/${o.id}/description-summary`, {}, "POST");
+      const ok = await mutate(
+        `/opportunities/${o.id}/description-summary`,
+        { engine: selectedEngine },
+        "POST",
+      );
       if (!ok) {
-        setError("Could not generate AI summary. Verify your Career Buddy provider in Settings.");
+        setError(
+          selectedEngine === "llm"
+            ? "Could not generate LLM summary. Verify your Career Buddy provider in Settings, or run Fast Local (TF-IDF / BM25)."
+            : "Could not generate summary from the job description.",
+        );
       } else {
         setIsEditing(false);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to generate AI summary.");
+      setError(e instanceof Error ? e.message : "Failed to generate summary.");
     } finally {
       setGenerating(false);
     }
@@ -179,11 +193,40 @@ export default function OpportunityAISummary({
 
   return (
     <section className="workflow-section ai-summary-container" aria-label="AI Summary">
-      <div className="section-intro">
-        <h3>Role summary &amp; breakdown</h3>
-        <p>
-          A concise 100-word executive summary of the job description, plus top 5 skills and 5 key responsibilities.
-        </p>
+      <div className="section-intro with-action">
+        <div>
+          <h3>Role summary &amp; breakdown</h3>
+          <p>
+            A concise 100-word executive summary of the job description, plus top 5 skills and 5 key responsibilities.
+          </p>
+        </div>
+        {hasDescription && (
+          <div className="ai-engine-selector-wrap">
+            <span className="ai-engine-selector-label">AI Engine:</span>
+            <div className="library-view-toggle ai-engine-toggle" role="group" aria-label="Summarization engine">
+              <button
+                type="button"
+                className={engine === "tfidf" ? "active" : ""}
+                disabled={generating || busy}
+                onClick={() => setEngine("tfidf")}
+                title="Instant local statistical extraction using TF-IDF & BM25 sentence and skill scoring (offline, zero token cost)"
+              >
+                <Zap size={12} />
+                Fast Local (TF-IDF / BM25)
+              </button>
+              <button
+                type="button"
+                className={engine === "llm" ? "active" : ""}
+                disabled={generating || busy}
+                onClick={() => setEngine("llm")}
+                title="Deep generative AI synthesis using your configured Career Buddy LLM"
+              >
+                <Sparkles size={12} />
+                Generative AI (LLM)
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -224,41 +267,73 @@ export default function OpportunityAISummary({
         </div>
       ) : !o.aiSummary ? (
         <div className="ai-summary-empty-box">
-          <Sparkles size={32} style={{ color: "var(--accent)" }} />
+          {engine === "tfidf" ? (
+            <Zap size={32} style={{ color: "var(--accent)" }} />
+          ) : (
+            <Sparkles size={32} style={{ color: "var(--accent)" }} />
+          )}
           <div>
             <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>Ready to summarize</h4>
             <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--muted)" }}>
               Job description contains {descWordCount} words.
             </p>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-              Click below to generate a focused 100-word executive summary with top 5 skills and 5 key responsibilities using your configured AI model.
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", maxWidth: 520 }}>
+              {engine === "tfidf"
+                ? "Run an instant Fast Local (TF-IDF / BM25) statistical summary first. If you want a deeper generative synthesis afterward, switch to Generative AI (LLM) and re-run."
+                : "Generate a synthesized 100-word executive summary with top 5 skills and 5 key responsibilities using your configured Career Buddy LLM."}
             </p>
           </div>
-          <button
-            type="button"
-            className="button primary"
-            disabled={generating || busy}
-            onClick={() => void handleGenerate()}
-            style={{ marginTop: 8 }}
-          >
-            {generating ? (
-              <>
-                <LoaderCircle size={15} className="spin" />
-                Generating summary…
-              </>
-            ) : (
-              <>
-                <Sparkles size={15} />
-                Generate summary
-              </>
-            )}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
+            <button
+              type="button"
+              className="button primary"
+              disabled={generating || busy}
+              onClick={() => void handleGenerate()}
+            >
+              {generating ? (
+                <>
+                  <LoaderCircle size={15} className="spin" />
+                  {engine === "tfidf" ? "Extracting summary…" : "Generating with LLM…"}
+                </>
+              ) : engine === "tfidf" ? (
+                <>
+                  <Zap size={15} />
+                  Run Fast Local Summary (TF-IDF / BM25)
+                </>
+              ) : (
+                <>
+                  <Sparkles size={15} />
+                  Run LLM Summary
+                </>
+              )}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="ai-summary-card">
           <div className="ai-summary-card-header">
             <div className="ai-summary-meta">
               <span className="word-count-badge">{summaryWordCount} words</span>
+              <span
+                className={`ai-engine-badge ${o.aiSummaryEngine === "tfidf" ? "engine-tfidf" : "engine-llm"}`}
+                title={
+                  o.aiSummaryEngine === "tfidf"
+                    ? "Generated locally via TF-IDF / BM25 statistical extraction"
+                    : "Generated via Career Buddy LLM"
+                }
+              >
+                {o.aiSummaryEngine === "tfidf" ? (
+                  <>
+                    <Zap size={11} />
+                    Fast Local (TF-IDF / BM25)
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={11} />
+                    Generative AI (LLM)
+                  </>
+                )}
+              </span>
               {o.aiSummaryGeneratedAt && (
                 <span>
                   Generated {formatDate(o.aiSummaryGeneratedAt, timezone, true)}
@@ -284,15 +359,29 @@ export default function OpportunityAISummary({
                 <Edit3 size={13} />
                 {isEditing ? "Done editing" : "Edit"}
               </button>
+              {o.aiSummaryEngine === "tfidf" && engine === "tfidf" && (
+                <button
+                  type="button"
+                  className="button primary small"
+                  disabled={generating || busy}
+                  onClick={() => void handleGenerate("llm")}
+                  title="Not satisfied with the statistical summary? Re-run with your configured Generative AI (LLM) model."
+                >
+                  <Sparkles size={13} />
+                  {generating ? "Running LLM…" : "Upgrade with LLM"}
+                </button>
+              )}
               <button
                 type="button"
                 className="button secondary small"
                 disabled={generating || busy}
                 onClick={() => void handleGenerate()}
-                title="Regenerate summary, skills, and responsibilities from job description"
+                title={`Regenerate summary using ${engine === "tfidf" ? "Fast Local (TF-IDF / BM25)" : "Generative AI (LLM)"}`}
               >
                 <RefreshCw size={13} className={generating ? "spin" : ""} />
-                {generating ? "Regenerating…" : "Regenerate"}
+                {generating
+                  ? "Regenerating…"
+                  : `Regenerate (${engine === "tfidf" ? "TF-IDF" : "LLM"})`}
               </button>
             </div>
           </div>

@@ -245,7 +245,7 @@ export function createStandaloneBuddy(ctx) {
           })(),
           attachments: attachments().map(publicAttachment),
           documents: getDocuments()
-            .filter((d) => !d.opportunityId && !d.generation)
+            .filter((d) => !d.opportunityId)
             .map((d) => ({
               id: d.id,
               name: d.name,
@@ -312,7 +312,7 @@ export function createStandaloneBuddy(ctx) {
           throw buddyError(400, "Choose whether to use the career library.");
         const allowed = new Set(
           getDocuments()
-            .filter((d) => !d.opportunityId && !d.generation)
+            .filter((d) => !d.opportunityId)
             .map((d) => d.id),
         );
         if (
@@ -360,9 +360,13 @@ export function createStandaloneBuddy(ctx) {
           const available = getDocuments().filter(
             (d) => !d.opportunityId && !d.generation && !["template","cv-template","cover-letter-template"].includes(d.category),
           );
-          const ids = body.useLibrary
-            ? await vectors.selectSources(body.message, available)
-            : [...new Set(body.documentIds)];
+          const explicitIds = Array.isArray(body.documentIds)
+            ? body.documentIds.filter((id) => allowed.has(id))
+            : [];
+          const selectedLibraryIds = (body.useLibrary || !explicitIds.length)
+            ? await vectors.selectSources(body.message, available, 10)
+            : [];
+          const ids = [...new Set([...explicitIds, ...selectedLibraryIds])].slice(0, 20);
           if (body.templateId) {
             if (!allowed.has(body.templateId))
               throw buddyError(

@@ -14,6 +14,9 @@ import {
   Trash2,
   Pencil,
   Download,
+  ExternalLink,
+  MessageSquare,
+  UploadCloud,
   X,
   Star,
   Mail,
@@ -113,11 +116,15 @@ export default function CareerFileManager({
   onChanged,
   onError,
   onNotice,
+  onOpenInStudio,
+  onChatAboutDocument,
 }: {
   documents: BoardDocument[];
   onChanged: () => void;
   onError: (e: unknown) => void;
   onNotice: (s: string) => void;
+  onOpenInStudio?: (docId: string) => void;
+  onChatAboutDocument?: (doc: BoardDocument) => void;
 }) {
   const [group, setGroup] = useState(""),
     [search, setSearch] = useState(""),
@@ -269,6 +276,22 @@ export default function CareerFileManager({
       }
     }
     onNotice("Files pasted.");
+  }
+  async function uploadToGoogleDrive(doc: BoardDocument) {
+    await run(async () => {
+      const res = await api<{
+        ok: boolean;
+        url?: string;
+        message?: string;
+      }>(
+        "/document-studio/google/export",
+        json({ documentId: doc.id, mode: "api" }),
+      );
+      onNotice(res.message || `Uploaded "${leaf(doc)}" to Google Docs.`);
+      if (res.url) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
+    });
   }
   return (
     <section
@@ -471,6 +494,39 @@ export default function CareerFileManager({
             />{" "}
             {selected.length ? `${selected.length} selected` : "Select"}
           </label>
+          {onOpenInStudio && (
+            <button
+              title="Open selected document in Doc Studio"
+              disabled={busy || picked.length !== 1 || unavailable(picked[0])}
+              onClick={() => onOpenInStudio(picked[0].id)}
+            >
+              <FileText size={16} />
+              Open in Doc Studio
+            </button>
+          )}
+          {onChatAboutDocument && (
+            <button
+              title="Chat about this doc with Career Buddy"
+              disabled={busy || picked.length !== 1 || unavailable(picked[0])}
+              onClick={() => onChatAboutDocument(picked[0])}
+            >
+              <MessageSquare size={16} />
+              Chat with Career Buddy
+            </button>
+          )}
+          <button
+            title="Upload to Google Drive and edit in Google Docs"
+            disabled={
+              busy ||
+              picked.length !== 1 ||
+              unavailable(picked[0]) ||
+              !/\.(docx|dotx|md|markdown|txt)$/i.test(picked[0].name)
+            }
+            onClick={() => void uploadToGoogleDrive(picked[0])}
+          >
+            <UploadCloud size={16} />
+            Upload &amp; edit in Google Docs
+          </button>
           <button
             title="Copy (Ctrl/Cmd+C)"
             disabled={busy || !picked.length || picked.some(unavailable)}
@@ -545,6 +601,10 @@ export default function CareerFileManager({
             </select>
           )}
         </div>
+        <div className="career-files-info-banner">
+          <FileText size={15} />
+          <span>Click on any document to open and edit it in Doc Studio.</span>
+        </div>
         {group === "missing" && (
           <p className="muted">
             Missing files are hidden from the main view. Reconnect unavailable
@@ -559,7 +619,8 @@ export default function CareerFileManager({
           {visible.map((d) => {
             const g = groupOf(d),
               chosen = selected.includes(d.id),
-              ext = d.name.split(".").pop()?.toUpperCase();
+              ext = d.name.split(".").pop()?.toUpperCase(),
+              googleUrl = d.originalUrl || d.externalSource?.url;
             return (
               <article
                 key={d.id}
@@ -590,10 +651,17 @@ export default function CareerFileManager({
                 </label>
                 <a
                   className="career-file-preview"
-                  href={d.url}
-                  aria-label={`Open ${leaf(d)}`}
+                  href={onOpenInStudio ? `#/studio?doc=${encodeURIComponent(d.id)}` : d.url}
+                  aria-label={`Open ${leaf(d)} in Doc Studio`}
                   onClick={(e) => {
-                    if (unavailable(d)) e.preventDefault();
+                    if (unavailable(d)) {
+                      e.preventDefault();
+                      return;
+                    }
+                    if (onOpenInStudio) {
+                      e.preventDefault();
+                      onOpenInStudio(d.id);
+                    }
                   }}
                 >
                   {view === "grid" &&
@@ -614,7 +682,20 @@ export default function CareerFileManager({
                   <span className="career-file-format">{ext}</span>
                 </a>
                 <div className="career-file-info">
-                  <a href={d.url} title={d.name}>
+                  <a
+                    href={onOpenInStudio ? `#/studio?doc=${encodeURIComponent(d.id)}` : d.url}
+                    title={`Open ${d.name} in Doc Studio`}
+                    onClick={(e) => {
+                      if (unavailable(d)) {
+                        e.preventDefault();
+                        return;
+                      }
+                      if (onOpenInStudio) {
+                        e.preventDefault();
+                        onOpenInStudio(d.id);
+                      }
+                    }}
+                  >
                     {leaf(d)}
                   </a>
                   <span className="career-file-type">
@@ -630,14 +711,54 @@ export default function CareerFileManager({
                     <small>Submitted · preserved</small>
                   )}
                 </div>
-                <a
-                  className="icon-button"
-                  href={d.url}
-                  download
-                  aria-label={`Download ${leaf(d)}`}
-                >
-                  <Download size={15} />
-                </a>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {onChatAboutDocument && !unavailable(d) && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      title={`Chat about ${leaf(d)} with Career Buddy`}
+                      aria-label={`Chat about ${leaf(d)} with Career Buddy`}
+                      onClick={() => onChatAboutDocument(d)}
+                    >
+                      <MessageSquare size={15} />
+                    </button>
+                  )}
+                  {googleUrl ? (
+                    <a
+                      className="icon-button"
+                      href={googleUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Edit ${leaf(d)} in Google Docs`}
+                      aria-label={`Edit ${leaf(d)} in Google Docs`}
+                    >
+                      <ExternalLink size={15} />
+                    </a>
+                  ) : (
+                    /\.(docx|dotx|md|markdown|txt)$/i.test(d.name) &&
+                    !unavailable(d) && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        disabled={busy}
+                        title={`Upload ${leaf(d)} to Google Drive & edit in Google Docs`}
+                        aria-label={`Upload ${leaf(d)} to Google Drive`}
+                        onClick={() => void uploadToGoogleDrive(d)}
+                      >
+                        <UploadCloud size={15} />
+                      </button>
+                    )
+                  )}
+                  <a
+                    className="icon-button"
+                    href={d.url}
+                    download
+                    title={`Download ${leaf(d)}`}
+                    aria-label={`Download ${leaf(d)}`}
+                  >
+                    <Download size={15} />
+                  </a>
+                </div>
               </article>
             );
           })}

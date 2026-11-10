@@ -4187,6 +4187,28 @@ test('managed folders: saves opportunity documents into 2 subdirectories Company
    assert.ok(d.relativePath.startsWith('opportunities/beta-corp/staff-platform-engineer/'));
    assert.ok(existsSync(join(f.options.filesDir, d.relativePath)));
  }
+
+ // 7. Test open-folder endpoint for opportunity
+ const openRes = await f.request('/api/opportunities/' + encodeURIComponent(op.id) + '/open-folder', { method: 'POST' });
+ assert.equal(openRes.status, 200);
+ assert.equal(openRes.data.ok, true);
+ assert.ok(openRes.data.folderPath);
+ assert.ok(openRes.data.containerPath);
+ assert.equal(typeof openRes.data.openedOnHost, 'boolean');
+ assert.equal(typeof openRes.data.opened, 'boolean');
+ assert.ok(existsSync(openRes.data.containerPath));
+ assert.ok(existsSync(openRes.data.folderPath));
+
+ // 8. Test open-folder endpoint for reference documents
+ const openRefRes = await f.request('/api/documents/open-folder', { method: 'POST' });
+ assert.equal(openRefRes.status, 200);
+ assert.equal(openRefRes.data.ok, true);
+ assert.ok(openRefRes.data.folderPath);
+ assert.ok(openRefRes.data.containerPath);
+ assert.equal(typeof openRefRes.data.openedOnHost, 'boolean');
+ assert.equal(typeof openRefRes.data.opened, 'boolean');
+ assert.ok(existsSync(openRefRes.data.containerPath));
+ assert.ok(existsSync(openRefRes.data.folderPath));
 });
 
 test("update check: /api/board includes updateStatus and /api/updates/check checks status", async (t) => {
@@ -4850,10 +4872,22 @@ test('document studio phase 4 supports connected documents (Obsidian sync/export
   let externalContent = 'Initial Google Drive content';
 
   const f = await fixture(t, {
-    googleFetch: async (url) => {
+    googleFetch: async (url, options = {}) => {
       const u = String(url);
       if (u.includes('oauth2.googleapis.com/token')) {
         return new Response(JSON.stringify({ access_token: 'mock-token', expires_in: 3600 }));
+      }
+      if (u.includes('upload/drive/v3/files') && options.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            id: 'exported-gdoc-123',
+            name: 'Exported CV',
+            mimeType: 'application/vnd.google-apps.document',
+            modifiedTime: '2026-11-09T14:00:00Z',
+            version: '1',
+            webViewLink: 'https://docs.google.com/document/d/exported-gdoc-123/edit',
+          }),
+        );
       }
       if (u.includes('files?')) {
         return new Response(JSON.stringify({ files: googleFiles }));
@@ -5021,6 +5055,42 @@ test('document studio phase 4 supports connected documents (Obsidian sync/export
   });
   assert.equal(obsReadOnlyExport.status, 400);
   assert.match(obsReadOnlyExport.data.error, /read-only/i);
+
+  // 10. Export to Google Docs (Direct API and Local Copy)
+  const validDocxBytes = await layoutDraft('Tailored CV', '# Candidate\n\n## Experience\n- Delivered platform.', 'classic');
+  const exportSourceDoc = (
+    await f.request('/api/documents', {
+      method: 'POST',
+      body: {
+        name: 'CV - Fictional Corp - Architect.docx',
+        kind: 'cv',
+        category: 'tailored-cv',
+        contentBase64: validDocxBytes.toString('base64'),
+      },
+    })
+  ).data;
+
+  // Direct API export
+  const apiExportRes = await f.request('/api/document-studio/google/export', {
+    method: 'POST',
+    body: { documentId: exportSourceDoc.id, mode: 'api' },
+  });
+  assert.equal(apiExportRes.status, 200);
+  assert.equal(apiExportRes.data.ok, true);
+  assert.equal(apiExportRes.data.mode, 'api');
+  assert.equal(apiExportRes.data.url, 'https://docs.google.com/document/d/exported-gdoc-123/edit');
+  assert.equal(apiExportRes.data.document.originalUrl, 'https://docs.google.com/document/d/exported-gdoc-123/edit');
+
+  // Local copy export
+  const localExportRes = await f.request('/api/document-studio/google/export', {
+    method: 'POST',
+    body: { documentId: exportSourceDoc.id, mode: 'local' },
+  });
+  assert.equal(localExportRes.status, 200);
+  assert.equal(localExportRes.data.ok, true);
+  assert.equal(localExportRes.data.mode, 'local');
+  assert.ok(localExportRes.data.filePath);
+  assert.ok(existsSync(localExportRes.data.filePath));
 });
 
 test('Document Studio Phase 5: Verification, persistence, safeguards, and limits', async (t) => {

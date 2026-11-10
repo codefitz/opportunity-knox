@@ -1,9 +1,20 @@
 import { uploadId } from "../lib/upload-queue";
 import DecisionReview from "./DecisionReview";
 import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
-import { AlertCircle, Check, LoaderCircle, RotateCcw } from "lucide-react";
-import { editedTimestamp, formatDate, localInput } from "../api";
+import {
+  AlertCircle,
+  Briefcase,
+  Check,
+  FilePlus2,
+  LoaderCircle,
+  MessageSquare,
+  RotateCcw,
+  Wrench,
+  X,
+} from "lucide-react";
+import { api, editedTimestamp, formatDate, json, localInput } from "../api";
 import type {
+  BoardDocument,
   Opportunity,
   OpportunityOffer,
   OpportunityReview,
@@ -13,7 +24,9 @@ type Props = {
   timezone: string;
   busy: boolean;
   onError?: (e: unknown) => void;
+  onNotice?: (message: string) => void;
   onAssessed?: (saved: Opportunity) => void;
+  onOpenBuddyWithPrompt?: (prompt: string) => void;
   mutate: (path: string, body: unknown, method?: string) => Promise<boolean>;
 };
 const reviewLabels = { proceed: "Proceed", ignore: "Ignore", defer: "Defer" };
@@ -76,7 +89,9 @@ export function OpportunityReviewForm({
   busy,
   mutate,
   onError = () => {},
+  onNotice,
   onAssessed,
+  onOpenBuddyWithPrompt,
 }: Props) {
   const [form, setForm] = useState<ReviewFormState>({
     strengths: o.review?.strengths || "",
@@ -90,6 +105,10 @@ export function OpportunityReviewForm({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "undone" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState("");
   const [assessing, setAssessing] = useState(false);
+  const [addressingGap, setAddressingGap] = useState<string | null>(null);
+  const [gapNote, setGapNote] = useState("");
+  const [gapProjectTitle, setGapProjectTitle] = useState("");
+  const [gapBusy, setGapBusy] = useState<"" | "master-cv" | "project">("");
 
   const formRef = useRef(form);
   formRef.current = form;
@@ -249,8 +268,13 @@ export function OpportunityReviewForm({
     </div>
   );
 
+  const parsedGaps = form.gaps
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
   return (
-    <section className="workflow-section" aria-label="Your review decision">
+    <section className="workflow-section" aria-label="Fit assessment">
       <DecisionReview opportunity={o} onError={onError} disabled={busy} onBusy={setAssessing} onAssessed={(draft, savedOpportunity) => {
         const updated = {
           ...formRef.current,
@@ -261,14 +285,13 @@ export function OpportunityReviewForm({
         setForm(updated);
         lastSavedRef.current = updated;
         setSaveStatus("saved");
-        setStatusMessage("Review saved");
+        setStatusMessage("Fit assessment saved");
         onAssessed?.(savedOpportunity);
       }}/>
       <div className="section-intro">
-        <h3>Your review decision</h3>
+        <h3>Fit Summary: Strengths &amp; Gaps</h3>
         <p>
-          Keep your own strengths, gaps and decision alongside Career Buddy’s
-          assessment. Changes are saved automatically.
+          Review your matched strengths and address any identified gaps by adding evidence to your Master CV, saving a Project in Career Docs, or refining with Career Buddy.
         </p>
       </div>
       {renderAutoSaveBar(true)}
@@ -291,7 +314,7 @@ export function OpportunityReviewForm({
             <label className="field wide">
               <span>Strengths for this opportunity</span>
               <textarea
-                rows={3}
+                rows={4}
                 maxLength={50000}
                 value={form.strengths}
                 onChange={(e) => set("strengths", e.target.value, 600)}
@@ -300,9 +323,9 @@ export function OpportunityReviewForm({
               />
             </label>
             <label className="field wide">
-              <span>Gaps / concerns</span>
+              <span>Gaps / areas to address</span>
               <textarea
-                rows={3}
+                rows={4}
                 maxLength={50000}
                 value={form.gaps}
                 onChange={(e) => set("gaps", e.target.value, 600)}
@@ -310,79 +333,217 @@ export function OpportunityReviewForm({
                 placeholder="Missing experience, unanswered questions or trade-offs…"
               />
             </label>
-            <label className="field">
-              <span>Your decision</span>
-              <select
-                value={form.decision}
-                onChange={(e) => {
-                  const updated = {
-                    ...formRef.current,
-                    decision: e.target.value,
-                    effectiveAt: "",
-                    applyStage: false,
-                  };
-                  setForm(updated);
-                  scheduleSave(updated, 0);
-                }}
-              >
-                <option value="">Not decided</option>
-                <option value="proceed">Proceed</option>
-                <option value="ignore">Ignore</option>
-                <option value="defer">Defer</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Review date and time</span>
-              <input
-                type="datetime-local"
-                value={form.effectiveAt}
-                onChange={(e) => set("effectiveAt", e.target.value, 600)}
-                onBlur={handleBlur}
-              />
-              <small>
-                Leave empty to use the current time. Uses this device’s
-                timezone.
-              </small>
-            </label>
-            <label className="field wide">
-              <span>Decision reason (optional)</span>
-              <textarea
-                rows={3}
-                maxLength={50000}
-                value={form.reason}
-                onChange={(e) => set("reason", e.target.value, 600)}
-                onBlur={handleBlur}
-                placeholder="Why are you proceeding, ignoring or deferring?"
-              />
-            </label>
-            {!!form.decision && !o.outcome && (
-              <div className="wide">
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={form.applyStage}
-                    onChange={(e) => {
-                      const updated = { ...formRef.current, applyStage: e.target.checked };
-                      setForm(updated);
-                      scheduleSave(updated, 0);
-                    }}
-                  />
-                  Also update the workflow stage
-                </label>
-                <p className="quiet-empty">
-                  {form.decision === "proceed"
-                    ? "Move to CV & cover letter."
-                    : form.decision === "ignore"
-                      ? "Close this opportunity as Ignored."
-                      : "Move to Review for later consideration."}{" "}
-                  Leave unticked to record your decision at the current stage.
-                </p>
-              </div>
-            )}
           </div>
         </fieldset>
         {renderAutoSaveBar(false)}
       </form>
+
+      {parsedGaps.length > 0 && (
+        <div className="fit-gaps-action-panel" style={{ marginTop: 18, padding: 16, border: "1px solid var(--line)", borderRadius: 10, background: "var(--surface)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <strong>Address Identified Gaps ({parsedGaps.length})</strong>
+            <small className="text-muted">Click any gap to add supporting experience to your Master CV, a Project, or Career Buddy</small>
+          </div>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
+            {parsedGaps.map((gapItem, idx) => (
+              <li
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 12px",
+                  border: "1px solid var(--line)",
+                  borderRadius: 8,
+                  background: "var(--panel-soft)",
+                }}
+              >
+                <span style={{ fontSize: 13, lineHeight: 1.45, flex: 1 }}>{gapItem}</span>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  onClick={() => {
+                    setAddressingGap(gapItem);
+                    setGapNote("");
+                    setGapProjectTitle(
+                      `Project Evidence - ${gapItem.slice(0, 48).replace(/[^\p{L}\p{N} _-]/gu, "").trim() || o.role}`,
+                    );
+                  }}
+                >
+                  <Wrench size={13} /> Address Gap
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {addressingGap && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!gapBusy) setAddressingGap(null);
+          }}
+        >
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="address-gap-modal-title"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 620 }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h2 id="address-gap-modal-title" style={{ margin: 0, fontSize: 18 }}>
+                Address Fit Gap
+              </h2>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={!!gapBusy}
+                onClick={() => setAddressingGap(null)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: "10px 12px",
+                borderRadius: 8,
+                background: "var(--accent-soft)",
+                border: "1px solid var(--line)",
+                marginBottom: 14,
+                fontSize: 13,
+              }}
+            >
+              <strong>Gap / Requirement:</strong> {addressingGap}
+            </div>
+
+            <label className="field" style={{ marginBottom: 12 }}>
+              <span>How does your experience or project work address this gap?</span>
+              <textarea
+                rows={5}
+                autoFocus
+                disabled={!!gapBusy}
+                value={gapNote}
+                onChange={(e) => setGapNote(e.target.value)}
+                placeholder="Write a bullet point, achievement, or notes about relevant experience you have that addresses this gap…"
+              />
+            </label>
+
+            <label className="field" style={{ marginBottom: 16 }}>
+              <span>Project file title (if saving as a Project in Career Docs)</span>
+              <input
+                type="text"
+                disabled={!!gapBusy}
+                value={gapProjectTitle}
+                onChange={(e) => setGapProjectTitle(e.target.value)}
+                placeholder="Project Evidence"
+              />
+            </label>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={!!gapBusy}
+                onClick={() => {
+                  const draftContext = gapNote.trim()
+                    ? `Here is my draft experience for this gap:\n"${gapNote.trim()}"\n\nPlease help me refine this into a strong, factual achievement bullet and update my Master CV.`
+                    : `Please help me brainstorm and refine how my existing career experience can address this gap, and propose an update for my Master CV.`;
+                  const prompt = `I want to address this fit gap for ${o.role} at ${o.company}:\n"${addressingGap}"\n\n${draftContext}`;
+                  setAddressingGap(null);
+                  onOpenBuddyWithPrompt?.(prompt);
+                }}
+              >
+                <MessageSquare size={15} />
+                Chat with Career Buddy
+              </button>
+
+              <button
+                type="button"
+                className="button secondary"
+                disabled={!!gapBusy || !gapNote.trim()}
+                onClick={async () => {
+                  setGapBusy("project");
+                  try {
+                    const cleanTitle =
+                      (gapProjectTitle.trim() || "Project Evidence")
+                        .replace(/[/\\:*?"<>|\0]/g, "-")
+                        .replace(/\.md$/i, "") + ".md";
+                    const mdContent = `# ${cleanTitle.replace(/\.md$/i, "")}\n\n**Target Role:** ${o.role} at ${o.company}\n**Addressed Requirement / Gap:** ${addressingGap}\n\n## Evidence & Achievements\n${gapNote.trim()}\n`;
+                    const bytes = new TextEncoder().encode(mdContent);
+                    let binary = "";
+                    for (const b of bytes) binary += String.fromCharCode(b);
+                    const contentBase64 = btoa(binary);
+                    const created = await api<BoardDocument>(
+                      "/documents",
+                      json({
+                        name: `Projects/${cleanTitle}`,
+                        kind: "reference",
+                        category: "project",
+                        status: "draft",
+                        contentBase64,
+                        notes: `Project evidence addressing gap for ${o.company} (${o.role}).`,
+                      }),
+                    );
+                    await api("/buddy/index", json({ documentIds: [created.id] })).catch(() => {});
+                    onNotice?.(`Saved "${cleanTitle}" to Projects in Career Docs.`);
+                    setAddressingGap(null);
+                  } catch (err) {
+                    onError(err);
+                  } finally {
+                    setGapBusy("");
+                  }
+                }}
+              >
+                {gapBusy === "project" ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Briefcase size={15} />
+                )}
+                Add to a Project
+              </button>
+
+              <button
+                type="button"
+                className="button primary"
+                disabled={!!gapBusy || !gapNote.trim()}
+                onClick={async () => {
+                  setGapBusy("master-cv");
+                  try {
+                    const res = await api<{ message: string }>(
+                      "/document-studio/master-cv/append",
+                      json({
+                        gap: addressingGap,
+                        content: gapNote.trim(),
+                        heading: "Additional Experience & Evidence",
+                      }),
+                    );
+                    onNotice?.(res.message || "Added evidence to Master CV.");
+                    setAddressingGap(null);
+                  } catch (err) {
+                    onError(err);
+                  } finally {
+                    setGapBusy("");
+                  }
+                }}
+              >
+                {gapBusy === "master-cv" ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <FilePlus2 size={15} />
+                )}
+                Add to Master CV
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {!!o.review?.history?.length && (
         <details className="workflow-history">
           <summary>

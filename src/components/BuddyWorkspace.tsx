@@ -7,15 +7,20 @@ import { useEffect, useState, useRef } from "react";
 import { api, json, readFile, ApiError } from "../api";
 import {
   UploadCloud,
+  FilePlus2,
   FileText,
   X,
   Send,
   Plus,
   Check,
   LoaderCircle,
-  Bot,
   BriefcaseBusiness,
+  History,
+  ChevronDown,
+  Search,
+  PanelLeft,
 } from "lucide-react";
+import BuddyAvatar from "./BuddyAvatar";
 
 type Message = {
   id: string;
@@ -77,14 +82,28 @@ type State = {
 export default function BuddyWorkspace({
   onError,
   onChanged,
+  onNotice,
+  focusedDocument,
+  onClearFocusedDocument,
+  initialPrompt,
+  onInitialPromptConsumed,
+  compact = false,
 }: {
   onError: (e: unknown) => void;
   onChanged: () => void;
+  onNotice?: (message: string) => void;
+  focusedDocument?: { id: string; name: string } | null;
+  onClearFocusedDocument?: () => void;
+  initialPrompt?: string;
+  onInitialPromptConsumed?: () => void;
+  compact?: boolean;
 }) {
   const [conversationId, setConversationId] = useState(
     () => localStorage.getItem("knox-buddy-conversation") || "legacy",
   );
   const [historySearch, setHistorySearch] = useState("");
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [request, setRequest] = useState<BuddyRequestInfo | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const messagesEnd = useRef<HTMLDivElement>(null);
@@ -99,6 +118,7 @@ export default function BuddyWorkspace({
   const [olderAvailable, setOlderAvailable] = useState(true);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [appendedMasterIds, setAppendedMasterIds] = useState<Record<string, boolean>>({});
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<{
     message: string;
@@ -144,6 +164,13 @@ export default function BuddyWorkspace({
   useEffect(() => {
     void load().catch(onError);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (initialPrompt && initialPrompt.trim()) {
+      setInput(initialPrompt);
+      onInitialPromptConsumed?.();
+    }
+  }, [initialPrompt]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -215,7 +242,7 @@ export default function BuddyWorkspace({
           ...draft,
           mode: "auto",
           conversationId,
-          documentIds: [],
+          documentIds: focusedDocument?.id ? [focusedDocument.id] : [],
           useLibrary: true,
           attachmentIds: attached,
           templateId: "",
@@ -263,73 +290,77 @@ export default function BuddyWorkspace({
     .find((m) => m.proposal?.opportunity && !m.appliedAt);
 
   return (
-    <main className="content-page buddy-workspace-page">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">YOUR CAREER COMPANION</div>
-          <h1>Career Buddy</h1>
-          <p>
-            Your friendly career companion, candid coach, and helping hand with opportunities.
-          </p>
-        </div>
-      </div>
-
-      <div className="buddy-workspace-layout">
-        {/* Left Sidebar: Conversations History */}
-        <aside
-          className="buddy-history-sidebar"
-          aria-label="Chat history sidebar"
-        >
-          <div className="buddy-history-header">
-            <strong>Chat history</strong>
-            <button
-              type="button"
-              className="button primary small"
-              disabled={busy}
-              onClick={() => chooseConversation(uploadId())}
-            >
-              New conversation
-            </button>
+    <main className={`content-page buddy-workspace-page ${compact ? "is-compact-pane" : ""}`.trim()}>
+      {!compact && (
+        <div className="page-heading">
+          <div>
+            <div className="eyebrow">CAREER ASSISTANT</div>
+            <h1>Career Buddy</h1>
+            <p>
+              Chat about your career documents, draft STAR stories, or extract opportunities from job descriptions.
+            </p>
           </div>
+        </div>
+      )}
 
-          <label className="field" style={{ margin: "12px 0" }}>
-            <input
-              type="search"
-              value={historySearch}
-              onChange={(e) => setHistorySearch(e.target.value)}
-              placeholder="Search conversations…"
-            />
-          </label>
+      <div className={`buddy-workspace-layout ${showSidebar && !compact ? "with-sidebar" : "full-width"}`}>
+        {/* Optional Left Sidebar: Only when pinned */}
+        {showSidebar && !compact && (
+          <aside
+            className="buddy-history-sidebar"
+            aria-label="Chat history sidebar"
+          >
+            <div className="buddy-history-header">
+              <strong>Chat history</strong>
+              <button
+                type="button"
+                className="button primary small"
+                disabled={busy}
+                onClick={() => chooseConversation(uploadId())}
+              >
+                New conversation
+              </button>
+            </div>
 
-          <nav className="buddy-history-nav" aria-label="Saved Career Buddy conversations">
-            {state?.conversations
-              ?.filter((c) =>
-                c.title.toLowerCase().includes(historySearch.toLowerCase()),
-              )
-              .map((c) => (
-                <button
-                  type="button"
-                  key={c.id}
-                  disabled={busy}
-                  aria-pressed={c.id === conversationId}
-                  className="buddy-history-item"
-                  onClick={() => chooseConversation(c.id)}
-                >
-                  <strong>{c.title}</strong>
-                  <small>
-                    {new Date(c.updatedAt).toLocaleDateString()} · {c.count} messages
-                  </small>
-                </button>
-              ))}
-            {state?.conversations?.length === 0 && (
-              <p className="buddy-muted" style={{ padding: "8px 0" }}>
-                No saved chats yet.
-              </p>
-            )}
-          </nav>
-        </aside>
+            <label className="field" style={{ margin: "12px 0" }}>
+              <input
+                type="search"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Search conversations…"
+              />
+            </label>
 
-        {/* Right Pane: Fixed Chat Window */}
+            <nav className="buddy-history-nav" aria-label="Saved Career Buddy conversations">
+              {state?.conversations
+                ?.filter((c) =>
+                  c.title.toLowerCase().includes(historySearch.toLowerCase()),
+                )
+                .map((c) => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    disabled={busy}
+                    aria-pressed={c.id === conversationId}
+                    className="buddy-history-item"
+                    onClick={() => chooseConversation(c.id)}
+                  >
+                    <strong>{c.title}</strong>
+                    <small>
+                      {new Date(c.updatedAt).toLocaleDateString()} · {c.count} messages
+                    </small>
+                  </button>
+                ))}
+              {state?.conversations?.length === 0 && (
+                <p className="buddy-muted" style={{ padding: "8px 0" }}>
+                  No saved chats yet.
+                </p>
+              )}
+            </nav>
+          </aside>
+        )}
+
+        {/* Main Chat Pane: Full width with Dynamic Pull-down Drawer */}
         <section
           className="buddy-chat-pane"
           aria-label="Active Career Buddy conversation"
@@ -337,17 +368,121 @@ export default function BuddyWorkspace({
           {/* Top Header */}
           <header className="buddy-chat-header">
             <div className="buddy-chat-title-row">
-              <h2>
-                {state?.conversations?.find((c) => c.id === conversationId)?.title ||
-                  "New conversation"}
-              </h2>
-              {busy && (
-                <span className="badge green small">
-                  <LoaderCircle size={12} className="spin" />
-                  Buddy is thinking…
-                </span>
-              )}
+              <div className="buddy-chat-heading-group">
+                <button
+                  type="button"
+                  className={`buddy-history-pulldown-btn ${historyDrawerOpen ? "is-open" : ""}`}
+                  onClick={() => setHistoryDrawerOpen(!historyDrawerOpen)}
+                  aria-expanded={historyDrawerOpen}
+                  title="Browse chat history"
+                >
+                  <History size={15} />
+                  <span>Chats ({state?.conversations?.length || 0})</span>
+                  <ChevronDown
+                    size={14}
+                    className={`buddy-chevron ${historyDrawerOpen ? "open" : ""}`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={busy}
+                  onClick={() => {
+                    chooseConversation(uploadId());
+                    setHistoryDrawerOpen(false);
+                  }}
+                  title="Start a new chat"
+                >
+                  <Plus size={14} />
+                  <span>New chat</span>
+                </button>
+                <h2>
+                  {state?.conversations?.find((c) => c.id === conversationId)?.title ||
+                    "New conversation"}
+                </h2>
+              </div>
+              <div className="buddy-chat-header-actions">
+                {!compact && (
+                  <button
+                    type="button"
+                    className={`button secondary small ${showSidebar ? "active" : ""}`}
+                    onClick={() => setShowSidebar(!showSidebar)}
+                    title={showSidebar ? "Hide sidebar" : "Pin history to side"}
+                  >
+                    <PanelLeft size={14} />
+                    <span>{showSidebar ? "Hide sidebar" : "Pin sidebar"}</span>
+                  </button>
+                )}
+                {busy && (
+                  <span className="badge green small">
+                    <LoaderCircle size={12} className="spin" />
+                    Buddy is thinking…
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* Dynamic Pull-down Drawer for Chat History */}
+            {historyDrawerOpen && (
+              <div className="buddy-history-pulldown">
+                <div className="buddy-history-pulldown-bar">
+                  <div className="buddy-history-search-wrap">
+                    <Search size={14} className="text-muted" />
+                    <input
+                      type="search"
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                      placeholder="Search previous chats…"
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => setHistoryDrawerOpen(false)}
+                  >
+                    <X size={14} />
+                    <span>Close</span>
+                  </button>
+                </div>
+                <div className="buddy-history-pulldown-content">
+                  {state?.conversations
+                    ?.filter((c) =>
+                      c.title.toLowerCase().includes(historySearch.toLowerCase()),
+                    )
+                    .map((c) => (
+                      <button
+                        type="button"
+                        key={c.id}
+                        disabled={busy}
+                        aria-pressed={c.id === conversationId}
+                        className={`buddy-history-card ${c.id === conversationId ? "active" : ""}`}
+                        onClick={() => {
+                          chooseConversation(c.id);
+                          setHistoryDrawerOpen(false);
+                        }}
+                      >
+                        <div className="history-card-top">
+                          <strong className="history-card-title">{c.title}</strong>
+                          <span className="history-card-badge">{c.count} msg</span>
+                        </div>
+                        <div className="history-card-date">
+                          {new Date(c.updatedAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </div>
+                      </button>
+                    ))}
+                  {(!state?.conversations || state.conversations.length === 0) && (
+                    <p className="buddy-muted" style={{ padding: "16px" }}>
+                      No saved chats yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Single clean Upload or Drag & Drop option */}
             <div
@@ -386,6 +521,31 @@ export default function BuddyWorkspace({
                   : "Drop a job description, CV, or recruiter notes here, or click to upload"}
               </span>
             </div>
+
+            {focusedDocument && (
+              <div className="buddy-attached-chips" style={{ marginBottom: 8 }}>
+                <span className="buddy-file-chip" style={{ background: "var(--accent-soft)", borderColor: "var(--green)" }}>
+                  <FileText size={13} />
+                  <span className="buddy-chip-label">
+                    Active Doc: <strong>{focusedDocument.name}</strong>
+                  </span>
+                  {onClearFocusedDocument && (
+                    <button
+                      type="button"
+                      className="buddy-chip-remove"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClearFocusedDocument();
+                      }}
+                      title="Clear focused document"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </span>
+              </div>
+            )}
 
             {attached.length > 0 && (
               <div className="buddy-attached-chips">
@@ -465,11 +625,14 @@ export default function BuddyWorkspace({
 
             {state?.messages.length === 0 && (
               <div className="buddy-empty-chat">
-                <Bot size={32} style={{ color: "var(--green)", marginBottom: "8px" }} />
-                <h3>Hey there! How can I help you today?</h3>
+                <div style={{ marginBottom: "8px" }}>
+                  <BuddyAvatar size={40} />
+                </div>
+                <h3>How can I help you today?</h3>
                 <p>
-                  Ask career advice, drop a job description or recruiter message to add an
-                  opportunity, or work on a STAR achievement story together.
+                  {focusedDocument
+                    ? `Ask questions about "${focusedDocument.name}", refine its bullets, or extract achievements for your Master CV.`
+                    : "Ask career advice, drop a job description or recruiter message to add an opportunity, or work on a STAR achievement story together."}
                 </p>
               </div>
             )}
@@ -489,8 +652,8 @@ export default function BuddyWorkspace({
                     </>
                   ) : (
                     <>
-                      <div className="buddy-avatar buddy">
-                        <Bot size={14} /> Career Buddy
+                      <div className="buddy-avatar buddy" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <BuddyAvatar size={18} /> Career Buddy
                       </div>
                       <span className="buddy-msg-time">
                         {new Date(m.createdAt).toLocaleTimeString([], {
@@ -504,6 +667,44 @@ export default function BuddyWorkspace({
 
                 <div className="buddy-msg-content">
                   <p style={{ whiteSpace: "pre-wrap", margin: "4px 0" }}>{m.content}</p>
+                  {m.role === "assistant" && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        disabled={busy || Boolean(appendedMasterIds[m.id])}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const res = await api<{ message: string }>(
+                              "/document-studio/master-cv/append",
+                              json({
+                                content: m.content,
+                                heading: focusedDocument
+                                  ? `Notes from ${focusedDocument.name}`
+                                  : "Career Buddy Evidence & Notes",
+                              }),
+                            );
+                            setAppendedMasterIds((prev) => ({ ...prev, [m.id]: true }));
+                            onNotice?.(res.message || "Added to Master CV.");
+                            onChanged();
+                          } catch (err) {
+                            onError(err);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        title="Append this response directly to your Master CV in Career Docs"
+                      >
+                        {appendedMasterIds[m.id] ? (
+                          <Check size={13} />
+                        ) : (
+                          <FilePlus2 size={13} />
+                        )}
+                        {appendedMasterIds[m.id] ? "Added to Master CV" : "Add to Master CV"}
+                      </button>
+                    </div>
+                  )}
 
                   {m.role === "user" &&
                     ["failed", "cancelled", "interrupted"].includes(m.status || "") && (
@@ -624,7 +825,7 @@ export default function BuddyWorkspace({
                             className="field"
                             style={{ marginTop: "8px", marginBottom: "8px" }}
                           >
-                            <span>Story title (optional file name in Career Hub)</span>
+                            <span>Story title (optional file name in Career Docs)</span>
                             <input
                               type="text"
                               maxLength={100}

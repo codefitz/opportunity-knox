@@ -261,3 +261,20 @@
   text-align: left;
   box-shadow: 0 2px 4px #00000010;
 }
+
+.career-files-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+.career-files-info-banner svg {
+  color: var(--green);
+  flex-shrink: 0;
+}

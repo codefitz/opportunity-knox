@@ -735,6 +735,16 @@ export function createCareerBuddy(ctx) {
           body.documentIds ?? [],
           allowed.map((d) => d.id),
         );
+        if (!ids.length) {
+          const available = allowed.filter(
+            (d) => !d.generation && !["template", "cv-template", "cover-letter-template"].includes(d.category)
+          );
+          const query = (message + "\n" + (opportunity.role || "") + "\n" + (opportunity.description || "")).slice(0, 12000);
+          ids = await vectors.selectSources(query, available, 10);
+          if (!ids.length && available.length) {
+            ids = available.slice(0, 10).map((d) => d.id);
+          }
+        }
         const autoTailor=body.autoTailor===true;
         const validLayouts = ["auto", ...layouts.map((l) => l.id)];
         if(autoTailor && (!["cv","cover"].includes(action)||!validLayouts.includes(body.templateLayout||"auto")))

@@ -276,9 +276,9 @@ export default function Todos({
     <section className="knox-todos" aria-label="To-do list">
       <header className="knox-page-heading">
         <div>
-          <p className="knox-eyebrow">YOUR NEXT STEPS</p>
-          <h1>A little progress, every day.</h1>
-          <p>Keep follow-ups, preparation and everything in between moving.</p>
+          <p className="knox-eyebrow">TASKS &amp; REMINDERS</p>
+          <h1>Tasks</h1>
+          <p>Manage follow-ups, interview preparation, and application deadlines.</p>
         </div>
         <button
           className="knox-button knox-button-primary"

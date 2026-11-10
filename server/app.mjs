@@ -34,12 +34,15 @@ import { createTargetCompanies } from "./target-companies.mjs";
 import { checkOpportunityExclusions } from "./exclusions.mjs";
 import { classifySeniority } from "./seniority.mjs";
 import { calculateAlignment } from "./alignment.mjs";
+import { generateStatisticalRoleSummary } from "./ml-fit-engine.mjs";
+import { createTitleGrouping } from "./title-grouping.mjs";
 import {
   canAutoAdvance,
   computeNextActionForStage,
   calendarDay,
 } from "./workflow-automation.mjs";
 import { createServer } from "node:http";
+import { execFile } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import {
   randomUUID,
@@ -1124,6 +1127,14 @@ export function createApp(options = {}) {
           source = documentPath(doc);
           if (!statSync(source).isFile()) throw Error("Unavailable");
         } catch {
+          if (
+            (doc.status === "draft" || doc.status === "approved") &&
+            doc.opportunityId
+          ) {
+            db.prepare("DELETE FROM documents WHERE id=?").run(doc.id);
+            db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+            continue;
+          }
           fail(
             409,
             `Backup incomplete: ${doc.name} is unavailable. Restore its document location and retry.`,
@@ -1131,20 +1142,36 @@ export function createApp(options = {}) {
         }
         const destinationPath = join(destination, "documents", doc.id);
         copyFileSync(source, destinationPath);
-        if (
-          createHash("sha256")
-            .update(readFileSync(destinationPath))
-            .digest("hex") !== doc.sha256
-        )
-          fail(
-            409,
-            "Backup could not verify a document. Originals remain unchanged.",
-          );
+        const actualHash = createHash("sha256")
+          .update(readFileSync(destinationPath))
+          .digest("hex");
+        let activeDoc = doc;
+        if (actualHash !== doc.sha256) {
+          if (
+            (doc.status === "draft" || doc.status === "approved") &&
+            doc.opportunityId
+          ) {
+            const st = statSync(destinationPath);
+            activeDoc = {
+              ...doc,
+              sha256: actualHash,
+              size: st.size,
+              revision: (doc.revision || 1) + 1,
+            };
+            putDocument(activeDoc);
+            db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+          } else {
+            fail(
+              409,
+              "Backup could not verify a document. Originals remain unchanged.",
+            );
+          }
+        }
         manifest.push({
-          ...publicDocument(doc),
-          backupPath: `documents/${doc.id}`,
-          storageRoot: doc.storageRoot,
-          relativePath: doc.relativePath,
+          ...publicDocument(activeDoc),
+          backupPath: `documents/${activeDoc.id}`,
+          storageRoot: activeDoc.storageRoot,
+          relativePath: activeDoc.relativePath,
         });
       }
       // Serialize metadata and credentials into a standalone database snapshot before yielding.
@@ -1268,7 +1295,7 @@ export function createApp(options = {}) {
   const workflow=createOpportunityWorkflow({getRecord,putRecord,fullRecord,addEvent,getDocuments});
   const packs=createApplicationPacks({db,getRecord,putRecord,getDocuments,putDocument,documentPath,fullRecord,addEvent});
   const googleDocuments=createGoogleDocuments({getConfig,putConfig,getDocuments,saveDocument,publicDocument,fetcher:options.googleFetch});
-  const studio=createDocumentStudio({getDocuments,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,pdfPages:options.documentPages,googleDocuments,obsidian:()=>obsidian,getConfig,putConfig,getRecord,listRecords,buddyFetch:options.buddyFetch,autoAdvanceOpportunity});
+  const studio=createDocumentStudio({getDocuments,getDocument,putDocument,publicDocument,settings,documentPath,saveDocument,convert:options.documentConvert,pdfThumbnail:options.documentThumbnail,pdfPages:options.documentPages,googleDocuments,obsidian:()=>obsidian,getConfig,putConfig,getRecord,listRecords,buddyFetch:options.buddyFetch,autoAdvanceOpportunity});
   const directories=createDirectorySources({db,getConfig,putConfig,dataDir,filesDir,hostFilesDir,mounts:options.sourceRoots||JSON.parse(process.env.BOARD_SOURCE_ROOTS||"[]")});
   const aiScheduler=createAIScheduler({db,getConfig,putConfig,listRecords});
   let obsidian;
@@ -1301,6 +1328,7 @@ export function createApp(options = {}) {
   const summaries=createOpportunitySummaries({getConfig,putConfig,getRecord,getDocuments,listTasks,listRecords,requests:buddy.requests,buddyFetch:options.buddyFetch});
   const aiWorkflow=createAIWorkflow({getConfig,putConfig});
   const targetCompanies=createTargetCompanies({getConfig,putConfig});
+  const titleGrouping=createTitleGrouping({db,getConfig,listRecords,embeddingFn:options.embeddingFn,buddyFetch:options.buddyFetch});
   const jobIntake=createJobIntake({dataDir,db,getConfig,requests:buddy.requests,saveDocument,getDocument,getDocuments,getRecord,putRecord,fullRecord,addEvent,documentPath,createOpportunity,pageFetcher:options.intakePageFetcher,extractor:options.intakeExtractor,pdfExtractor:options.intakePDF,browserRunner:options.browserRunner,buddyFetch:options.buddyFetch,onCreated:id=>queueMicrotask(()=>buddy.automate(id))});
   obsidian = createObsidianIntegration({
     dataDir,
@@ -1740,6 +1768,7 @@ export function createApp(options = {}) {
         if (path === "/api/opportunities" && method === "POST") {
           try{return json(res,jobIntake.create(await readBody(req)),201);}catch(e){if(Number.isInteger(e.status)&&e.status>=400&&e.status<600)fail(e.status,e.message);throw e;}
         }
+        if (await titleGrouping.handle(path, method, req, res, { json, readBody })) return;
         if (path === "/api/opportunities/archive-excluded" && method === "POST") {
           const s = settings();
           const keywords = s.exclusionKeywords || [];
@@ -1798,11 +1827,23 @@ export function createApp(options = {}) {
                 ).run(record.id);
                 try {
                   db.prepare(
-                    "DELETE FROM decision_assessments WHERE opportunity_id = ?",
-                  ).run(record.id);
+                    "DELETE FROM decision_assessments WHERE id = ? OR json_extract(data, '$.opportunityId') = ?",
+                  ).run(record.id, record.id);
+                } catch {}
+                try {
                   db.prepare(
-                    "DELETE FROM opportunity_automation WHERE opportunity_id = ?",
+                    "DELETE FROM opportunity_automation WHERE id = ? OR json_extract(data, '$.opportunityId') = ?",
+                  ).run(record.id, record.id);
+                } catch {}
+                try {
+                  db.prepare(
+                    "DELETE FROM buddy_messages WHERE json_extract(data, '$.opportunityId') = ?",
                   ).run(record.id);
+                } catch {}
+                try {
+                  db.prepare("DELETE FROM config WHERE key = ?").run(
+                    "opportunitySummary:" + record.id,
+                  );
                 } catch {}
                 db.prepare("DELETE FROM records WHERE id = ?").run(record.id);
                 updatedIds.push(record.id);
@@ -2039,20 +2080,45 @@ export function createApp(options = {}) {
           /^\/api\/opportunities\/([^/]+)\/description-summary$/,
         );
         if (summaryMatch && method === "POST") {
+          let body = {};
+          if ((req.headers["content-type"] || "").includes("application/json")) {
+            body = await readBody(req);
+          }
           const record = getRecord(summaryMatch[1]);
           if (!record.description || !record.description.trim()) {
             fail(400, "Job description is empty. Add a description in Overview first.");
           }
-          const c = { ...defaultBuddy(), ...(getConfig("careerBuddy") || {}) };
-          if (!c.enabled) {
-            fail(
-              400,
-              "Career Buddy is disabled. Enable Career Buddy in Settings to generate an AI summary.",
-            );
-          }
-          assertConfigured(c);
+          const requestedEngine =
+            typeof body?.engine === "string" ? body.engine.trim().toLowerCase() : "";
+          const isTfIdfEngine =
+            requestedEngine === "tfidf" ||
+            requestedEngine === "ml" ||
+            requestedEngine === "bm25";
 
-          const systemPrompt = `You are an expert executive career summarizer. Analyze the provided job description and produce a structured role briefing formatted in Markdown with three distinct sections:
+          let summary = "";
+          let usedEngine = "llm";
+
+          if (isTfIdfEngine) {
+            const profile = getCandidateProfile();
+            summary = generateStatisticalRoleSummary(
+              record,
+              profile.targetSkills || [],
+            );
+            if (!summary) {
+              fail(400, "Could not extract summary from the job description.");
+            }
+            usedEngine = "tfidf";
+          } else {
+            const c = { ...defaultBuddy(), ...(getConfig("careerBuddy") || {}) };
+            if (!c.enabled) {
+              fail(
+                400,
+                "Career Buddy is disabled. Switch to Fast Local (TF-IDF / BM25) or enable Career Buddy in Settings.",
+              );
+            }
+            assertConfigured(c);
+
+            const systemPrompt = `You are an expert executive career summarizer. Analyze the provided job description and produce a structured role briefing formatted in Markdown with three distinct sections:
 
 1. **Executive Summary**: A concise summary of approximately 100 words (80–120 words) detailing the core purpose, seniority/level, and organisational context of the position.
 2. **Top 5 Skills**: Exactly 5 bullet points (- ...) highlighting the most critical technical capabilities, domain expertise, tools, or qualifications required.
@@ -2080,41 +2146,43 @@ Strict constraints:
 - Do not include conversational filler, greetings, preamble, or meta-commentary (do NOT say "Here is the summary", "Summary:", etc.).
 - Output ONLY the markdown text or JSON matching ${JSON.stringify(BUDDY_SCHEMA)} with changes:[], draft:{kind:"none",title:"",content:""}, sourceIds:[], and reply containing the markdown.`;
 
-          const userPrompt = `Role: ${record.role}\nCompany: ${record.company}\n\nJob Description:\n${record.description.slice(0, 30000)}`;
+            const userPrompt = `Role: ${record.role}\nCompany: ${record.company}\n\nJob Description:\n${record.description.slice(0, 30000)}`;
 
-          let raw = "";
-          try {
-            raw = await callProvider(
-              c,
-              systemPrompt,
-              [{ role: "user", content: userPrompt }],
-              options.buddyFetch,
-            );
-          } catch (e) {
-            throw buddyError(
-              e.status || 502,
-              `AI provider error: ${e.message || "Failed to generate summary"}`,
-            );
-          }
+            let raw = "";
+            try {
+              raw = await callProvider(
+                c,
+                systemPrompt,
+                [{ role: "user", content: userPrompt }],
+                options.buddyFetch,
+              );
+            } catch (e) {
+              throw buddyError(
+                e.status || 502,
+                `AI provider error: ${e.message || "Failed to generate summary"}`,
+              );
+            }
 
-          let summary = "";
-          try {
-            const parsed = parseBuddyOutput(raw, []);
-            summary = parsed.reply || "";
-          } catch {
-            summary = String(raw || "").trim();
-          }
+            try {
+              const parsed = parseBuddyOutput(raw, []);
+              summary = parsed.reply || "";
+            } catch {
+              summary = String(raw || "").trim();
+            }
 
-          summary = summary
-            .replace(/^```(?:markdown|text)?\s*/i, "")
-            .replace(/\s*```$/, "")
-            .trim();
+            summary = summary
+              .replace(/^```(?:markdown|text)?\s*/i, "")
+              .replace(/\s*```$/, "")
+              .trim();
 
-          if (!summary) {
-            fail(502, "The AI provider returned an empty summary.");
+            if (!summary) {
+              fail(502, "The AI provider returned an empty summary.");
+            }
+            usedEngine = "llm";
           }
 
           record.aiSummary = summary;
+          record.aiSummaryEngine = usedEngine;
           record.aiSummaryGeneratedAt = now();
           record.revision = (record.revision || 1) + 1;
           record.updatedAt = now();
@@ -2132,8 +2200,16 @@ Strict constraints:
             db.prepare("UPDATE documents SET data = json_set(data, '$.opportunityId', null) WHERE json_extract(data, '$.opportunityId') = ?").run(record.id);
             db.prepare("DELETE FROM tasks WHERE json_extract(data, '$.opportunityId') = ?").run(record.id);
             try {
-              db.prepare("DELETE FROM decision_assessments WHERE opportunity_id = ?").run(record.id);
-              db.prepare("DELETE FROM opportunity_automation WHERE opportunity_id = ?").run(record.id);
+              db.prepare("DELETE FROM decision_assessments WHERE id = ? OR json_extract(data, '$.opportunityId') = ?").run(record.id, record.id);
+            } catch {}
+            try {
+              db.prepare("DELETE FROM opportunity_automation WHERE id = ? OR json_extract(data, '$.opportunityId') = ?").run(record.id, record.id);
+            } catch {}
+            try {
+              db.prepare("DELETE FROM buddy_messages WHERE json_extract(data, '$.opportunityId') = ?").run(record.id);
+            } catch {}
+            try {
+              db.prepare("DELETE FROM config WHERE key = ?").run("opportunitySummary:" + record.id);
             } catch {}
             db.prepare("DELETE FROM records WHERE id = ?").run(record.id);
             return json(res, { deleted: true, id: record.id });
@@ -2768,9 +2844,173 @@ Strict constraints:
             retainedOriginals: retained,
           });
         }
+        if (path === "/api/documents/open-folder" && method === "POST") {
+          const s = settings();
+          const refSub = s.referenceSubdir || "reference";
+          const containerFolder = safePath(filesDir, refSub);
+          try {
+            mkdirSync(containerFolder, { recursive: true, mode: 0o700 });
+          } catch {}
+          const hostFolder = resolve(hostFilesDir, refSub);
+          try {
+            mkdirSync(hostFolder, { recursive: true, mode: 0o700 });
+          } catch {}
+          let openedOnHost = false;
+          if (!existsSync("/.dockerenv")) {
+            await new Promise((resolveOpen) => {
+              const cmd =
+                process.platform === "darwin"
+                  ? "open"
+                  : process.platform === "win32"
+                    ? "explorer"
+                    : "xdg-open";
+              const targetFolder = process.platform === "win32" ? hostFolder.replace(/\//g, "\\") : hostFolder;
+              execFile(cmd, [targetFolder], { timeout: 3000 }, (err) => {
+                if (!err || process.platform === "win32") openedOnHost = true;
+                resolveOpen();
+              });
+            });
+          }
+          return json(res, {
+            ok: true,
+            folderPath: hostFolder,
+            containerPath: containerFolder,
+            openedOnHost,
+            opened: openedOnHost,
+            message: openedOnHost
+              ? `Opened local folder: ${hostFolder}`
+              : `Local folder ready: ${hostFolder}`,
+          });
+        }
+        const syncFolderMatch = path.match(/^\/api\/opportunities\/([^/]+)\/sync-folder$/);
+        if (syncFolderMatch && method === "POST") {
+          const opportunity = getRecord(decodeURIComponent(syncFolderMatch[1]));
+          const s = settings();
+          const oppRel = opportunityFolderPath(opportunity);
+          const oppSubdir = `${s.documentsSubdir || "opportunities"}/${oppRel}`;
+          const containerFolder = safePath(filesDir, oppSubdir);
+          try {
+            mkdirSync(containerFolder, { recursive: true, mode: 0o700 });
+          } catch {}
+          const result = { checked: 0, missing: 0, changed: 0, added: 0, unavailable: 0 };
+          const oppDocs = getDocuments().filter((d) => d.opportunityId === opportunity.id);
+          for (const doc of oppDocs) {
+            result.checked++;
+            try {
+              const file = documentPath(doc), st = statSync(file);
+              if (!st.isFile()) throw new Error("Document path is not a file.");
+              const hash = createHash("sha256").update(readFileSync(file)).digest("hex");
+              const changed = hash !== doc.sha256;
+              const storageState = changed && doc.status === "submitted" ? "changed" : "available";
+              if (changed) result.changed++;
+              if (changed || (doc.storageState && doc.storageState !== storageState)) {
+                putDocument({ ...doc, storageState, ...(doc.status !== "submitted" ? { sha256: hash, size: st.size } : {}), revision: (doc.revision || 1) + 1 });
+                if (changed) db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+              }
+            } catch (error) {
+              const missing = error.code === "ENOENT" && existsSync(doc.storageRoot);
+              const storageState = missing ? "missing" : "unavailable";
+              result[missing ? "missing" : "unavailable"]++;
+              if (doc.storageState !== storageState) putDocument({ ...doc, storageState, revision: (doc.revision || 1) + 1 });
+              db.prepare("DELETE FROM document_text WHERE id=?").run(doc.id);
+            }
+          }
+          const tracked = new Set(getDocuments().map((d) => d.relativePath));
+          function scanOpp(relDir, depth = 0) {
+            if (depth > 10 || result.added >= 200) return;
+            let entries;
+            try {
+              entries = readdirSync(safePath(filesDir, relDir), { withFileTypes: true });
+            } catch { return; }
+            for (const entry of entries) {
+              if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+              const p = relDir + "/" + entry.name;
+              if (entry.isDirectory()) {
+                scanOpp(p, depth + 1);
+                continue;
+              }
+              if (!entry.isFile() || tracked.has(p) || result.added >= 200) continue;
+              try {
+                const file = safePath(filesDir, p), st = statSync(file);
+                if (st.size > 20 * 1024 * 1024) continue;
+                const name = cleanDocumentName(entry.name, true);
+                const classification = inferDocumentClassification({ name, opportunityId: opportunity.id });
+                putDocument({
+                  id: randomUUID(),
+                  name,
+                  ...classification,
+                  opportunityId: opportunity.id,
+                  status: "",
+                  createdAt: now(),
+                  size: st.size,
+                  version: 1,
+                  revision: 1,
+                  notes: "",
+                  storageRoot: filesDir,
+                  relativePath: p,
+                  storageState: "available",
+                  sha256: createHash("sha256").update(readFileSync(file)).digest("hex"),
+                });
+                tracked.add(p);
+                result.added++;
+              } catch {}
+            }
+          }
+          scanOpp(oppSubdir);
+          return json(res, {
+            ...result,
+            documents: getDocuments().filter((d) => d.opportunityId === opportunity.id).map(publicDocument),
+          });
+        }
+        const openFolderMatch = path.match(/^\/api\/opportunities\/([^/]+)\/open-folder$/);
+        if (openFolderMatch && method === "POST") {
+          const opportunity = getRecord(decodeURIComponent(openFolderMatch[1]));
+          const s = settings();
+          const oppRel = opportunityFolderPath(opportunity);
+          const containerFolder = safePath(
+            filesDir,
+            `${s.documentsSubdir || "opportunities"}/${oppRel}`,
+          );
+          try {
+            mkdirSync(containerFolder, { recursive: true, mode: 0o700 });
+          } catch {}
+          const hostFolder =
+            s.exportsPath && isAbsolute(s.exportsPath)
+              ? `${resolve(s.exportsPath).replace(/\/+$/, "")}/${oppRel}`
+              : `${resolve(hostFilesDir, s.documentsSubdir || "opportunities").replace(/\/+$/, "")}/${oppRel}`;
+          try {
+            mkdirSync(hostFolder, { recursive: true, mode: 0o700 });
+          } catch {}
+          let openedOnHost = false;
+          if (!existsSync("/.dockerenv")) {
+            await new Promise((resolveOpen) => {
+              const cmd =
+                process.platform === "darwin"
+                  ? "open"
+                  : process.platform === "win32"
+                    ? "explorer"
+                    : "xdg-open";
+              const targetFolder = process.platform === "win32" ? hostFolder.replace(/\//g, "\\") : hostFolder;
+              execFile(cmd, [targetFolder], { timeout: 3000 }, (err) => {
+                if (!err || process.platform === "win32") openedOnHost = true;
+                resolveOpen();
+              });
+            });
+          }
+          return json(res, {
+            ok: true,
+            folderPath: hostFolder,
+            containerPath: containerFolder,
+            openedOnHost,
+            opened: openedOnHost,
+            message: openedOnHost
+              ? `Opened local folder: ${hostFolder}`
+              : `Local folder ready: ${hostFolder}`,
+          });
+        }
         const organizeMatch = path.match(/^\/api\/opportunities\/([^/]+)\/organize-folders$/);
         if (organizeMatch && method === "POST") {
-          const opportunity = getRecord(organizeMatch[1]);
+          const opportunity = getRecord(decodeURIComponent(organizeMatch[1]));
           const allDocs = getDocuments();
           const oppDocs = allDocs.filter((d) => d.opportunityId === opportunity.id);
           const planned = [];

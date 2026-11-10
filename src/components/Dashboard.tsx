@@ -167,8 +167,8 @@ export default function Dashboard(props: Props) {
       <header className="knox-page-heading">
         <div>
           <p className="knox-eyebrow">WORKSPACE OVERVIEW</p>
-          <h1>Your search, at a glance.</h1>
-          <p>Every opportunity, next step and milestone in one place.</p>
+          <h1>Dashboard</h1>
+          <p>Track active applications, upcoming interviews, and daily submission targets.</p>
         </div>
         <div className="knox-heading-actions">
           <button
@@ -868,7 +868,7 @@ export default function Dashboard(props: Props) {
             application.
           </p>
           <span className="knox-reference-link">
-            Open Career Hub <ArrowRight size={15} />
+            Open Career Docs <ArrowRight size={15} />
           </span>
           <small>Stored originals · Source material for Career Buddy</small>
         </button>
