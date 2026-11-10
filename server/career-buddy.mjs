@@ -1,3 +1,5 @@
+import { downloadCvKeywords } from "./cv-keyword-download.mjs";
+import { cvKeywordInstructions, cvKeywordReferences, importKeywordCsv, suggestAdvertKeywords } from "./cv-keywords.mjs";
 import { readCVTemplate, populateCVTemplate } from "./cv-template.mjs";
 import { runCodexDocumentGeneration } from "./codex-local.mjs";
 import {requireAIStage} from "./ai-workflow.mjs";
@@ -282,6 +284,7 @@ export function systemPrompt(timezone, today, action) {
     "Ground advice and drafts in the supplied candidate evidence. Previous JDs and job requirements are not proof of candidate experience. Do not invent employers, dates, certifications, skills, qualifications, metrics or achievements. Explicitly flag gaps and ask for evidence. In replies cite supplied source names/IDs; return sourceIds only from the supplied context. Explain missing or partial source coverage. Never claim a draft was approved.",
     "For salary: label suggestions as estimates from saved information, not verified market ranges. State currency, base versus total/contract terms and location assumptions; ask if missing. Never invent a salary source or current benchmark.",
     "For a CV or cover letter return an editable complete document in draft.content using simple Markdown headings and bullets, with no invented claims. Keep the source CV chronology and factual identity; tailor selection and emphasis to this role. For CV work experience, include detailed achievement bullets only for roles from the last 10 years; group roles older than 10 years under a 'Previous Experience' section with only dates, company names, and job titles, plus an optional short summary of points relevant to the job description. Keep advice, gap warnings and citations in reply, outside application prose. Do not copy job requirements into the candidate skill list without evidence. Do not treat a generated draft as new factual evidence.",
+    ...(action === "cv" ? [cvKeywordInstructions] : []),
     "Requested action: " +
       action +
       ". For cv or cover, return that draft kind if adequate evidence is supplied, otherwise explain what is missing with kind none. Use kind none and empty title/content for other replies unless explicitly asked for a document.",
@@ -461,6 +464,30 @@ export function createCareerBuddy(ctx) {
     indexDocuments,
     getDocumentText: (id) => getRow("document_text", id),
     async handle(path, method, req, res, { json, readBody }) {
+      if (path === "/api/buddy/cv-keywords" && ["GET", "POST", "DELETE"].includes(method)) {
+        if (method !== "GET") {
+          const { source, csv, download } = await readBody(req);
+          if (!["esco", "soc2020"].includes(source))
+            throw buddyError(400, "Choose ESCO or SOC 2020.");
+          const key = "cvKeywords:" + source;
+          if (inFlight.has(key)) throw buddyError(409, "A download is already running for this source.");
+          if (method === "DELETE") {
+            putConfig(key, null);
+          } else if (download === true) {
+            inFlight.add(key);
+            try {
+              putConfig(key, { labels: await downloadCvKeywords(source) });
+            } finally {
+              inFlight.delete(key);
+            }
+          } else {
+            putConfig(key, { labels: importKeywordCsv(source, csv) });
+          }
+        }
+        json(res, Object.fromEntries(["esco", "soc2020"].map((source) =>
+          [source, getConfig("cvKeywords:" + source)?.labels.length || 0])));
+        return true;
+      }
       if(await assistantPacks.handle(path,method,req,res,{json,readBody}))return true;
       if(await automation.handle(path,method,req,res,{json,readBody}))return true;
       if(await workspace.handle(path,method,req,res,{json,readBody}))return true;
@@ -683,7 +710,7 @@ export function createCareerBuddy(ctx) {
         return true;
       }
       const match = path.match(
-        /^\/api\/opportunities\/([^/]+)\/buddy(?:\/(chat|apply|draft)(?:\/([^/]+))?)?$/,
+        /^\/api\/opportunities\/([^/]+)\/buddy(?:\/(chat|apply|draft|job-keywords)(?:\/([^/]+))?)?$/,
       );
       if (!match) return false;
       let opportunity = getRecord(match[1]);
@@ -694,6 +721,12 @@ export function createCareerBuddy(ctx) {
           documents: summaries(true).filter(
             (d) => !d.opportunityId || d.opportunityId === opportunity.id,
           ),
+        });
+        return true;
+      }
+      if (match[2] === "job-keywords" && !match[3] && method === "GET") {
+        json(res, {
+          terms: suggestAdvertKeywords(getConfig, opportunity.description.slice(0, 35000)),
         });
         return true;
       }
@@ -944,6 +977,9 @@ export function createCareerBuddy(ctx) {
                     nextAction: o.nextAction,
                   }))
               : [],
+            ...(action === "cv" ? {
+              keywordReferences: cvKeywordReferences(getConfig, full.role, full.description.slice(0, 35000)),
+            } : {}),
             excerpts: retrieval.chunks,
             coverage: {
               omittedChunks: retrieval.omittedChunks,
@@ -1021,6 +1057,7 @@ export function createCareerBuddy(ctx) {
                 company: opportunity.company,
                 role: opportunity.role,
                 description: opportunity.description,
+                keywordReferences: context.keywordReferences,
               },
               brief: message,
               instructions: body.instructions || "",

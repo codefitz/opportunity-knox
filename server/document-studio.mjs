@@ -1,3 +1,4 @@
+import { cvKeywordInstructions, cvKeywordReferences } from "./cv-keywords.mjs";
 import { randomUUID } from "node:crypto";
 import {
   mkdtempSync,
@@ -469,7 +470,7 @@ export function createDocumentStudio({
             required: ["title", "content"],
           };
           const system = kind === "cv"
-            ? "You are an expert career advisor and document author. Tailor a complete, factual, professional CV for the target role using the candidate's verified source CV. Preserve complete factual identity, employers, chronology, dates and qualifications. Never invent factual claims or employers. Highlight relevant achievements matching the target role. Format output as clear Markdown with headers (## Summary, ## Skills, ## Experience, ## Education). In ## Experience, format each job with job title, company and dates, followed by bulleted achievements strictly for roles from the last 10 years. For any roles older than 10 years, place them under a ## Previous Experience section listing only dates, company names, and job titles, optionally accompanied by a concise summary of points relevant to the job description."
+            ? "You are an expert career advisor and document author. Tailor a complete, factual, professional CV for the target role using the candidate's verified source CV. Preserve complete factual identity, employers, chronology, dates and qualifications. Never invent factual claims or employers. Highlight relevant achievements matching the target role. Format output as clear Markdown with headers (## Summary, ## Skills, ## Experience, ## Education). In ## Experience, format each job with job title, company and dates, followed by bulleted achievements strictly for roles from the last 10 years. For any roles older than 10 years, place them under a ## Previous Experience section listing only dates, company names, and job titles, optionally accompanied by a concise summary of points relevant to the job description. " + cvKeywordInstructions
             : `You are an expert career advisor and document author. Draft a concise, compelling cover letter for the target role and employer using verified evidence from the candidate source CV. Never invent factual claims or qualifications. Format in clean Markdown paragraphs suitable for a professional letter.`;
 
           const promptPayload = {
@@ -477,6 +478,7 @@ export function createDocumentStudio({
             targetRole,
             targetCompany,
             brief: targetBrief || undefined,
+            ...(kind === "cv" ? { keywordReferences: cvKeywordReferences(getConfig, targetRole, targetBrief) } : {}),
             instructions: b.instructions ? cleanText(b.instructions, "Instructions", 5000) : undefined,
             sourceCVText: sourceText.slice(0, 60000),
           };

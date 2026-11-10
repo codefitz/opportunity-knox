@@ -22,6 +22,7 @@ import documentCategories, {libraryCategory} from "./lib/document-categories";
 import DocumentConnections from "./components/DocumentConnections";
 import BuddyWorkspace from "./components/BuddyWorkspace";
 import VectorIndex from "./components/VectorIndex";
+import OpportunityJobKeywords from "./components/OpportunityJobKeywords";
 import OpportunityAISummary from "./components/OpportunityAISummary";
 import {
   groupOpportunitiesByTitle,
@@ -151,6 +152,7 @@ import BulkActionsBar from "./components/BulkActionsBar";
 
 import Dashboard from "./components/Dashboard";
 import CareerBuddy, { type BuddySource } from "./components/CareerBuddy";
+import CvKeywordSettings from "./components/CvKeywordSettings";
 import CareerBuddySettings from "./components/CareerBuddySettings";
 import UnifiedCareerBuddyPane from "./components/UnifiedCareerBuddyPane";
 import { BuddyAvatar, useBuddyAvatar } from "./components/BuddyAvatar";
@@ -3433,6 +3435,9 @@ function OpportunityDetail({
             onNavigateOverview={() => setTab("overview")}
           />
         )}{" "}
+        {tab === "summary" && (
+          <OpportunityJobKeywords key={`${o.id}-${o.revision}`} id={o.id} hasAdvert={Boolean(o.description.trim())} />
+        )}
         {tab === "decision" && (
           <OpportunityReviewForm
             key={o.id}
@@ -8954,6 +8959,8 @@ function SettingsPage({
           </div>
           <CareerBuddySettings onError={onError} />
         </section>
+
+        <CvKeywordSettings />
 
         <section className="settings-section" id="decision-model-settings">
           <div className="settings-section-heading">

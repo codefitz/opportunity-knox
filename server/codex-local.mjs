@@ -1,3 +1,4 @@
+import { cvKeywordInstructions } from "./cv-keywords.mjs";
 import {
   readFileSync,
   writeFileSync,
@@ -235,6 +236,7 @@ export async function runCodexDocumentGeneration({
         company: opportunity?.company || "",
         role: opportunity?.role || "",
         description: (opportunity?.description || "").slice(0, 35000),
+        keywordReferences: opportunity?.keywordReferences,
         brief: (brief || "").slice(0, 10000),
         instructions: (instructions || "").slice(0, 10000),
       },
@@ -273,6 +275,7 @@ export async function runCodexDocumentGeneration({
     "INPUT FILES (in inputs/ or ../inputs/):",
     `- reference${refExt} (style reference: "${styleDocument.name}"): The visual style reference. Inspect its tables, columns, sidebars, section placement, margins, fonts, and headings. This is ONLY a visual reference—NEVER use its names, companies, dates, or example text as candidate facts.`,
     "- source_cv.txt: The verified candidate career facts. Preserve their real identity, employment chronology, job titles, employers, dates, and qualifications. Never fabricate claims or invent employers.",
+    cvKeywordInstructions,
     "- job_context.json: The target role, company, job requirements, and tailoring instructions.",
     "",
     "WORK EXPERIENCE & RECENCY RULES:",
